@@ -56,12 +56,12 @@ var _ = ginkgo.Describe("Metrics", func() {
 
 	ginkgo.BeforeEach(func() {
 		ns = util.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "e2e-metrics-")
-
-		resourceFlavor = utiltestingapi.MakeResourceFlavor("test-flavor").Obj()
+		suffix := util.RandomSuffix()
+		resourceFlavor = utiltestingapi.MakeResourceFlavor("test-flavor-" + suffix).Obj()
 		util.MustCreate(ctx, k8sClient, resourceFlavor)
 
 		metricsReaderClusterRoleBinding = &rbacv1.ClusterRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: "metrics-reader-rolebinding"},
+			ObjectMeta: metav1.ObjectMeta{Name: "metrics-reader-rolebinding-" + suffix},
 			Subjects: []rbacv1.Subject{
 				{
 					Kind:      "ServiceAccount",
@@ -236,7 +236,8 @@ var _ = ginkgo.Describe("Metrics", func() {
 		)
 
 		ginkgo.BeforeEach(func() {
-			admissionCheck = utiltestingapi.MakeAdmissionCheck("check1").ControllerName("ac-controller").Obj()
+			suffix := util.RandomSuffix()
+			admissionCheck = utiltestingapi.MakeAdmissionCheck("check1" + suffix).ControllerName("ac-controller").Obj()
 			util.MustCreate(ctx, k8sClient, admissionCheck)
 
 			util.SetAdmissionCheckActive(ctx, k8sClient, admissionCheck, metav1.ConditionTrue)

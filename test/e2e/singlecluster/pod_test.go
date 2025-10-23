@@ -47,7 +47,7 @@ var _ = ginkgo.Describe("Pod groups", func() {
 
 	ginkgo.BeforeEach(func() {
 		ns = util.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "pod-e2e-")
-		onDemandRF = utiltestingapi.MakeResourceFlavor("on-demand").NodeLabel("instance-type", "on-demand").Obj()
+		onDemandRF = utiltestingapi.MakeResourceFlavor("on-demand-"+util.RandomSuffix()).NodeLabel("instance-type", "on-demand").Obj()
 		util.MustCreate(ctx, k8sClient, onDemandRF)
 	})
 	ginkgo.AfterEach(func() {
@@ -63,9 +63,9 @@ var _ = ginkgo.Describe("Pod groups", func() {
 		)
 
 		ginkgo.BeforeEach(func() {
-			cq = utiltestingapi.MakeClusterQueue("cq").
+			cq = utiltestingapi.MakeClusterQueue("cq-"+util.RandomSuffix()).
 				ResourceGroup(
-					*utiltestingapi.MakeFlavorQuotas("on-demand").Resource(corev1.ResourceCPU, "5").Obj(),
+					*utiltestingapi.MakeFlavorQuotas(onDemandRF.Name).Resource(corev1.ResourceCPU, "5").Obj(),
 				).
 				Preemption(kueue.ClusterQueuePreemption{
 					WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
@@ -413,7 +413,8 @@ var _ = ginkgo.Describe("Pod groups", func() {
 				eventWatcher.Stop()
 			})
 
-			highPriorityClass := testing.MakePriorityClass("high").PriorityValue(100).Obj()
+			suffix := util.RandomSuffix()
+			highPriorityClass := testing.MakePriorityClass("high-"+suffix).PriorityValue(100).Obj()
 			util.MustCreate(ctx, k8sClient, highPriorityClass)
 			ginkgo.DeferCleanup(func() {
 				gomega.Expect(k8sClient.Delete(ctx, highPriorityClass)).To(gomega.Succeed())
@@ -447,7 +448,7 @@ var _ = ginkgo.Describe("Pod groups", func() {
 			highPriorityGroup := podtesting.MakePod("high-priority-group", ns.Name).
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				Queue(lq.Name).
-				PriorityClass("high").
+				PriorityClass(highPriorityClass.Name).
 				RequestAndLimit(corev1.ResourceCPU, "1").
 				TerminationGracePeriod(1).
 				MakeGroup(2)

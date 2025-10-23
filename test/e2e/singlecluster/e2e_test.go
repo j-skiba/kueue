@@ -86,19 +86,20 @@ var _ = ginkgo.Describe("Kueue", func() {
 			clusterQueue *kueue.ClusterQueue
 		)
 		ginkgo.BeforeEach(func() {
-			onDemandRF = utiltestingapi.MakeResourceFlavor("on-demand").
+			suffix := util.RandomSuffix()
+			onDemandRF = utiltestingapi.MakeResourceFlavor("on-demand-" + suffix).
 				NodeLabel("instance-type", "on-demand").Obj()
 			util.MustCreate(ctx, k8sClient, onDemandRF)
-			spotRF = utiltestingapi.MakeResourceFlavor("spot").
+			spotRF = utiltestingapi.MakeResourceFlavor("spot-" + suffix).
 				NodeLabel("instance-type", "spot").Obj()
 			util.MustCreate(ctx, k8sClient, spotRF)
-			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue").
+			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-"+suffix).
 				ResourceGroup(
-					*utiltestingapi.MakeFlavorQuotas("on-demand").
+					*utiltestingapi.MakeFlavorQuotas(onDemandRF.Name).
 						Resource(corev1.ResourceCPU, "1").
 						Resource(corev1.ResourceMemory, "1Gi").
 						Obj(),
-					*utiltestingapi.MakeFlavorQuotas("spot").
+					*utiltestingapi.MakeFlavorQuotas(spotRF.Name).
 						Resource(corev1.ResourceCPU, "1").
 						Resource(corev1.ResourceMemory, "1Gi").
 						Obj(),
@@ -108,7 +109,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 				}).
 				Obj()
 			util.MustCreate(ctx, k8sClient, clusterQueue)
-			localQueue = utiltestingapi.MakeLocalQueue("main", ns.Name).ClusterQueue("cluster-queue").Obj()
+			localQueue = utiltestingapi.MakeLocalQueue("main", ns.Name).ClusterQueue(clusterQueue.Name).Obj()
 			util.MustCreate(ctx, k8sClient, localQueue)
 		})
 		ginkgo.AfterEach(func() {
@@ -551,23 +552,24 @@ var _ = ginkgo.Describe("Kueue", func() {
 			check        *kueue.AdmissionCheck
 		)
 		ginkgo.BeforeEach(func() {
-			check = utiltestingapi.MakeAdmissionCheck("check1").ControllerName("ac-controller").Obj()
+			suffix := util.RandomSuffix()
+			check = utiltestingapi.MakeAdmissionCheck("check1" + "-" + suffix).ControllerName("ac-controller").Obj()
 			util.MustCreate(ctx, k8sClient, check)
 			util.SetAdmissionCheckActive(ctx, k8sClient, check, metav1.ConditionTrue)
-			onDemandRF = utiltestingapi.MakeResourceFlavor("on-demand").
+			onDemandRF = utiltestingapi.MakeResourceFlavor("on-demand-" + suffix).
 				NodeLabel("instance-type", "on-demand").Obj()
 			util.MustCreate(ctx, k8sClient, onDemandRF)
-			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue").
+			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-"+suffix).
 				ResourceGroup(
-					*utiltestingapi.MakeFlavorQuotas("on-demand").
+					*utiltestingapi.MakeFlavorQuotas(onDemandRF.Name).
 						Resource(corev1.ResourceCPU, "1").
 						Resource(corev1.ResourceMemory, "1Gi").
 						Obj(),
 				).
-				AdmissionChecks("check1").
+				AdmissionChecks(kueue.AdmissionCheckReference(check.Name)).
 				Obj()
 			util.MustCreate(ctx, k8sClient, clusterQueue)
-			localQueue = utiltestingapi.MakeLocalQueue("main", ns.Name).ClusterQueue("cluster-queue").Obj()
+			localQueue = utiltestingapi.MakeLocalQueue("main", ns.Name).ClusterQueue(clusterQueue.Name).Obj()
 			util.MustCreate(ctx, k8sClient, localQueue)
 		})
 		ginkgo.AfterEach(func() {
@@ -594,7 +596,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					g.Expect(slices.ToMap(createdWorkload.Status.AdmissionChecks, func(i int) (kueue.AdmissionCheckReference, string) {
 						return createdWorkload.Status.AdmissionChecks[i].Name, ""
-					})).Should(gomega.BeComparableTo(map[kueue.AdmissionCheckReference]string{"check1": ""}))
+					})).Should(gomega.BeComparableTo(map[kueue.AdmissionCheckReference]string{kueue.AdmissionCheckReference(check.Name): ""}))
 				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 
@@ -619,7 +621,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					patch := util.BaseSSAWorkload(createdWorkload)
 					workload.SetAdmissionCheckState(&patch.Status.AdmissionChecks, kueue.AdmissionCheckState{
-						Name:  "check1",
+						Name:  kueue.AdmissionCheckReference(check.Name),
 						State: kueue.CheckStateReady,
 					}, realClock)
 					g.Expect(k8sClient.Status().Patch(ctx, patch, client.Apply, client.FieldOwner("test-admission-check-controller"), client.ForceOwnership)).Should(gomega.Succeed())
@@ -648,7 +650,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					g.Expect(slices.ToMap(createdWorkload.Status.AdmissionChecks, func(i int) (kueue.AdmissionCheckReference, string) {
 						return createdWorkload.Status.AdmissionChecks[i].Name, ""
-					})).Should(gomega.BeComparableTo(map[kueue.AdmissionCheckReference]string{"check1": ""}))
+					})).Should(gomega.BeComparableTo(map[kueue.AdmissionCheckReference]string{kueue.AdmissionCheckReference(check.Name): ""}))
 				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 
@@ -657,7 +659,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					patch := util.BaseSSAWorkload(createdWorkload)
 					workload.SetAdmissionCheckState(&patch.Status.AdmissionChecks, kueue.AdmissionCheckState{
-						Name:  "check1",
+						Name:  kueue.AdmissionCheckReference(check.Name),
 						State: kueue.CheckStateReady,
 					}, realClock)
 					g.Expect(k8sClient.Status().Patch(ctx, patch, client.Apply, client.FieldOwner("test-admission-check-controller"), client.ForceOwnership)).Should(gomega.Succeed())
@@ -673,7 +675,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
 					patch := util.BaseSSAWorkload(createdWorkload)
 					workload.SetAdmissionCheckState(&patch.Status.AdmissionChecks, kueue.AdmissionCheckState{
-						Name:  "check1",
+						Name:  kueue.AdmissionCheckReference(check.Name),
 						State: kueue.CheckStateRejected,
 					}, realClock)
 					g.Expect(k8sClient.Status().Patch(ctx, patch, client.Apply,

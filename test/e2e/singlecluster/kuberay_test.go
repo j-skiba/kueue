@@ -49,13 +49,14 @@ var _ = ginkgo.Describe("Kuberay", func() {
 	)
 
 	ginkgo.BeforeEach(func() {
+		suffix := util.RandomSuffix()
 		ns = util.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "kuberay-e2e-")
-		rf = utiltestingapi.MakeResourceFlavor(resourceFlavorName).
+		rf = utiltestingapi.MakeResourceFlavor(resourceFlavorName+"-"+suffix).
 			NodeLabel("instance-type", "on-demand").
 			Obj()
 		gomega.Expect(k8sClient.Create(ctx, rf)).To(gomega.Succeed())
 
-		cq = utiltestingapi.MakeClusterQueue(clusterQueueName).
+		cq = utiltestingapi.MakeClusterQueue(clusterQueueName+"-"+suffix).
 			ResourceGroup(
 				*utiltestingapi.MakeFlavorQuotas(rf.Name).
 					Resource(corev1.ResourceCPU, "1").Obj()).

@@ -54,13 +54,13 @@ var _ = ginkgo.Describe("LeaderWorkerSet integration", func() {
 
 	ginkgo.BeforeEach(func() {
 		ns = util.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "lws-e2e-")
-
-		rf = utiltestingapi.MakeResourceFlavor(resourceFlavorName).NodeLabel("instance-type", "on-demand").Obj()
+		suffix := util.RandomSuffix()
+		rf = utiltestingapi.MakeResourceFlavor(resourceFlavorName+"-"+suffix).NodeLabel("instance-type", "on-demand").Obj()
 		util.MustCreate(ctx, k8sClient, rf)
 
-		cq = utiltestingapi.MakeClusterQueue(clusterQueueName).
+		cq = utiltestingapi.MakeClusterQueue(clusterQueueName+"-"+suffix).
 			ResourceGroup(
-				*utiltestingapi.MakeFlavorQuotas(resourceFlavorName).
+				*utiltestingapi.MakeFlavorQuotas(rf.Name).
 					Resource(corev1.ResourceCPU, "5").
 					Obj(),
 			).
@@ -693,12 +693,13 @@ var _ = ginkgo.Describe("LeaderWorkerSet integration", func() {
 		)
 
 		ginkgo.BeforeEach(func() {
-			highPriorityWPC = utiltestingapi.MakeWorkloadPriorityClass("high-priority").
+			suffix := util.RandomSuffix()
+			highPriorityWPC = utiltestingapi.MakeWorkloadPriorityClass("high-priority-" + suffix).
 				PriorityValue(5000).
 				Obj()
 			util.MustCreate(ctx, k8sClient, highPriorityWPC)
 
-			lowPriorityWPC = utiltestingapi.MakeWorkloadPriorityClass("low-priority").
+			lowPriorityWPC = utiltestingapi.MakeWorkloadPriorityClass("low-priority-" + suffix).
 				PriorityValue(1000).
 				Obj()
 			util.MustCreate(ctx, k8sClient, lowPriorityWPC)
@@ -788,7 +789,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet integration", func() {
 					g.Expect(k8sClient.Get(ctx, highPriorityWlLookupKey, createdHighPriorityWl)).To(gomega.Succeed())
 					g.Expect(createdHighPriorityWl.Status.Conditions).To(testing.HaveConditionStatusTrue(kueue.WorkloadAdmitted))
 					g.Expect(createdHighPriorityWl.Spec.PriorityClassSource).To(gomega.Equal(constants.WorkloadPriorityClassSource))
-					g.Expect(createdHighPriorityWl.Spec.PriorityClassName).To(gomega.Equal(highPriorityLWS.Name))
+					g.Expect(createdHighPriorityWl.Spec.PriorityClassName).To(gomega.Equal(highPriorityWPC.Name))
 				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 

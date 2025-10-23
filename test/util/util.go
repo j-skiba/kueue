@@ -49,6 +49,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -76,6 +77,11 @@ import (
 	"sigs.k8s.io/kueue/pkg/workload"
 	"sigs.k8s.io/kueue/pkg/workloadslicing"
 )
+
+// RandomSuffix returns a random string of 5 characters.
+func RandomSuffix() string {
+	return rand.String(5)
+}
 
 var SetupLogger = sync.OnceFunc(func() {
 	ctrl.SetLogger(NewTestingLogger(ginkgo.GinkgoWriter))

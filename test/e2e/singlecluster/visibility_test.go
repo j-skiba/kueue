@@ -74,12 +74,13 @@ var _ = ginkgo.Describe("Kueue visibility server", func() {
 
 	ginkgo.When("There are pending workloads due to capacity maxed by the admitted job", func() {
 		ginkgo.BeforeEach(func() {
-			defaultRF = utiltestingapi.MakeResourceFlavor(defaultFlavor).Obj()
+			suffix := util.RandomSuffix()
+			defaultRF = utiltestingapi.MakeResourceFlavor(defaultFlavor + "-" + suffix).Obj()
 			util.MustCreate(ctx, k8sClient, defaultRF)
 
-			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue").
+			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-"+suffix).
 				ResourceGroup(
-					*utiltestingapi.MakeFlavorQuotas(defaultFlavor).
+					*utiltestingapi.MakeFlavorQuotas(defaultRF.Name).
 						Resource(corev1.ResourceCPU, "1").
 						Obj(),
 				).
@@ -92,13 +93,13 @@ var _ = ginkgo.Describe("Kueue visibility server", func() {
 			localQueueB = utiltestingapi.MakeLocalQueue("b", nsA.Name).ClusterQueue(clusterQueue.Name).Obj()
 			util.MustCreate(ctx, k8sClient, localQueueB)
 
-			highPriorityClass = testing.MakePriorityClass("high").PriorityValue(100).Obj()
+			highPriorityClass = testing.MakePriorityClass("high-"+suffix).PriorityValue(100).Obj()
 			util.MustCreate(ctx, k8sClient, highPriorityClass)
 
-			midPriorityClass = testing.MakePriorityClass("mid").PriorityValue(75).Obj()
+			midPriorityClass = testing.MakePriorityClass("mid-"+suffix).PriorityValue(75).Obj()
 			util.MustCreate(ctx, k8sClient, midPriorityClass)
 
-			lowPriorityClass = testing.MakePriorityClass("low").PriorityValue(50).Obj()
+			lowPriorityClass = testing.MakePriorityClass("low-"+suffix).PriorityValue(50).Obj()
 			util.MustCreate(ctx, k8sClient, lowPriorityClass)
 
 			ginkgo.By("Schedule a job that when admitted workload blocks the queue", func() {
