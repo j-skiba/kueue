@@ -56,6 +56,7 @@ type LocalQueueSpec struct {
 	FairSharing *FairSharing `json:"fairSharing,omitempty"`
 }
 
+// Deprecated: LocalQueueFlavorStatus is deprecated and marked for removal in v1beta2.
 type LocalQueueFlavorStatus struct {
 	// name of the flavor.
 	// +required
@@ -141,19 +142,20 @@ type LocalQueueStatus struct {
 	// +optional
 	FlavorsReservation []LocalQueueFlavorUsage `json:"flavorsReservation"`
 
-	// flavorUsage are the used quotas, by flavor currently in use by the
+	// flavorsUsage are the used quotas, by flavor currently in use by the
 	// workloads assigned to this LocalQueue.
 	// +listType=map
 	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=16
 	// +optional
-	FlavorUsage []LocalQueueFlavorUsage `json:"flavorUsage"`
+	FlavorsUsage []LocalQueueFlavorUsage `json:"flavorsUsage"`
 
 	// flavors lists all currently available ResourceFlavors in specified ClusterQueue.
 	// +listType=map
 	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=16
 	// +optional
+	// Deprecated: Flavors is deprecated and marked for removal in v1beta2.
 	Flavors []LocalQueueFlavorStatus `json:"flavors,omitempty"`
 
 	// fairSharing contains the information about the current status of fair sharing.
@@ -218,3 +220,5 @@ type LocalQueueList struct {
 func init() {
 	SchemeBuilder.Register(&LocalQueue{}, &LocalQueueList{})
 }
+
+func (*LocalQueue) Hub() {}
