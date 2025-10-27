@@ -56,7 +56,7 @@ var _ = ginkgo.Describe("Kuberay", func() {
 			Obj()
 		gomega.Expect(k8sClient.Create(ctx, rf)).To(gomega.Succeed())
 
-		cq = utiltestingapi.MakeClusterQueue(clusterQueueName+"-"+suffix).
+		cq = utiltestingapi.MakeClusterQueue(clusterQueueName + "-" + suffix).
 			ResourceGroup(
 				*utiltestingapi.MakeFlavorQuotas(rf.Name).
 					Resource(corev1.ResourceCPU, "1").Obj()).

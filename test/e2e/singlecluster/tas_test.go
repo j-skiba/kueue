@@ -66,7 +66,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", func() {
 			onDemandRF = utiltestingapi.MakeResourceFlavor("on-demand-"+suffix).
 				NodeLabel("instance-type", "on-demand").TopologyName(topology.Name).Obj()
 			util.MustCreate(ctx, k8sClient, onDemandRF)
-			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-"+suffix).
+			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-" + suffix).
 				ResourceGroup(
 					*utiltestingapi.MakeFlavorQuotas("on-demand-"+suffix).
 						Resource(corev1.ResourceCPU, "1").
@@ -162,7 +162,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", func() {
 				Obj()
 
 			util.MustCreate(ctx, k8sClient, onDemandRF)
-			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-"+suffix).
+			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-" + suffix).
 				ResourceGroup(
 					*utiltestingapi.MakeFlavorQuotas("on-demand-"+suffix).
 						Resource(corev1.ResourceCPU, "1").
@@ -298,7 +298,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling", func() {
 				Obj()
 
 			util.MustCreate(ctx, k8sClient, onDemandRF)
-			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-"+suffix).
+			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-" + suffix).
 				ResourceGroup(
 					*utiltestingapi.MakeFlavorQuotas("on-demand-"+suffix).
 						Resource(corev1.ResourceCPU, "1").

@@ -87,10 +87,10 @@ var _ = ginkgo.Describe("Kueue", func() {
 		)
 		ginkgo.BeforeEach(func() {
 			suffix := util.RandomSuffix()
-			onDemandRF = utiltestingapi.MakeResourceFlavor("on-demand-" + suffix).
+			onDemandRF = utiltestingapi.MakeResourceFlavor("on-demand-"+suffix).
 				NodeLabel("instance-type", "on-demand").Obj()
 			util.MustCreate(ctx, k8sClient, onDemandRF)
-			spotRF = utiltestingapi.MakeResourceFlavor("spot-" + suffix).
+			spotRF = utiltestingapi.MakeResourceFlavor("spot-"+suffix).
 				NodeLabel("instance-type", "spot").Obj()
 			util.MustCreate(ctx, k8sClient, spotRF)
 			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-"+suffix).
@@ -285,7 +285,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 		ginkgo.It("Should readmit preempted job with priorityClass into a separate flavor", func() {
 			util.MustCreate(ctx, k8sClient, sampleJob)
 
-			highPriorityClass := testing.MakePriorityClass("high").PriorityValue(100).Obj()
+			highPriorityClass := testing.MakePriorityClass("high-" + util.RandomSuffix()).PriorityValue(100).Obj()
 			util.MustCreate(ctx, k8sClient, highPriorityClass)
 			ginkgo.DeferCleanup(func() {
 				gomega.Expect(k8sClient.Delete(ctx, highPriorityClass)).To(gomega.Succeed())
@@ -300,7 +300,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 			ginkgo.By("Job is preempted by higher priority job", func() {
 				job := testingjob.MakeJob("high", ns.Name).
 					Queue("main").
-					PriorityClass("high").
+					PriorityClass(highPriorityClass.Name).
 					RequestAndLimit(corev1.ResourceCPU, "1").
 					NodeSelector("instance-type", "on-demand"). // target the same flavor to cause preemption
 					Obj()
@@ -392,21 +392,22 @@ var _ = ginkgo.Describe("Kueue", func() {
 		})
 
 		ginkgo.It("Should allow updating the workload's priority through the job", func() {
-			lowPriority := "low-priority"
+			suffix := util.RandomSuffix()
+			lowPriority := "low-priority-" + suffix
 			lowPriorityClass := utiltestingapi.MakeWorkloadPriorityClass(lowPriority).PriorityValue(100).Obj()
 			util.MustCreate(ctx, k8sClient, lowPriorityClass)
 			ginkgo.DeferCleanup(func() {
 				gomega.Expect(k8sClient.Delete(ctx, lowPriorityClass)).To(gomega.Succeed())
 			})
 
-			midPriority := "mid-priority"
+			midPriority := "mid-priority-" + suffix
 			midPriorityClass := utiltestingapi.MakeWorkloadPriorityClass(midPriority).PriorityValue(200).Obj()
 			util.MustCreate(ctx, k8sClient, midPriorityClass)
 			ginkgo.DeferCleanup(func() {
 				gomega.Expect(k8sClient.Delete(ctx, midPriorityClass)).To(gomega.Succeed())
 			})
 
-			highPriority := "high-priority"
+			highPriority := "high-priority-" + suffix
 			highPriorityClass := utiltestingapi.MakeWorkloadPriorityClass(highPriority).PriorityValue(300).Obj()
 			util.MustCreate(ctx, k8sClient, highPriorityClass)
 			ginkgo.DeferCleanup(func() {
@@ -497,7 +498,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 		})
 
 		ginkgo.It("Should not allow removing the workload's priority through the job", func() {
-			samplePriority := "sample-priority"
+			samplePriority := "sample-priority-" + util.RandomSuffix()
 			samplePriorityClass := utiltestingapi.MakeWorkloadPriorityClass(samplePriority).PriorityValue(100).Obj()
 			util.MustCreate(ctx, k8sClient, samplePriorityClass)
 			ginkgo.DeferCleanup(func() {
@@ -556,10 +557,10 @@ var _ = ginkgo.Describe("Kueue", func() {
 			check = utiltestingapi.MakeAdmissionCheck("check1" + "-" + suffix).ControllerName("ac-controller").Obj()
 			util.MustCreate(ctx, k8sClient, check)
 			util.SetAdmissionCheckActive(ctx, k8sClient, check, metav1.ConditionTrue)
-			onDemandRF = utiltestingapi.MakeResourceFlavor("on-demand-" + suffix).
+			onDemandRF = utiltestingapi.MakeResourceFlavor("on-demand-"+suffix).
 				NodeLabel("instance-type", "on-demand").Obj()
 			util.MustCreate(ctx, k8sClient, onDemandRF)
-			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-"+suffix).
+			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-" + suffix).
 				ResourceGroup(
 					*utiltestingapi.MakeFlavorQuotas(onDemandRF.Name).
 						Resource(corev1.ResourceCPU, "1").
@@ -640,6 +641,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 		})
 
 		ginkgo.It("Should suspend a job when its checks become invalid", func() {
+			sampleJob = (&testingjob.JobWrapper{Job: *sampleJob}).Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).Obj()
 			util.MustCreate(ctx, k8sClient, sampleJob)
 
 			createdWorkload := &kueue.Workload{}
@@ -651,6 +653,13 @@ var _ = ginkgo.Describe("Kueue", func() {
 					g.Expect(slices.ToMap(createdWorkload.Status.AdmissionChecks, func(i int) (kueue.AdmissionCheckReference, string) {
 						return createdWorkload.Status.AdmissionChecks[i].Name, ""
 					})).Should(gomega.BeComparableTo(map[kueue.AdmissionCheckReference]string{kueue.AdmissionCheckReference(check.Name): ""}))
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+			})
+
+			ginkgo.By("waiting for the workload to be assigned", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					g.Expect(k8sClient.Get(ctx, wlLookupKey, createdWorkload)).Should(gomega.Succeed())
+					g.Expect(createdWorkload.Status.Conditions).Should(testing.HaveConditionStatusTrue(kueue.WorkloadQuotaReserved))
 				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 
@@ -668,6 +677,14 @@ var _ = ginkgo.Describe("Kueue", func() {
 
 			util.ExpectJobUnsuspendedWithNodeSelectors(ctx, k8sClient, jobKey, map[string]string{
 				"instance-type": "on-demand",
+			})
+
+			ginkgo.By("await for the job to be running", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					createdJob := &batchv1.Job{}
+					g.Expect(k8sClient.Get(ctx, jobKey, createdJob)).Should(gomega.Succeed())
+					g.Expect(createdJob.Status.Active).To(gomega.Equal(int32(1)))
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("setting the check as Rejected", func() {
@@ -690,7 +707,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, jobKey, createdJob)).Should(gomega.Succeed())
 					g.Expect(ptr.Deref(createdJob.Spec.Suspend, false)).Should(gomega.BeTrue())
-				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
 			})
 		})
 	})

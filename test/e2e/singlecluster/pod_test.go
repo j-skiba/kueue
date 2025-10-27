@@ -63,7 +63,7 @@ var _ = ginkgo.Describe("Pod groups", func() {
 		)
 
 		ginkgo.BeforeEach(func() {
-			cq = utiltestingapi.MakeClusterQueue("cq-"+util.RandomSuffix()).
+			cq = utiltestingapi.MakeClusterQueue("cq-" + util.RandomSuffix()).
 				ResourceGroup(
 					*utiltestingapi.MakeFlavorQuotas(onDemandRF.Name).Resource(corev1.ResourceCPU, "5").Obj(),
 				).
@@ -249,14 +249,22 @@ var _ = ginkgo.Describe("Pod groups", func() {
 			ginkgo.By("Excess pod is deleted", func() {
 				excess := group[2].DeepCopy()
 				excess.Name = "excess"
-				excessPods := sets.New(client.ObjectKeyFromObject(excess))
 				ginkgo.By("Create the excess pod", func() {
 					util.MustCreate(ctx, k8sClient, excess)
 				})
 				ginkgo.By("Use events to observe the excess pods are getting stopped", func() {
-					util.ExpectEventsForObjects(eventWatcher, excessPods, func(e *corev1.Event) bool {
-						return e.InvolvedObject.Namespace == ns.Name && e.Reason == "ExcessPodDeleted"
-					})
+					gomega.Eventually(func(g gomega.Gomega) {
+						eventList := &corev1.EventList{}
+						g.Expect(k8sClient.List(ctx, eventList, client.InNamespace(ns.Name), client.MatchingFields{"involvedObject.name": "excess"})).To(gomega.Succeed())
+						found := false
+						for _, ev := range eventList.Items {
+							if ev.Reason == "ExcessPodDeleted" {
+								found = true
+								break
+							}
+						}
+						g.Expect(found).To(gomega.BeTrue())
+					}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
 				})
 				ginkgo.By("Verify the excess pod is deleted", func() {
 					util.ExpectObjectToBeDeleted(ctx, k8sClient, excess, false)
@@ -414,7 +422,7 @@ var _ = ginkgo.Describe("Pod groups", func() {
 			})
 
 			suffix := util.RandomSuffix()
-			highPriorityClass := testing.MakePriorityClass("high-"+suffix).PriorityValue(100).Obj()
+			highPriorityClass := testing.MakePriorityClass("high-" + suffix).PriorityValue(100).Obj()
 			util.MustCreate(ctx, k8sClient, highPriorityClass)
 			ginkgo.DeferCleanup(func() {
 				gomega.Expect(k8sClient.Delete(ctx, highPriorityClass)).To(gomega.Succeed())
@@ -474,9 +482,20 @@ var _ = ginkgo.Describe("Pod groups", func() {
 			})
 
 			ginkgo.By("Use events to observe the default-priority pods are getting preempted", func() {
-				util.ExpectEventsForObjects(eventWatcher, defaultGroupPods, func(e *corev1.Event) bool {
-					return e.InvolvedObject.Namespace == ns.Name && e.Reason == "Stopped"
-				})
+				for podKey := range defaultGroupPods {
+					gomega.Eventually(func(g gomega.Gomega) {
+						eventList := &corev1.EventList{}
+						g.Expect(k8sClient.List(ctx, eventList, client.InNamespace(podKey.Namespace), client.MatchingFields{"involvedObject.name": podKey.Name})).To(gomega.Succeed())
+						found := false
+						for _, ev := range eventList.Items {
+							if ev.Reason == "Stopped" {
+								found = true
+								break
+							}
+						}
+						g.Expect(found).To(gomega.BeTrue())
+					}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}
 			})
 
 			ginkgo.By("Wait for default-priority pods to fail", func() {

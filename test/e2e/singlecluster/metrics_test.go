@@ -17,6 +17,8 @@ limitations under the License.
 package e2e
 
 import (
+	"fmt"
+
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
@@ -77,7 +79,7 @@ var _ = ginkgo.Describe("Metrics", func() {
 		}
 		util.MustCreate(ctx, k8sClient, metricsReaderClusterRoleBinding)
 
-		curlPod = testingjobspod.MakePod("curl-metrics", kueueNS).
+		curlPod = testingjobspod.MakePod("curl-metrics-"+suffix, kueueNS).
 			ServiceAccountName(serviceAccountName).
 			Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 			TerminationGracePeriod(1).
@@ -541,12 +543,22 @@ var _ = ginkgo.Describe("Metrics", func() {
 				util.ExpectObjectToBeDeleted(ctx, k8sClient, lowerJob1, true)
 				util.ExpectObjectToBeDeleted(ctx, k8sClient, lowerJob2, true)
 				gomega.Expect(util.DeleteWorkloadsInNamespace(ctx, k8sClient, ns)).Should(gomega.Succeed())
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, localQueue1, true)
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, localQueue2, true)
 				util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue1, true)
 				util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue2, true)
 			})
 
 			ginkgo.By("checking that eviction and preemption metrics are no longer available", func() {
-				util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, metrics)
+				deletedMetrics := [][]string{
+					{"kueue_local_queue_evicted_workloads_total", fmt.Sprintf("name=%q", localQueue1.Name)},
+					{"kueue_local_queue_resource_reservation", fmt.Sprintf("name=%q", localQueue1.Name)},
+					{"kueue_local_queue_resource_usage", fmt.Sprintf("name=%q", localQueue1.Name)},
+					{"kueue_local_queue_evicted_workloads_total", fmt.Sprintf("name=%q", localQueue2.Name)},
+					{"kueue_local_queue_resource_reservation", fmt.Sprintf("name=%q", localQueue2.Name)},
+					{"kueue_local_queue_resource_usage", fmt.Sprintf("name=%q", localQueue2.Name)},
+				}
+				util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, deletedMetrics)
 			})
 		})
 	})

@@ -53,7 +53,7 @@ var _ = ginkgo.Describe("TrainJob", func() {
 			suffix := util.RandomSuffix()
 			defaultRf = utiltestingapi.MakeResourceFlavor("default-" + suffix).Obj()
 			util.MustCreate(ctx, k8sClient, defaultRf)
-			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-"+suffix).
+			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-" + suffix).
 				ResourceGroup(
 					*utiltestingapi.MakeFlavorQuotas(defaultRf.Name).
 						Resource(corev1.ResourceCPU, "2").

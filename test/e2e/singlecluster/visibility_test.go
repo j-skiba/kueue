@@ -78,7 +78,7 @@ var _ = ginkgo.Describe("Kueue visibility server", func() {
 			defaultRF = utiltestingapi.MakeResourceFlavor(defaultFlavor + "-" + suffix).Obj()
 			util.MustCreate(ctx, k8sClient, defaultRF)
 
-			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-"+suffix).
+			clusterQueue = utiltestingapi.MakeClusterQueue("cluster-queue-" + suffix).
 				ResourceGroup(
 					*utiltestingapi.MakeFlavorQuotas(defaultRF.Name).
 						Resource(corev1.ResourceCPU, "1").
@@ -93,13 +93,13 @@ var _ = ginkgo.Describe("Kueue visibility server", func() {
 			localQueueB = utiltestingapi.MakeLocalQueue("b", nsA.Name).ClusterQueue(clusterQueue.Name).Obj()
 			util.MustCreate(ctx, k8sClient, localQueueB)
 
-			highPriorityClass = testing.MakePriorityClass("high-"+suffix).PriorityValue(100).Obj()
+			highPriorityClass = testing.MakePriorityClass("high-" + suffix).PriorityValue(100).Obj()
 			util.MustCreate(ctx, k8sClient, highPriorityClass)
 
-			midPriorityClass = testing.MakePriorityClass("mid-"+suffix).PriorityValue(75).Obj()
+			midPriorityClass = testing.MakePriorityClass("mid-" + suffix).PriorityValue(75).Obj()
 			util.MustCreate(ctx, k8sClient, midPriorityClass)
 
-			lowPriorityClass = testing.MakePriorityClass("low-"+suffix).PriorityValue(50).Obj()
+			lowPriorityClass = testing.MakePriorityClass("low-" + suffix).PriorityValue(50).Obj()
 			util.MustCreate(ctx, k8sClient, lowPriorityClass)
 
 			ginkgo.By("Schedule a job that when admitted workload blocks the queue", func() {
@@ -543,8 +543,10 @@ var _ = ginkgo.Describe("Kueue visibility server", func() {
 
 		ginkgo.It("Should return an appropriate error", func() {
 			ginkgo.By("Returning a Forbidden error due to insufficient permissions for the ClusterQueue request", func() {
-				_, err := impersonatedVisibilityClient.ClusterQueues().GetPendingWorkloadsSummary(ctx, "non-existent", metav1.GetOptions{})
-				gomega.Expect(err).Should(testing.BeForbiddenError())
+				gomega.Eventually(func(g gomega.Gomega) {
+					_, err := impersonatedVisibilityClient.ClusterQueues().GetPendingWorkloadsSummary(ctx, "non-existent", metav1.GetOptions{})
+					g.Expect(err).Should(testing.BeForbiddenError())
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 			ginkgo.By("Returning a ResourceNotFound error for a nonexistent LocalQueue", func() {
 				_, err := impersonatedVisibilityClient.LocalQueues(nsA.Name).GetPendingWorkloadsSummary(ctx, "non-existent", metav1.GetOptions{})
@@ -560,12 +562,16 @@ var _ = ginkgo.Describe("Kueue visibility server", func() {
 	ginkgo.When("A subject is not bound to kueue-batch-user-role, nor to kueue-batch-admin-role", func() {
 		ginkgo.It("Should return an appropriate error", func() {
 			ginkgo.By("Returning a Forbidden error due to insufficient permissions for the ClusterQueue request", func() {
-				_, err := impersonatedVisibilityClient.ClusterQueues().GetPendingWorkloadsSummary(ctx, "non-existent", metav1.GetOptions{})
-				gomega.Expect(err).Should(testing.BeForbiddenError())
+				gomega.Eventually(func(g gomega.Gomega) {
+					_, err := impersonatedVisibilityClient.ClusterQueues().GetPendingWorkloadsSummary(ctx, "non-existent", metav1.GetOptions{})
+					g.Expect(err).Should(testing.BeForbiddenError())
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 			ginkgo.By("Returning a Forbidden error due to insufficient permissions for the LocalQueue request", func() {
-				_, err := impersonatedVisibilityClient.LocalQueues(nsA.Name).GetPendingWorkloadsSummary(ctx, "non-existent", metav1.GetOptions{})
-				gomega.Expect(err).Should(testing.BeForbiddenError())
+				gomega.Eventually(func(g gomega.Gomega) {
+					_, err := impersonatedVisibilityClient.LocalQueues(nsA.Name).GetPendingWorkloadsSummary(ctx, "non-existent", metav1.GetOptions{})
+					g.Expect(err).Should(testing.BeForbiddenError())
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 		})
 	})

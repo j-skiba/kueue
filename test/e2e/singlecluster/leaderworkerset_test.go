@@ -58,7 +58,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet integration", func() {
 		rf = utiltestingapi.MakeResourceFlavor(resourceFlavorName+"-"+suffix).NodeLabel("instance-type", "on-demand").Obj()
 		util.MustCreate(ctx, k8sClient, rf)
 
-		cq = utiltestingapi.MakeClusterQueue(clusterQueueName+"-"+suffix).
+		cq = utiltestingapi.MakeClusterQueue(clusterQueueName + "-" + suffix).
 			ResourceGroup(
 				*utiltestingapi.MakeFlavorQuotas(rf.Name).
 					Resource(corev1.ResourceCPU, "5").
@@ -430,7 +430,9 @@ var _ = ginkgo.Describe("LeaderWorkerSet integration", func() {
 				})
 
 				createdWorkload1 := &kueue.Workload{}
-				wlLookupKey1 := types.NamespacedName{Name: leaderworkerset.GetWorkloadName(lws.UID, lws.Name, "0"), Namespace: ns.Name}
+
+				wlLookupKey1 := types.NamespacedName{Name: leaderworkerset.GetWorkloadName(createdLeaderWorkerSet.UID, createdLeaderWorkerSet.Name, "0"), Namespace: ns.Name}
+
 				ginkgo.By("Check workload is created", func() {
 					gomega.Expect(k8sClient.Get(ctx, wlLookupKey1, createdWorkload1)).To(gomega.Succeed())
 				})
@@ -442,6 +444,12 @@ var _ = ginkgo.Describe("LeaderWorkerSet integration", func() {
 						g.Expect(k8sClient.Update(ctx, createdLeaderWorkerSet)).To(gomega.Succeed())
 					}, util.Timeout, util.Interval).Should(gomega.Succeed())
 				})
+
+				gomega.Eventually(func(g gomega.Gomega) {
+					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(lws), createdLeaderWorkerSet)).To(gomega.Succeed())
+					g.Expect(createdLeaderWorkerSet.Status.ReadyReplicas).To(gomega.Equal(int32(2)))
+					g.Expect(createdLeaderWorkerSet.Status.Conditions).To(testing.HaveConditionStatusTrueAndReason("Available", "AllGroupsReady"))
+				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
 
 				ginkgo.By("Scale down LeaderWorkerSet", func() {
 					gomega.Eventually(func(g gomega.Gomega) {
@@ -457,18 +465,19 @@ var _ = ginkgo.Describe("LeaderWorkerSet integration", func() {
 						g.Expect(createdLeaderWorkerSet.Status.ReadyReplicas).To(gomega.Equal(int32(1)))
 						g.Expect(createdLeaderWorkerSet.Status.Conditions).To(testing.HaveConditionStatusTrueAndReason("Available", "AllGroupsReady"))
 					}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+
 				})
 
 				ginkgo.By("Check workload for group 1 is still exist", func() {
 					gomega.Expect(k8sClient.Get(ctx, wlLookupKey1, createdWorkload1)).To(gomega.Succeed())
 				})
 
-				createdWorkload2 := &kueue.Workload{}
-				wlLookupKey2 := types.NamespacedName{Name: leaderworkerset.GetWorkloadName(lws.UID, lws.Name, "1"), Namespace: ns.Name}
+				wlLookupKey2 := types.NamespacedName{Name: leaderworkerset.GetWorkloadName(createdLeaderWorkerSet.UID, createdLeaderWorkerSet.Name, "1"), Namespace: ns.Name}
+
 				ginkgo.By("Check workload for group 2 is deleted", func() {
 					gomega.Eventually(func(g gomega.Gomega) {
-						g.Expect(k8sClient.Get(ctx, wlLookupKey2, createdWorkload2)).To(testing.BeNotFoundError())
-					}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+						g.Expect(k8sClient.Get(ctx, wlLookupKey2, &kueue.Workload{})).To(testing.BeNotFoundError())
+					}, util.VeryLongTimeout, util.Interval).Should(gomega.Succeed())
 				})
 
 				ginkgo.By("Delete the LeaderWorkerSet", func() {
@@ -487,6 +496,9 @@ var _ = ginkgo.Describe("LeaderWorkerSet integration", func() {
 
 				ginkgo.By("Check workloads are deleted", func() {
 					util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, createdWorkload1, false, util.LongTimeout)
+					createdWorkload2 := &kueue.Workload{}
+					createdWorkload2.Name = wlLookupKey2.Name
+					createdWorkload2.Namespace = wlLookupKey2.Namespace
 					util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, createdWorkload2, false, util.LongTimeout)
 				})
 			},

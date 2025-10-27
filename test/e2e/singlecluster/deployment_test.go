@@ -55,7 +55,7 @@ var _ = ginkgo.Describe("Deployment", func() {
 			Obj()
 		util.MustCreate(ctx, k8sClient, rf)
 
-		cq = utiltestingapi.MakeClusterQueue(clusterQueueName+"-"+suffix).
+		cq = utiltestingapi.MakeClusterQueue(clusterQueueName + "-" + suffix).
 			ResourceGroup(
 				*utiltestingapi.MakeFlavorQuotas(rf.Name).
 					Resource(corev1.ResourceCPU, "5").

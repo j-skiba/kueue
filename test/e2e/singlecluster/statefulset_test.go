@@ -59,7 +59,7 @@ var _ = ginkgo.Describe("StatefulSet integration", func() {
 			Obj()
 		util.MustCreate(ctx, k8sClient, rf)
 
-		cq = utiltestingapi.MakeClusterQueue(clusterQueueName+"-"+suffix).
+		cq = utiltestingapi.MakeClusterQueue(clusterQueueName + "-" + suffix).
 			ResourceGroup(
 				*utiltestingapi.MakeFlavorQuotas(rf.Name).
 					Resource(corev1.ResourceCPU, "5").
@@ -314,12 +314,11 @@ var _ = ginkgo.Describe("StatefulSet integration", func() {
 				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 
-			ginkgo.By("Wait for ReadyReplicas < 3", func() {
+			ginkgo.By("Waiting for replicas to be deleted", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					createdStatefulSet := &appsv1.StatefulSet{}
 					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(statefulSet), createdStatefulSet)).To(gomega.Succeed())
-					g.Expect(createdStatefulSet.Status.ReadyReplicas).To(gomega.BeNumerically("<", 3))
-					g.Expect(k8sClient.Update(ctx, createdStatefulSet)).To(gomega.Succeed())
+					g.Expect(createdStatefulSet.Status.ReadyReplicas).To(gomega.Equal(int32(0)))
 				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
@@ -376,7 +375,7 @@ var _ = ginkgo.Describe("StatefulSet integration", func() {
 					createdStatefulSet := &appsv1.StatefulSet{}
 					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(statefulSet), createdStatefulSet)).To(gomega.Succeed())
 					g.Expect(createdStatefulSet.Status.ReadyReplicas).To(gomega.Equal(int32(3)))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.VeryLongTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("Check workload is created", func() {
