@@ -1,0 +1,135 @@
+{{- if .Values.localQueueCreator.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-localqueue-controller
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-localqueue-controller-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kueue.x-k8s.io
+  resources:
+  - clusterqueues
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kueue.x-k8s.io
+  resources:
+  - localqueues
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-localqueue-controller-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-localqueue-controller-role
+subjects:
+- kind: ServiceAccount
+  name: {{ .Release.Name }}-localqueue-controller
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-localqueue-controller-config
+  namespace: {{ .Release.Namespace }}
+data:
+  controller_manager_config.yaml: |
+    localQueueName: {{ .Values.localQueueCreator.config.localQueueName }}
+    {{- if .Values.localQueueCreator.config.managedJobsNamespaceSelector }}
+    managedJobsNamespaceSelector:
+      {{- toYaml .Values.localQueueCreator.config.managedJobsNamespaceSelector | nindent 6 }}
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-localqueue-controller
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: localqueue-creator
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    control-plane: kueue-localqueue-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: kueue-localqueue-controller
+      app.kubernetes.io/name: localqueue-creator
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        control-plane: kueue-localqueue-controller
+        app.kubernetes.io/name: localqueue-creator
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-localqueue-controller
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - args:
+        - "--config=/etc/kueue/controller_manager_config.yaml"
+        - "--zap-log-level=2"
+        image: "{{ .Values.localQueueCreator.image.repository }}:{{ .Values.localQueueCreator.image.tag }}"
+        imagePullPolicy: {{ .Values.localQueueCreator.image.pullPolicy }}
+        name: manager
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          {{- toYaml .Values.localQueueCreator.resources | nindent 10 }}
+        volumeMounts:
+        - mountPath: /etc/kueue
+          name: manager-config
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - configMap:
+          name: {{ .Release.Name }}-localqueue-controller-config
+        name: manager-config
+{{- end }}

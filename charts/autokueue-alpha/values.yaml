@@ -1,0 +1,95 @@
+enableAutoKueue: true
+
+# Configuration for the AutoKueue setup hook
+autoKueue:
+  clusterQueueName: "cluster-queue"
+  # List of topology levels. 
+  # Example:
+  # tasLevels:
+  #   - name: cloud.google.com/gke-nodepool
+  tasLevels: []
+  
+  # Node labels to associate with the ResourceFlavor
+  # Example:
+  # nodeLabel:
+  #   cloud.google.com/gke-nodepool: "default-pool"
+  nodeLabel: {}
+
+# Configuration for the LocalQueue Creator component
+localQueueCreator:
+  enabled: true
+  image:
+    repository: us-central1-docker.pkg.dev/k8s-staging-images/kueue/localqueue-creator
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Configuration for the controller
+  config:
+    localQueueName: "default"
+    # Optional: managedJobsNamespaceSelector
+    # managedJobsNamespaceSelector:
+    #   matchLabels:
+    #     key: value
+
+  resources:
+    limits:
+      cpu: 100m
+      memory: 100Mi
+    requests:
+      cpu: 100m
+      memory: 100Mi
+
+# Default values for the dependency 'kueue'
+kueue:
+  enabled: true
+  managerConfig:
+    # We override the controller configuration to explicitly exclude the kueue-system namespace
+    # from job interception. This prevents a deadlock where the post-install hook Job
+    # (which runs in kueue-system) is blocked by the webhook it is trying to install.
+    controllerManagerConfigYaml: |-
+      apiVersion: config.kueue.x-k8s.io/v1beta2
+      kind: Configuration
+      health:
+        healthProbeBindAddress: :8081
+      metrics:
+        bindAddress: :8443
+      # enableClusterQueueResources: true
+      webhook:
+        port: 9443
+      leaderElection:
+        leaderElect: true
+        resourceName: c1f6bfd2.kueue.x-k8s.io
+      controller:
+        groupKindConcurrency:
+          Job.batch: 5
+          Pod: 5
+          Workload.kueue.x-k8s.io: 5
+          LocalQueue.kueue.x-k8s.io: 1
+          ClusterQueue.kueue.x-k8s.io: 1
+          ResourceFlavor.kueue.x-k8s.io: 1
+      clientConnection:
+        qps: 50
+        burst: 100
+      managedJobsNamespaceSelector:
+        matchExpressions:
+          - key: kubernetes.io/metadata.name
+            operator: NotIn
+            values: [ kube-system, kueue-system ]
+      integrations:
+        frameworks:
+        - "batch/job"
+        - "kubeflow.org/mpijob"
+        - "ray.io/rayjob"
+        - "ray.io/raycluster"
+        - "jobset.x-k8s.io/jobset"
+        - "trainer.kubeflow.org/trainjob"
+        - "kubeflow.org/paddlejob"
+        - "kubeflow.org/pytorchjob"
+        - "kubeflow.org/tfjob"
+        - "kubeflow.org/xgboostjob"
+        - "kubeflow.org/jaxjob"
+        - "workload.codeflare.dev/appwrapper"
+  controllerManager:
+    featureGates:
+      - name: TopologyAwareScheduling
+        enabled: true
