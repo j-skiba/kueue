@@ -127,6 +127,10 @@ spec:
         volumeMounts:
         - mountPath: /etc/kueue
           name: manager-config
+      {{- with .Values.localQueueCreator.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       terminationGracePeriodSeconds: 10
       volumes:
       - configMap:

@@ -19,9 +19,13 @@ autoKueue:
 localQueueCreator:
   enabled: true
   image:
-    repository: us-central1-docker.pkg.dev/k8s-staging-images/kueue/localqueue-creator
-    tag: latest
+    repository: us-central1-docker.pkg.dev/jakubskiba-gke-dev/my-images/localqueue-creator
+    tag: v1
     pullPolicy: IfNotPresent
+  
+  # Optional: imagePullSecrets
+  # imagePullSecrets:
+  #   - name: regcred
   
   # Configuration for the controller
   config:
@@ -43,17 +47,13 @@ localQueueCreator:
 kueue:
   enabled: true
   managerConfig:
-    # We override the controller configuration to explicitly exclude the kueue-system namespace
-    # from job interception. This prevents a deadlock where the post-install hook Job
-    # (which runs in kueue-system) is blocked by the webhook it is trying to install.
     controllerManagerConfigYaml: |-
-      apiVersion: config.kueue.x-k8s.io/v1beta2
+      apiVersion: config.kueue.x-k8s.io/v1beta1
       kind: Configuration
       health:
         healthProbeBindAddress: :8081
       metrics:
         bindAddress: :8443
-      # enableClusterQueueResources: true
       webhook:
         port: 9443
       leaderElection:
@@ -70,6 +70,7 @@ kueue:
       clientConnection:
         qps: 50
         burst: 100
+      # EXCLUDE kueue-system from webhooks to prevent deadlock with the post-install hook
       managedJobsNamespaceSelector:
         matchExpressions:
           - key: kubernetes.io/metadata.name

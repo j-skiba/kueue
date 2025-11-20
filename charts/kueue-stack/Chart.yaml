@@ -1,5 +1,5 @@
 apiVersion: v2
-name: autokueue-alpha
+name: kueue-stack
 description: A Helm chart for AutoKueue (Alpha) setup including Kueue, LocalQueue Creator, and default resources.
 type: application
 version: 0.1.0
@@ -7,5 +7,5 @@ appVersion: "0.1.0"
 dependencies:
   - name: kueue
     version: "0.14.4"
-    repository: "file://../kueue"
+    repository: "oci://registry.k8s.io/kueue/charts" # Adjusted path for Helm dependency resolution
     condition: kueue.enabled
