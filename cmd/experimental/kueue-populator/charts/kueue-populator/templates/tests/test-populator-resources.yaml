@@ -8,26 +8,34 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   serviceAccountName: "{{ .Release.Name }}-test-sa"
-  containers:
-    - name: kubectl
+  initContainers:
+    - name: check-lq-not-in-kube-system
       image: bitnami/kubectl:latest
-      command:
-        - /bin/sh
-        - -c
-        - |
-          set -ex
-          echo "Checking for setup resources..."
-          kubectl get clusterqueue {{ .Values.kueuePopulator.config.clusterQueueName }}
-          kubectl get resourceflavor tas-gpu-default
-
-          echo "Checking LocalQueue in default namespace..."
-          kubectl get localqueue -n default {{ .Values.kueuePopulator.config.localQueueName }}
-
-          echo "Ensuring LocalQueue NOT in kube-system..."
-          if kubectl get localqueue -n kube-system {{ .Values.kueuePopulator.config.localQueueName }}; then exit 1; fi
-
-          echo "Ensuring LocalQueue NOT in {{ .Release.Namespace }}..."
-          if kubectl get localqueue -n {{ .Release.Namespace }} {{ .Values.kueuePopulator.config.localQueueName }}; then exit 1; fi
-
-          echo "Prepopulator resources OK"
+      command: ["sh", "-c"]
+      args: [
+        "if kubectl get localqueue -n kube-system {{ .Values.kueuePopulator.config.localQueueName }}; then exit 1; else exit 0; fi"
+      ]
+    - name: check-lq-not-in-release-ns
+      image: bitnami/kubectl:latest
+      command: ["sh", "-c"]
+      args: [
+        "if kubectl get localqueue -n {{ .Release.Namespace }} {{ .Values.kueuePopulator.config.localQueueName }}; then exit 1; else exit 0; fi"
+      ]
+  containers:
+    - name: check-clusterqueue
+      image: bitnami/kubectl:latest
+      command: ["kubectl"]
+      args: ["get", "clusterqueue", "{{ .Values.kueuePopulator.config.clusterQueueName }}"]
+    - name: check-resourceflavor
+      image: bitnami/kubectl:latest
+      command: ["kubectl"]
+      args: ["get", "resourceflavor", "tas-gpu-default"]
+    - name: check-localqueue-default
+      image: bitnami/kubectl:latest
+      command: ["kubectl"]
+      args: ["get", "localqueue", "-n", "default", "{{ .Values.kueuePopulator.config.localQueueName }}"]
+    # This container only runs if initContainers succeed
+    - name: tests-succeeded
+      image: k8s.gcr.io/pause:3.1
+      command: ["/bin/sh", "-c", "echo 'Non-existence checks passed'"]
   restartPolicy: Never

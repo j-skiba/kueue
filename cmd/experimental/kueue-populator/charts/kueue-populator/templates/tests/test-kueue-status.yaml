@@ -9,15 +9,24 @@ metadata:
 spec:
   serviceAccountName: "{{ .Release.Name }}-test-sa"
   containers:
-    - name: kubectl
+    - name: check-kueue-controller-manager
       image: bitnami/kubectl:latest
-      command:
-        - /bin/sh
-        - -c
-        - |
-          set -ex
-          echo "Checking Kueue Deployments..."
-          kubectl get deployment -n "{{ .Release.Namespace }}" "{{ .Release.Name }}-kueue-controller-manager" -o jsonpath='{.status.readyReplicas}' | grep 1
-          kubectl get deployment -n "{{ .Release.Namespace }}" "{{ .Release.Name }}-kueue-populator" -o jsonpath='{.status.readyReplicas}' | grep 1
-          echo "Kueue Deployments OK"
+      command: ["kubectl"]
+      args: [
+        "wait",
+        "--for=condition=Available",
+        "--timeout=60s",
+        "deployment/{{ .Release.Name }}-kueue-controller-manager",
+        "-n", "{{ .Release.Namespace }}"
+      ]
+    - name: check-kueue-populator
+      image: bitnami/kubectl:latest
+      command: ["kubectl"]
+      args: [
+        "wait",
+        "--for=condition=Available",
+        "--timeout=60s",
+        "deployment/{{ .Release.Name }}-kueue-populator",
+        "-n", "{{ .Release.Namespace }}"
+      ]
   restartPolicy: Never
