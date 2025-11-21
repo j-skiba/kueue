@@ -22,6 +22,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// UpdateFunc is a function that modifies an object in-place.
+// It returns a bool indicating whether an update was made, and an error if any occurred.
+type UpdateFunc func() (bool, error)
+
 // PatchOption defines a functional option for customizing PatchOptions.
 // It follows the functional options pattern, allowing callers to configure
 // patch behavior at call sites without directly manipulating PatchOptions.
@@ -72,14 +76,6 @@ func WithLoose() PatchOption {
 	}
 }
 
-func patchCommon(obj client.Object, update func() (client.Object, bool, error), patchFunc func(patch client.Patch) error, options ...PatchOption) error {
-	opts := DefaultPatchOptions()
-	for _, opt := range options {
-		opt(opts)
-	}
-	return updateAndPatch(obj, *opts, update, patchFunc)
-}
-
 // Patch applies an update to a Kubernetes object using a patch-based workflow.
 //
 // The function first computes the "original" and "modified" states of the object
@@ -94,10 +90,9 @@ func patchCommon(obj client.Object, update func() (client.Object, bool, error), 
 //
 // Example:
 //
-//	err := Patch(ctx, client, obj, func() (client.Object, bool, error) {
-//	    updated := obj.DeepCopyObject().(client.Object)
-//	    updated.SetLabels(map[string]string{"app": "demo"})
-//	    return updated, true, nil
+//	err := Patch(ctx, client, obj, func() (bool, error) {
+//	    obj.SetLabels(map[string]string{"app": "demo"})
+//	    return true, nil
 //	}, WithLoose())
 //	if err != nil {
 //	    log.Fatal(err)
@@ -107,7 +102,7 @@ func patchCommon(obj client.Object, update func() (client.Object, bool, error), 
 //   - By default, patches are generated in "strict" mode (Strict=true).
 //     This clears the ResourceVersion field in the original object to ensure
 //     it is always included in the generated patch.
-func Patch(ctx context.Context, c client.Client, obj client.Object, update func() (client.Object, bool, error), options ...PatchOption) error {
+func Patch(ctx context.Context, c client.Client, obj client.Object, update UpdateFunc, options ...PatchOption) error {
 	return patchCommon(obj, update, func(patch client.Patch) error {
 		return c.Patch(ctx, obj, patch)
 	}, options...)
@@ -129,11 +124,9 @@ func Patch(ctx context.Context, c client.Client, obj client.Object, update func(
 //
 // Example:
 //
-//	err := PatchStatus(ctx, client, obj, func() (client.Object, bool, error) {
-//	    updated := obj.DeepCopyObject().(client.Object)
-//	    myObj := updated.(*myv1.MyCustomResource)
-//	    myObj.Status.Phase = "Ready"
-//	    return updated, true, nil
+//	err := PatchStatus(ctx, client, obj, func() (bool, error) {
+//	    obj.Status.Phase = "Ready"
+//	    return true, nil
 //	})
 //	if err != nil {
 //	    log.Fatal(err)
@@ -143,10 +136,35 @@ func Patch(ctx context.Context, c client.Client, obj client.Object, update func(
 //   - By default, patches are generated in "strict" mode (Strict=true).
 //     This clears the ResourceVersion field in the original object to ensure
 //     it is always included in the generated patch.
-func PatchStatus(ctx context.Context, c client.Client, obj client.Object, update func() (client.Object, bool, error), options ...PatchOption) error {
+func PatchStatus(ctx context.Context, c client.Client, obj client.Object, update UpdateFunc, options ...PatchOption) error {
 	return patchCommon(obj, update, func(patch client.Patch) error {
 		return c.Status().Patch(ctx, obj, patch)
 	}, options...)
+}
+
+// patchFunc is a function that applies the given client.Patch to a resource.
+// It returns an error if the patch could not be applied.
+type patchFunc func(patch client.Patch) error
+
+func patchCommon(obj client.Object, updateFn UpdateFunc, patchFn patchFunc, options ...PatchOption) error {
+	opts := DefaultPatchOptions()
+	for _, opt := range options {
+		opt(opts)
+	}
+	return executePatch(obj, opts, updateFn, patchFn)
+}
+
+func executePatch(obj client.Object, options *PatchOptions, update UpdateFunc, patchFn patchFunc) error {
+	objOriginal := getOriginalObject(obj, options)
+	updated, err := update()
+	if err != nil || !updated {
+		return err
+	}
+	patch, err := createPatch(objOriginal, obj)
+	if err != nil {
+		return err
+	}
+	return patchFn(patch)
 }
 
 // getOriginalObject creates and returns a deep copy of the given client.Object.
@@ -156,27 +174,14 @@ func PatchStatus(ctx context.Context, c client.Client, obj client.Object, update
 // If PatchOptions.Strict is set to true, the function clears the
 // ResourceVersion field on the copied object. This ensures that the
 // ResourceVersion is included in the generated patch, enforcing stricter
-// version handling during patch application.
-func getOriginalObject(obj client.Object, options PatchOptions) client.Object {
+// version handling during the patch application.
+func getOriginalObject(obj client.Object, options *PatchOptions) client.Object {
 	objOriginal := obj.DeepCopyObject().(client.Object)
 	if options.Strict {
 		// Clearing ResourceVersion from the original object to make sure it is included in the generated patch.
 		objOriginal.SetResourceVersion("")
 	}
 	return objOriginal
-}
-
-func updateAndPatch(obj client.Object, options PatchOptions, update func() (client.Object, bool, error), patchFn func(client.Patch) error) error {
-	objOriginal := getOriginalObject(obj, options)
-	objPatched, updated, err := update()
-	if err != nil || !updated {
-		return err
-	}
-	patch, err := createPatch(objOriginal, objPatched)
-	if err != nil {
-		return err
-	}
-	return patchFn(patch)
 }
 
 func createPatch(before, after client.Object) (client.Patch, error) {

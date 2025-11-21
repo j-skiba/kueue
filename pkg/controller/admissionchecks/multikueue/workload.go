@@ -327,7 +327,7 @@ func (w *wlReconciler) reconcileGroup(ctx context.Context, group *wlGroup) (reco
 	// - Workload doesn't have quota reservation as a result of scale-up, i.e., scaling-up in progress.
 	if group.IsElasticWorkload() &&
 		((group.IsFinished() && workloadslicing.IsReplaced(group.local.Status)) ||
-			(!workload.HasQuotaReservation(group.local) && workloadslicing.ScaledUp(group.local))) {
+			(!group.IsFinished() && !workload.HasQuotaReservation(group.local) && workloadslicing.ScaledUp(group.local))) {
 		return reconcile.Result{}, nil
 	}
 
@@ -358,7 +358,7 @@ func (w *wlReconciler) reconcileGroup(ctx context.Context, group *wlGroup) (reco
 		}
 
 		// finish workload and copy the status to the local one
-		return reconcile.Result{}, workload.Finish(ctx, w.client, group.local, remoteFinishedCond.Reason, remoteFinishedCond.Message, kueue.MultiKueueControllerName, w.clock)
+		return reconcile.Result{}, workload.Finish(ctx, w.client, group.local, remoteFinishedCond.Reason, remoteFinishedCond.Message, w.clock)
 	}
 
 	// 2. delete all workloads that are out of sync (other than scaled-down elastic workloads)
@@ -443,9 +443,9 @@ func (w *wlReconciler) nominateAndSynchronizeWorkers(ctx context.Context, group 
 			nominatedWorkers = append(nominatedWorkers, workerName)
 		}
 		if group.local.Status.ClusterName == nil && !equality.Semantic.DeepEqual(group.local.Status.NominatedClusterNames, nominatedWorkers) {
-			if err := workload.PatchAdmissionStatus(ctx, w.client, group.local, w.clock, func() (*kueue.Workload, bool, error) {
+			if err := workload.PatchAdmissionStatus(ctx, w.client, group.local, w.clock, func() (bool, error) {
 				group.local.Status.NominatedClusterNames = nominatedWorkers
-				return group.local, true, nil
+				return true, nil
 			}); err != nil {
 				log.V(2).Error(err, "Failed to patch nominated clusters", "workload", klog.KObj(group.local))
 				return reconcile.Result{}, err
@@ -646,7 +646,7 @@ func (w *wlReconciler) syncReservingRemoteState(ctx context.Context, group *wlGr
 		return nil
 	}
 
-	if err := workload.PatchAdmissionStatus(ctx, w.client, group.local, w.clock, func() (*kueue.Workload, bool, error) {
+	if err := workload.PatchAdmissionStatus(ctx, w.client, group.local, w.clock, func() (bool, error) {
 		if needsTopologyUpdate {
 			updateDelayedTopologyRequest(group.local, group.remotes[reservingRemote])
 		}
@@ -668,7 +668,7 @@ func (w *wlReconciler) syncReservingRemoteState(ctx context.Context, group *wlGr
 			group.local.Status.NominatedClusterNames = nil
 		}
 
-		return group.local, true, nil
+		return true, nil
 	}); err != nil {
 		log.V(2).Error(err, "Failed to patch workload", "workload", klog.KObj(group.local))
 		return err

@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -210,9 +209,7 @@ func WithCache(c *schdcache.Cache) Option {
 }
 
 // WithClock sets the clock of the reconciler.
-// It default to system's clock and should only
-// be changed in testing.
-func WithClock(_ testing.TB, c clock.Clock) Option {
+func WithClock(c clock.Clock) Option {
 	return func(o *Options) {
 		o.Clock = c
 	}
@@ -363,27 +360,6 @@ func (r *JobReconciler) ReconcileGenericJob(ctx context.Context, req ctrl.Reques
 		}
 	}
 
-	// if this is a non-toplevel job, suspend the job if its ancestor's workload is not found or not admitted.
-	if !isTopLevelJob {
-		_, _, finished := job.Finished(ctx)
-		if !finished && !job.IsSuspended() {
-			if ancestorWorkload, err := r.getWorkloadForObject(ctx, ancestorJob); err != nil {
-				log.Error(err, "couldn't get an ancestor job workload")
-				return ctrl.Result{}, err
-			} else if ancestorWorkload == nil || !workload.IsAdmitted(ancestorWorkload) {
-				if err := clientutil.Patch(ctx, r.client, object, func() (client.Object, bool, error) {
-					job.Suspend()
-					return object, true, nil
-				}); err != nil {
-					log.Error(err, "suspending child job failed")
-					return ctrl.Result{}, err
-				}
-				r.record.Event(object, corev1.EventTypeNormal, ReasonSuspended, "Kueue managed child job suspended")
-			}
-		}
-		return ctrl.Result{}, nil
-	}
-
 	// when manageJobsWithoutQueueName is enabled, standalone jobs without queue names
 	// are still not managed if they don't match the namespace selector.
 	if r.manageJobsWithoutQueueName && QueueName(job) == "" {
@@ -397,6 +373,27 @@ func (r *JobReconciler) ReconcileGenericJob(ctx context.Context, req ctrl.Reques
 			log.V(3).Info("namespace selector does not match, ignoring the job", "namespace", ns.Name)
 			return ctrl.Result{}, nil
 		}
+	}
+
+	// if this is a non-toplevel job, suspend the job if its ancestor's workload is not found or not admitted.
+	if !isTopLevelJob {
+		_, _, finished := job.Finished(ctx)
+		if !finished && !job.IsSuspended() {
+			if ancestorWorkload, err := r.getWorkloadForObject(ctx, ancestorJob); err != nil {
+				log.Error(err, "couldn't get an ancestor job workload")
+				return ctrl.Result{}, err
+			} else if ancestorWorkload == nil || !workload.IsAdmitted(ancestorWorkload) {
+				if err := clientutil.Patch(ctx, r.client, object, func() (bool, error) {
+					job.Suspend()
+					return true, nil
+				}); err != nil {
+					log.Error(err, "suspending child job failed")
+					return ctrl.Result{}, err
+				}
+				r.record.Event(object, corev1.EventTypeNormal, ReasonSuspended, "Kueue managed child job suspended")
+			}
+		}
+		return ctrl.Result{}, nil
 	}
 
 	log.V(2).Info("Reconciling Job")
@@ -458,7 +455,7 @@ func (r *JobReconciler) ReconcileGenericJob(ctx context.Context, req ctrl.Reques
 			if !success {
 				reason = kueue.WorkloadFinishedReasonFailed
 			}
-			err := workload.Finish(ctx, r.client, wl, reason, message, constants.JobControllerName, r.clock)
+			err := workload.Finish(ctx, r.client, wl, reason, message, r.clock)
 			if err != nil && !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, err
 			}
@@ -554,14 +551,14 @@ func (r *JobReconciler) ReconcileGenericJob(ctx context.Context, req ctrl.Reques
 		if workload.HasQuotaReservation(wl) {
 			if !job.IsActive() {
 				log.V(6).Info("The job is no longer active, clear the workloads admission")
-				err := workload.PatchAdmissionStatus(ctx, r.client, wl, r.clock, func() (*kueue.Workload, bool, error) {
+				err := workload.PatchAdmissionStatus(ctx, r.client, wl, r.clock, func() (bool, error) {
 					// The requeued condition status set to true only on EvictedByPreemption
 					setRequeued := (evCond.Reason == kueue.WorkloadEvictedByPreemption) || (evCond.Reason == kueue.WorkloadEvictedDueToNodeFailures)
 					updated := workload.SetRequeuedCondition(wl, evCond.Reason, evCond.Message, setRequeued)
 					if workload.UnsetQuotaReservationWithCondition(wl, "Pending", evCond.Message, r.clock.Now()) {
 						updated = true
 					}
-					return wl, updated, nil
+					return updated, nil
 				})
 				if err != nil {
 					return ctrl.Result{}, fmt.Errorf("clearing admission: %w", err)
@@ -585,7 +582,7 @@ func (r *JobReconciler) ReconcileGenericJob(ctx context.Context, req ctrl.Reques
 				log.Error(err, "Unsuspending job")
 				if podset.IsPermanent(err) {
 					// Mark the workload as finished with failure since the is no point to retry.
-					errUpdateStatus := workload.Finish(ctx, r.client, wl, FailedToStartFinishedReason, err.Error(), constants.JobControllerName, r.clock)
+					errUpdateStatus := workload.Finish(ctx, r.client, wl, FailedToStartFinishedReason, err.Error(), r.clock)
 					if errUpdateStatus != nil {
 						log.Error(errUpdateStatus, "Updating workload status, on start failure", "err", err)
 					}
@@ -1024,7 +1021,7 @@ func (r *JobReconciler) ensurePrebuiltWorkloadInSync(ctx context.Context, wl *ku
 		}
 		// mark the workload as finished
 		msg := "The prebuilt workload is out of sync with its user job"
-		return false, workload.Finish(ctx, r.client, wl, kueue.WorkloadFinishedReasonOutOfSync, msg, constants.JobControllerName, r.clock)
+		return false, workload.Finish(ctx, r.client, wl, kueue.WorkloadFinishedReasonOutOfSync, msg, r.clock)
 	}
 	return true, nil
 }
@@ -1126,8 +1123,8 @@ func (r *JobReconciler) startJob(ctx context.Context, job GenericJob, object cli
 			return err
 		}
 	} else {
-		if err := clientutil.Patch(ctx, r.client, object, func() (client.Object, bool, error) {
-			return object, true, job.RunWithPodSetsInfo(ctx, info)
+		if err := clientutil.Patch(ctx, r.client, object, func() (bool, error) {
+			return true, job.RunWithPodSetsInfo(ctx, info)
 		}); err != nil {
 			return err
 		}
@@ -1170,12 +1167,12 @@ func (r *JobReconciler) stopJob(ctx context.Context, job GenericJob, wl *kueue.W
 		return nil
 	}
 
-	if err := clientutil.Patch(ctx, r.client, object, func() (client.Object, bool, error) {
+	if err := clientutil.Patch(ctx, r.client, object, func() (bool, error) {
 		job.Suspend()
 		if info != nil {
 			job.RestorePodSetsInfo(info)
 		}
-		return object, true, nil
+		return true, nil
 	}); err != nil {
 		return err
 	}

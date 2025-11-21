@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -188,8 +189,7 @@ func (c *ClusterQueue) PushOrUpdate(wInfo *workload.Info) {
 	defer c.rwm.Unlock()
 	key := workload.Key(wInfo.Obj)
 	c.forgetInflightByKey(key)
-	oldInfo := c.inadmissibleWorkloads[key]
-	if oldInfo != nil {
+	if oldInfo := c.inadmissibleWorkload(key); oldInfo != nil {
 		// update in place if the workload was inadmissible and didn't change
 		// to potentially become admissible, unless the Eviction status changed
 		// which can affect the workloads order in the queue.
@@ -265,13 +265,19 @@ func (c *ClusterQueue) DeleteFromLocalQueue(log logr.Logger, q *LocalQueue) {
 	defer c.rwm.Unlock()
 	for _, w := range q.items {
 		key := workload.Key(w.Obj)
-		if wl := c.inadmissibleWorkloads[key]; wl != nil {
+		if c.inadmissibleWorkload(key) != nil {
 			delete(c.inadmissibleWorkloads, key)
 		}
 	}
 	for _, w := range q.items {
 		c.delete(log, w.Obj)
 	}
+}
+
+// inadmissibleWorkload retrieves a workload from inadmissibleWorkloads.
+// Returns the workload if it exists and is non-nil, otherwise returns nil.
+func (c *ClusterQueue) inadmissibleWorkload(key workload.Reference) *workload.Info {
+	return c.inadmissibleWorkloads[key]
 }
 
 // requeueIfNotPresent inserts a workload that cannot be admitted into
@@ -284,10 +290,12 @@ func (c *ClusterQueue) requeueIfNotPresent(wInfo *workload.Info, immediate bool)
 	defer c.rwm.Unlock()
 	key := workload.Key(wInfo.Obj)
 	c.forgetInflightByKey(key)
+
+	inadmissibleWl := c.inadmissibleWorkload(key)
+
 	if c.backoffWaitingTimeExpired(wInfo) &&
 		(immediate || c.queueInadmissibleCycle >= c.popCycle || wInfo.LastAssignment.PendingFlavors()) {
 		// If the workload was inadmissible, move it back into the queue.
-		inadmissibleWl := c.inadmissibleWorkloads[key]
 		if inadmissibleWl != nil {
 			wInfo = inadmissibleWl
 			delete(c.inadmissibleWorkloads, key)
@@ -295,11 +303,11 @@ func (c *ClusterQueue) requeueIfNotPresent(wInfo *workload.Info, immediate bool)
 		return c.heap.PushIfNotPresent(wInfo)
 	}
 
-	if c.inadmissibleWorkloads[key] != nil {
+	if inadmissibleWl != nil {
 		return false
 	}
 
-	if data := c.heap.GetByKey(key); data != nil {
+	if c.heap.GetByKey(key) != nil {
 		return false
 	}
 
@@ -560,8 +568,8 @@ func queueOrderingFunc(ctx context.Context, c client.Client, wo workload.Orderin
 			case errB != nil:
 				log.V(2).Error(errB, "Error determining LocalQueue usage")
 			default:
-				log.V(3).Info("Resource usage from LocalQueue", "LocalQueue", a.Obj.Spec.QueueName, "Usage", lqAUsage)
-				log.V(3).Info("Resource usage from LocalQueue", "LocalQueue", b.Obj.Spec.QueueName, "Usage", lqBUsage)
+				log.V(3).Info("Resource usage from LocalQueue", "localQueue", klog.KRef(a.Obj.Namespace, string(a.Obj.Spec.QueueName)), "usage", lqAUsage)
+				log.V(3).Info("Resource usage from LocalQueue", "localQueue", klog.KRef(b.Obj.Namespace, string(b.Obj.Spec.QueueName)), "usage", lqBUsage)
 				if lqAUsage != lqBUsage {
 					return lqAUsage < lqBUsage
 				}

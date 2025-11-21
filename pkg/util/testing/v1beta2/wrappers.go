@@ -294,15 +294,6 @@ func (w *WorkloadWrapper) ResourceRequests(rr ...kueue.PodSetRequest) *WorkloadW
 	return w
 }
 
-func (w *WorkloadWrapper) SetOrReplaceCondition(condition metav1.Condition) *WorkloadWrapper {
-	existingCondition := apimeta.FindStatusCondition(w.Status.Conditions, condition.Type)
-	if existingCondition != nil {
-		apimeta.RemoveStatusCondition(&w.Status.Conditions, condition.Type)
-	}
-	apimeta.SetStatusCondition(&w.Status.Conditions, condition)
-	return w
-}
-
 func (w *WorkloadWrapper) ReclaimablePods(rps ...kueue.ReclaimablePod) *WorkloadWrapper {
 	w.Status.ReclaimablePods = rps
 	return w
@@ -1441,9 +1432,17 @@ func (mkc *MultiKueueClusterWrapper) Obj() *kueue.MultiKueueCluster {
 }
 
 func (mkc *MultiKueueClusterWrapper) KubeConfig(locationType kueue.LocationType, location string) *MultiKueueClusterWrapper {
-	mkc.Spec.KubeConfig = kueue.KubeConfig{
+	mkc.Spec.KubeConfig = &kueue.KubeConfig{
 		Location:     location,
 		LocationType: locationType,
+	}
+	return mkc
+}
+
+func (mkc *MultiKueueClusterWrapper) ClusterProfile(name string, namespace string) *MultiKueueClusterWrapper {
+	mkc.Spec.ClusterProfile = &kueue.ClusterProfileReference{
+		Name:      name,
+		Namespace: namespace,
 	}
 	return mkc
 }
