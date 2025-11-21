@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ .Release.Name }}-populator-resources-test"
+  namespace: "{{ .Release.Namespace }}"
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: "{{ .Release.Name }}-test-sa"
+  containers:
+    - name: kubectl
+      image: bitnami/kubectl:latest
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -ex
+          echo "Checking for setup resources..."
+          kubectl get clusterqueue {{ .Values.kueuePopulator.config.clusterQueueName }}
+          kubectl get resourceflavor tas-gpu-default
+
+          echo "Checking LocalQueue in default namespace..."
+          kubectl get localqueue -n default {{ .Values.kueuePopulator.config.localQueueName }}
+
+          echo "Ensuring LocalQueue NOT in kube-system..."
+          if kubectl get localqueue -n kube-system {{ .Values.kueuePopulator.config.localQueueName }}; then exit 1; fi
+
+          echo "Ensuring LocalQueue NOT in {{ .Release.Namespace }}..."
+          if kubectl get localqueue -n {{ .Release.Namespace }} {{ .Values.kueuePopulator.config.localQueueName }}; then exit 1; fi
+
+          echo "Prepopulator resources OK"
+  restartPolicy: Never
