@@ -1,5 +1,5 @@
 apiVersion: v2
-name: kueue-stack
+name: kueue-prepopulator
 description: A Helm chart for AutoKueue (Alpha) setup including Kueue, LocalQueue Creator, and default resources.
 type: application
 version: 0.1.0

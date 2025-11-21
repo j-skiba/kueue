@@ -1,5 +1,3 @@
-enableAutoKueue: true
-
 # Configuration for the AutoKueue setup hook
 autoKueue:
   clusterQueueName: "cluster-queue"
@@ -15,12 +13,12 @@ autoKueue:
   #   cloud.google.com/gke-nodepool: "default-pool"
   nodeLabel: {}
 
-# Configuration for the LocalQueue Creator component
-localQueueCreator:
+# Configuration for the Kueue Prepopulator component
+kueuePrepopulator:
   enabled: true
   image:
-    repository: us-central1-docker.pkg.dev/jakubskiba-gke-dev/my-images/localqueue-creator
-    tag: v1
+    repository: us-central1-docker.pkg.dev/k8s-staging-images/kueue/kueue-prepopulator
+    tag: latest
     pullPolicy: IfNotPresent
   
   # Optional: imagePullSecrets
