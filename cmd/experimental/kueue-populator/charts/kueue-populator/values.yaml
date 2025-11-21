@@ -8,11 +8,6 @@ kueuePopulator:
     # Example: latest
     tag: null
     pullPolicy: IfNotPresent
-
-  kubectl:
-    image:
-      tag: v1.33.0
-      pullPolicy: IfNotPresent
   
   # Optional: imagePullSecrets
   # imagePullSecrets:

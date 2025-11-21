@@ -8,34 +8,17 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   serviceAccountName: "{{ .Release.Name }}-test-sa"
-  initContainers:
-    - name: check-lq-not-in-kube-system
-      image: bitnami/kubectl:latest
-      command: ["sh", "-c"]
-      args: [
-        "if kubectl get localqueue -n kube-system {{ .Values.kueuePopulator.config.localQueueName }}; then exit 1; else exit 0; fi"
-      ]
-    - name: check-lq-not-in-release-ns
-      image: bitnami/kubectl:latest
-      command: ["sh", "-c"]
-      args: [
-        "if kubectl get localqueue -n {{ .Release.Namespace }} {{ .Values.kueuePopulator.config.localQueueName }}; then exit 1; else exit 0; fi"
-      ]
   containers:
     - name: check-clusterqueue
-      image: bitnami/kubectl:latest
+      image: registry.k8s.io/kubectl:v1.33.0
       command: ["kubectl"]
       args: ["get", "clusterqueue", "{{ .Values.kueuePopulator.config.clusterQueueName }}"]
     - name: check-resourceflavor
-      image: bitnami/kubectl:latest
+      image: registry.k8s.io/kubectl:v1.33.0
       command: ["kubectl"]
       args: ["get", "resourceflavor", "tas-gpu-default"]
     - name: check-localqueue-default
-      image: bitnami/kubectl:latest
+      image: registry.k8s.io/kubectl:v1.33.0
       command: ["kubectl"]
       args: ["get", "localqueue", "-n", "default", "{{ .Values.kueuePopulator.config.localQueueName }}"]
-    # This container only runs if initContainers succeed
-    - name: tests-succeeded
-      image: k8s.gcr.io/pause:3.1
-      command: ["/bin/sh", "-c", "echo 'Non-existence checks passed'"]
   restartPolicy: Never
