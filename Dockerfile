@@ -1,4 +1,6 @@
 # defaulted ARGs need to be declared first
+jsdklfsdjklfjsdklfjdsklfjdkslfjskdljf
+
 ARG BUILDER_IMAGE=golang:1.25
 ARG BASE_IMAGE=gcr.io/distroless/static:nonroot
 # compilation stage for the manager binary
