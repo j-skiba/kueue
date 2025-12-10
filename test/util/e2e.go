@@ -36,9 +36,11 @@ import (
 	"github.com/onsi/gomega"
 	awv1beta2 "github.com/project-codeflare/appwrapper/api/v1beta2"
 	rayv1 "github.com/ray-project/kuberay/ray-operator/apis/ray/v1"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -267,6 +269,10 @@ func waitForDeploymentAvailability(ctx context.Context, k8sClient client.Client,
 	ginkgo.By(fmt.Sprintf("Waiting for availability of deployment: %q", key))
 	gomega.EventuallyWithOffset(2, func(g gomega.Gomega) {
 		g.Expect(k8sClient.Get(ctx, key, deployment)).To(gomega.Succeed())
+		g.Expect(deployment.Status.ObservedGeneration).To(gomega.Equal(deployment.Generation))
+		g.Expect(deployment.Status.Replicas).To(gomega.Equal(*deployment.Spec.Replicas))
+		g.Expect(deployment.Status.UpdatedReplicas).To(gomega.Equal(*deployment.Spec.Replicas))
+		g.Expect(deployment.Status.AvailableReplicas).To(gomega.Equal(*deployment.Spec.Replicas))
 		g.Expect(deployment.Status.Conditions).To(gomega.ContainElement(gomega.BeComparableTo(
 			appsv1.DeploymentCondition{Type: appsv1.DeploymentAvailable, Status: corev1.ConditionTrue},
 			cmpopts.IgnoreFields(appsv1.DeploymentCondition{}, "Reason", "Message", "LastUpdateTime", "LastTransitionTime")),
@@ -303,6 +309,133 @@ func WaitForKueueAvailability(ctx context.Context, k8sClient client.Client) {
 	kcmKey := types.NamespacedName{Namespace: kueueNS, Name: "kueue-controller-manager"}
 	waitForDeploymentAvailability(ctx, k8sClient, kcmKey)
 	verifyNoControllerRestarts(ctx, k8sClient, kcmKey)
+	WaitForWebhookReady(ctx, k8sClient)
+}
+
+// WaitForWebhookReady waits for all webhook services to be ready
+func WaitForWebhookReady(ctx context.Context, k8sClient client.Client) {
+	ginkgo.By("Waiting for webhook service availability")
+
+	// Helper to collect unique services
+	services := make(map[types.NamespacedName]struct{})
+	addService := func(ns, name string) {
+		if ns != "" && name != "" {
+			services[types.NamespacedName{Namespace: ns, Name: name}] = struct{}{}
+		}
+	}
+
+	// 1. Discover services from MutatingWebhookConfigurations
+	mwcs := &admissionregistrationv1.MutatingWebhookConfigurationList{}
+	// Use explicit Expect to handle errors, but we need to ensure k8sClient is valid.
+	// We wrap in Eventually or just Expect depending on if we think API is flaky. List should be fine.
+	gomega.Expect(k8sClient.List(ctx, mwcs)).To(gomega.Succeed())
+	for _, mwc := range mwcs.Items {
+		for _, w := range mwc.Webhooks {
+			if w.ClientConfig.Service != nil {
+				addService(w.ClientConfig.Service.Namespace, w.ClientConfig.Service.Name)
+			}
+		}
+	}
+
+	// 2. Discover services from ValidatingWebhookConfigurations
+	vwcs := &admissionregistrationv1.ValidatingWebhookConfigurationList{}
+	gomega.Expect(k8sClient.List(ctx, vwcs)).To(gomega.Succeed())
+	for _, vwc := range vwcs.Items {
+		for _, w := range vwc.Webhooks {
+			if w.ClientConfig.Service != nil {
+				addService(w.ClientConfig.Service.Namespace, w.ClientConfig.Service.Name)
+			}
+		}
+	}
+
+	// 3. Discover services from CustomResourceDefinitions (Conversion Webhooks)
+	crds := &apiextensionsv1.CustomResourceDefinitionList{}
+	gomega.Expect(k8sClient.List(ctx, crds)).To(gomega.Succeed())
+	for _, crd := range crds.Items {
+		if crd.Spec.Conversion != nil && crd.Spec.Conversion.Strategy == apiextensionsv1.WebhookConverter && crd.Spec.Conversion.Webhook != nil {
+			if crd.Spec.Conversion.Webhook.ClientConfig != nil && crd.Spec.Conversion.Webhook.ClientConfig.Service != nil {
+				addService(crd.Spec.Conversion.Webhook.ClientConfig.Service.Namespace, crd.Spec.Conversion.Webhook.ClientConfig.Service.Name)
+			}
+		}
+	}
+
+	// 4. Verify that all expected job webhooks are present
+	expectedWebhooks := map[string]bool{
+		"mdeployment.kb.io":       true,
+		"vdeployment.kb.io":       true,
+		"mpytorchjob.kb.io":       true,
+		"vpytorchjob.kb.io":       true,
+		"mxgboostjob.kb.io":       true,
+		"vxgboostjob.kb.io":       true,
+		"mpaddlejob.kb.io":        true,
+		"vpaddlejob.kb.io":        true,
+		"mjaxjob.kb.io":           true,
+		"vjaxjob.kb.io":           true,
+		"mtfjob.kb.io":            true,
+		"vtfjob.kb.io":            true,
+		"mmpijob.kb.io":           true,
+		"vmpijob.kb.io":           true,
+		"mjob.kb.io":              true,
+		"vjob.kb.io":              true,
+		"mleaderworkerset.kb.io":  true,
+		"vleaderworkerset.kb.io":  true,
+		"mjobset.kb.io":           true,
+		"vjobset.kb.io":           true,
+		"mtrainjob.kb.io":         true,
+		"vtrainjob.kb.io":         true,
+		"mappwrapper.kb.io":       true,
+		"vappwrapper.kb.io":       true,
+		"mrayjob.kb.io":           true,
+		"vrayjob.kb.io":           true,
+		"mraycluster.kb.io":       true,
+		"vraycluster.kb.io":       true,
+		"mpod.kb.io":              true,
+		"vpod.kb.io":              true,
+		"mstatefulset.kb.io":      true,
+		"vstatefulset.kb.io":      true,
+	}
+
+	foundWebhooks := make(map[string]bool)
+	for _, mwc := range mwcs.Items {
+		for _, w := range mwc.Webhooks {
+			foundWebhooks[w.Name] = true
+		}
+	}
+	for _, vwc := range vwcs.Items {
+		for _, w := range vwc.Webhooks {
+			foundWebhooks[w.Name] = true
+		}
+	}
+
+	for expected := range expectedWebhooks {
+		gomega.Expect(foundWebhooks).To(gomega.HaveKey(expected), "Expected webhook %s to be present", expected)
+	}
+
+	// 5. Wait for all discovered services to have ready endpoints
+	for svcMsg := range services {
+		svc := svcMsg // capture for closure
+		gomega.Eventually(func(g gomega.Gomega) {
+			// Check EndpointSlices for the service
+			endpoints := &discoveryv1.EndpointSliceList{}
+			g.Expect(k8sClient.List(ctx, endpoints, client.InNamespace(svc.Namespace), client.MatchingLabels{
+				discoveryv1.LabelServiceName: svc.Name,
+			})).To(gomega.Succeed())
+
+			ready := false
+			for _, slice := range endpoints.Items {
+				for _, ep := range slice.Endpoints {
+					if ep.Conditions.Ready != nil && *ep.Conditions.Ready {
+						ready = true
+						break
+					}
+				}
+				if ready {
+					break
+				}
+			}
+			g.Expect(ready).To(gomega.BeTrue(), "Service %s/%s has no ready endpoints", svc.Namespace, svc.Name)
+		}, StartUpTimeout, Interval).Should(gomega.Succeed(), "Timed out waiting for webhook service %s/%s", svc.Namespace, svc.Name)
+	}
 }
 
 func WaitForAppWrapperAvailability(ctx context.Context, k8sClient client.Client) {
@@ -504,34 +637,52 @@ func CreateNamespaceFromObjectWithLog(ctx context.Context, k8sClient client.Clie
 	return ns
 }
 
-func GetKueueMetrics(ctx context.Context, cfg *rest.Config, restClient *rest.RESTClient, curlPodName, curlContainerName string) (string, error) {
+func GetKueueMetrics(ctx context.Context, k8sClient client.Client, cfg *rest.Config, restClient *rest.RESTClient, curlPodName, curlContainerName string) (string, error) {
 	kueueNS := GetKueueNamespace()
-	metricsOutput, _, err := KExecute(ctx, cfg, restClient, kueueNS, curlPodName, curlContainerName, []string{
-		"/bin/sh", "-c",
-		fmt.Sprintf(
-			"curl -s -k -H \"Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)\" https://%s.%s.svc.cluster.local:8443/metrics",
-			defaultMetricsServiceName, kueueNS,
-		),
-	})
-	return string(metricsOutput), err
+	// Scrape metrics from all controller manager pods to ensure we get metrics regardless of who is leader or how requests are routed
+	pods := &corev1.PodList{}
+	if err := k8sClient.List(ctx, pods, client.InNamespace(kueueNS), client.MatchingLabels{"control-plane": "controller-manager"}); err != nil {
+		return "", err
+	}
+
+	if len(pods.Items) == 0 {
+		return "", fmt.Errorf("no controller manager pods found in namespace %s", kueueNS)
+	}
+
+	var allMetrics strings.Builder
+	for _, pod := range pods.Items {
+		metricsOutput, stderr, err := KExecute(ctx, cfg, restClient, kueueNS, curlPodName, curlContainerName, []string{
+			"/bin/sh", "-c",
+			fmt.Sprintf(
+				"curl -v -k -H \"Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)\" https://%s:8443/metrics",
+				pod.Status.PodIP,
+			),
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to curl pod %s: %w, stderr: %s", pod.Name, err, string(stderr))
+		}
+		allMetrics.WriteString(string(metricsOutput))
+		allMetrics.WriteString("\n")
+	}
+	return allMetrics.String(), nil
 }
 
-func ExpectMetricsToBeAvailable(ctx context.Context, cfg *rest.Config, restClient *rest.RESTClient, curlPodName, curlContainerName string, metrics [][]string) {
+func ExpectMetricsToBeAvailable(ctx context.Context, k8sClient client.Client, cfg *rest.Config, restClient *rest.RESTClient, curlPodName, curlContainerName string, metrics [][]string) {
 	ginkgo.GinkgoHelper()
 	gomega.Eventually(func(g gomega.Gomega) {
-		metricsOutput, err := GetKueueMetrics(ctx, cfg, restClient, curlPodName, curlContainerName)
+		metricsOutput, err := GetKueueMetrics(ctx, k8sClient, cfg, restClient, curlPodName, curlContainerName)
 		g.Expect(err).NotTo(gomega.HaveOccurred())
 		g.Expect(metricsOutput).Should(utiltesting.ContainMetrics(metrics))
-	}, Timeout).Should(gomega.Succeed())
+	}, LongTimeout, Interval).Should(gomega.Succeed())
 }
 
-func ExpectMetricsNotToBeAvailable(ctx context.Context, cfg *rest.Config, restClient *rest.RESTClient, curlPodName, curlContainerName string, metrics [][]string) {
+func ExpectMetricsNotToBeAvailable(ctx context.Context, k8sClient client.Client, cfg *rest.Config, restClient *rest.RESTClient, curlPodName, curlContainerName string, metrics [][]string) {
 	ginkgo.GinkgoHelper()
 	gomega.Eventually(func(g gomega.Gomega) {
-		metricsOutput, err := GetKueueMetrics(ctx, cfg, restClient, curlPodName, curlContainerName)
+		metricsOutput, err := GetKueueMetrics(ctx, k8sClient, cfg, restClient, curlPodName, curlContainerName)
 		g.Expect(err).NotTo(gomega.HaveOccurred())
 		g.Expect(metricsOutput).Should(utiltesting.ExcludeMetrics(metrics))
-	}, Timeout).Should(gomega.Succeed())
+	}, LongTimeout, Interval).Should(gomega.Succeed())
 }
 
 func WaitForPodRunning(ctx context.Context, k8sClient client.Client, pod *corev1.Pod) {

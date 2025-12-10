@@ -289,6 +289,7 @@ function cluster_kueue_deploy {
     else
         build_and_apply_kueue_manifests "$1" "${ROOT_DIR}/test/e2e/config/default"
     fi
+    kubectl -n kueue-system wait --for=condition=available deployment/kueue-controller-manager --timeout=5m
 }
 
 # $1 kubeconfig
@@ -367,7 +368,7 @@ function install_kuberay {
     cluster_kind_load_image "${1}" "${KUBERAY_RAY_IMAGE}"
     cluster_kind_load_image "${1}" "${KUBERAY_IMAGE}"
     # create used instead of apply - https://github.com/ray-project/kuberay/issues/504
-    kubectl create --kubeconfig="$2" -k "${KUBERAY_MANIFEST}"
+    kubectl apply --kubeconfig="$2" --server-side --force-conflicts -k "${KUBERAY_MANIFEST}"
 }
 
 # $1 cluster name

@@ -19,6 +19,7 @@ package leaderworkerset
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -44,6 +45,7 @@ var (
 	baseCmpOpts = cmp.Options{
 		cmpopts.EquateEmpty(),
 		cmpopts.IgnoreFields(metav1.ObjectMeta{}, "ResourceVersion"),
+		cmpopts.IgnoreFields(metav1.ObjectMeta{}, "DeletionTimestamp"),
 	}
 )
 
@@ -550,7 +552,7 @@ func TestReconciler(t *testing.T) {
 			},
 			enableTopologyAwareScheduling: false,
 		},
-		"should delete LeaderWorkerSet ownerReference from the redundant prebuilt workload": {
+		"should delete the redundant prebuilt workload": {
 			leaderWorkerSet:     leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
 			wantLeaderWorkerSet: leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
 			workloads: []kueue.Workload{
@@ -614,7 +616,9 @@ func TestReconciler(t *testing.T) {
 					Priority(0).
 					Obj(),
 				*utiltestingapi.MakeWorkload(GetWorkloadName(types.UID(testUID), testLWS, "1"), testNS).
+					OwnerReference(gvk, testLWS, testUID).
 					OwnerReference(corev1.SchemeGroupVersion.WithKind("Pod"), "test-pod2", "test-pod2-uid").
+					DeletionTimestamp(time.Now()).
 					Annotation(podconstants.IsGroupWorkloadAnnotationKey, podconstants.IsGroupWorkloadAnnotationValue).
 					Finalizers(kueue.ResourceInUseFinalizerName).
 					PodSets(

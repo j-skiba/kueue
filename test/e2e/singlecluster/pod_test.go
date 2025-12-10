@@ -41,13 +41,15 @@ import (
 
 var _ = ginkgo.Describe("Pod groups", func() {
 	var (
-		ns         *corev1.Namespace
-		onDemandRF *kueue.ResourceFlavor
+		ns             *corev1.Namespace
+		onDemandRF     *kueue.ResourceFlavor
+		flavorOnDemand string
 	)
 
 	ginkgo.BeforeEach(func() {
 		ns = util.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "pod-e2e-")
-		onDemandRF = utiltestingapi.MakeResourceFlavor("on-demand").NodeLabel("instance-type", "on-demand").Obj()
+		flavorOnDemand = "on-demand-" + ns.Name
+		onDemandRF = utiltestingapi.MakeResourceFlavor(flavorOnDemand).NodeLabel("instance-type", "on-demand").Obj()
 		util.MustCreate(ctx, k8sClient, onDemandRF)
 	})
 	ginkgo.AfterEach(func() {
@@ -58,14 +60,16 @@ var _ = ginkgo.Describe("Pod groups", func() {
 
 	ginkgo.When("Single CQ", func() {
 		var (
-			cq *kueue.ClusterQueue
-			lq *kueue.LocalQueue
+			cq               *kueue.ClusterQueue
+			lq               *kueue.LocalQueue
+			clusterQueueName string
 		)
 
 		ginkgo.BeforeEach(func() {
-			cq = utiltestingapi.MakeClusterQueue("cq").
+			clusterQueueName = "cq-" + ns.Name
+			cq = utiltestingapi.MakeClusterQueue(clusterQueueName).
 				ResourceGroup(
-					*utiltestingapi.MakeFlavorQuotas("on-demand").Resource(corev1.ResourceCPU, "5").Obj(),
+					*utiltestingapi.MakeFlavorQuotas(flavorOnDemand).Resource(corev1.ResourceCPU, "5").Obj(),
 				).
 				Preemption(kueue.ClusterQueuePreemption{
 					WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
@@ -422,7 +426,7 @@ var _ = ginkgo.Describe("Pod groups", func() {
 				eventWatcher.Stop()
 			})
 
-			highPriorityClass := utiltesting.MakePriorityClass("high").PriorityValue(100).Obj()
+			highPriorityClass := utiltesting.MakePriorityClass("high-" + ns.Name).PriorityValue(100).Obj()
 			util.MustCreate(ctx, k8sClient, highPriorityClass)
 			ginkgo.DeferCleanup(func() {
 				gomega.Expect(k8sClient.Delete(ctx, highPriorityClass)).To(gomega.Succeed())
@@ -456,7 +460,7 @@ var _ = ginkgo.Describe("Pod groups", func() {
 			highPriorityGroup := podtesting.MakePod("high-priority-group", ns.Name).
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				Queue(lq.Name).
-				PriorityClass("high").
+				PriorityClass(highPriorityClass.Name).
 				RequestAndLimit(corev1.ResourceCPU, "1").
 				TerminationGracePeriod(1).
 				MakeGroup(2)

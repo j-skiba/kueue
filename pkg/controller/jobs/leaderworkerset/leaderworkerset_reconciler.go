@@ -124,7 +124,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	eg.Go(func() error {
 		return parallelize.Until(ctx, len(toFinalize), func(i int) error {
-			return r.removeOwnerReference(ctx, lws, toFinalize[i])
+			return r.deleteWorkload(ctx, toFinalize[i])
 		})
 	})
 
@@ -254,12 +254,8 @@ func podSets(lws *leaderworkersetv1.LeaderWorkerSet) ([]kueue.PodSet, error) {
 	return podSets, nil
 }
 
-func (r *Reconciler) removeOwnerReference(ctx context.Context, lws *leaderworkersetv1.LeaderWorkerSet, wl *kueue.Workload) error {
-	err := controllerutil.RemoveOwnerReference(lws, wl, r.client.Scheme())
-	if err != nil {
-		return err
-	}
-	return r.client.Update(ctx, wl)
+func (r *Reconciler) deleteWorkload(ctx context.Context, wl *kueue.Workload) error {
+	return client.IgnoreNotFound(r.client.Delete(ctx, wl))
 }
 
 var _ predicate.Predicate = (*Reconciler)(nil)
