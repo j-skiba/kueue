@@ -90,7 +90,7 @@ func (j *JobSetWrapper) ReplicatedJobs(replicatedJobs ...ReplicatedJobRequiremen
 			spec.TerminationGracePeriodSeconds = ptr.To[int64](0)
 			spec.Containers = []corev1.Container{
 				{
-					Name:  "c",
+					Name:  "node",
 					Image: req.Image,
 					Args:  req.Args,
 				},

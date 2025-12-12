@@ -736,12 +736,14 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				Size(3).
 				Replicas(1).
-				RequestAndLimit(corev1.ResourceCPU, "200m").
+				RequestAndLimit(corev1.ResourceCPU, "1").
 				TerminationGracePeriod(0).
 				Queue(lq.Name).
 				WorkloadPriorityClass(lowPriorityWPC.Name).
 				Obj()
 			ginkgo.By("Create a low priority LeaderWorkerSet", func() {
+				req := lowPriorityLWS.Spec.LeaderWorkerTemplate.WorkerTemplate.Spec.Containers[0].Resources.Requests
+				ginkgo.GinkgoWriter.Printf("DEBUG: LowPriorityLWS CPU Request: %v\n", req.Cpu())
 				util.MustCreate(ctx, k8sClient, lowPriorityLWS)
 			})
 
@@ -775,7 +777,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				Size(3).
 				Replicas(1).
-				RequestAndLimit(corev1.ResourceCPU, "200m").
+				RequestAndLimit(corev1.ResourceCPU, "1").
 				TerminationGracePeriod(0).
 				Queue(lq.Name).
 				WorkloadPriorityClass(highPriorityWPC.Name).
@@ -834,7 +836,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				Size(3).
 				Replicas(1).
-				RequestAndLimit(corev1.ResourceCPU, "200m").
+				RequestAndLimit(corev1.ResourceCPU, "1").
 				TerminationGracePeriod(0).
 				Queue(lq.Name).
 				WorkloadPriorityClass(lowPriorityWPC.Name).
@@ -879,8 +881,8 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				Size(3).
 				Replicas(1).
-				RequestAndLimit(corev1.ResourceCPU, "200m").
-				TerminationGracePeriod(1).
+				RequestAndLimit(corev1.ResourceCPU, "1").
+				TerminationGracePeriod(0).
 				Queue(lq.Name).
 				WorkloadPriorityClass(lowPriorityWPC.Name).
 				Obj()
@@ -909,6 +911,14 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 
 			ginkgo.By("Checking the Workload priority is updated", func() {
 				util.ExpectWorkloadsWithWorkloadPriority(ctx, k8sClient, highPriorityWPC.Name, highPriorityWPC.Value, updatablePriorityWlLookupKey)
+			})
+
+			ginkgo.By("Await for the low-priority Workload to be preempted", func() {
+				createdLowPriorityWl := &kueue.Workload{}
+				gomega.Eventually(func(g gomega.Gomega) {
+					g.Expect(k8sClient.Get(ctx, lowPriorityWlLookupKey, createdLowPriorityWl)).To(gomega.Succeed())
+					g.Expect(createdLowPriorityWl.Status.Conditions).To(utiltesting.HaveConditionStatusTrue(kueue.WorkloadPreempted))
+				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("Await for the low-priority LeaderWorkerSet to be preempted", func() {
@@ -947,7 +957,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Size(3).
 				Replicas(1).
 				RequestAndLimit(corev1.ResourceCPU, "200m").
-				TerminationGracePeriod(1).
+				TerminationGracePeriod(0).
 				Queue(lq.Name).
 				Obj()
 

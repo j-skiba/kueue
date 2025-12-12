@@ -53,7 +53,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 			Queue("main").
 			Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 			RequestAndLimit(corev1.ResourceCPU, "100m").
-			RequestAndLimit(corev1.ResourceMemory, "200Mi").
+			RequestAndLimit(corev1.ResourceMemory, "20Mi").
 			Obj()
 		jobKey = client.ObjectKeyFromObject(sampleJob)
 	})
@@ -150,7 +150,8 @@ var _ = ginkgo.Describe("Kueue", func() {
 						Spec: batchv1.JobSpec{
 							Template: corev1.PodTemplateSpec{
 								Spec: corev1.PodSpec{
-									RestartPolicy: corev1.RestartPolicyNever,
+									RestartPolicy:                 corev1.RestartPolicyNever,
+									TerminationGracePeriodSeconds: ptr.To[int64](0),
 									Containers: []corev1.Container{
 										{
 											Name:    "c",
