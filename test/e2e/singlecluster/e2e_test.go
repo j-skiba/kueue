@@ -52,8 +52,8 @@ var _ = ginkgo.Describe("Kueue", func() {
 		sampleJob = testingjob.MakeJob("test-job", ns.Name).
 			Queue("main").
 			Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
-			RequestAndLimit(corev1.ResourceCPU, "1").
-			RequestAndLimit(corev1.ResourceMemory, "20Mi").
+			RequestAndLimit(corev1.ResourceCPU, "100m").
+			RequestAndLimit(corev1.ResourceMemory, "200Mi").
 			Obj()
 		jobKey = client.ObjectKeyFromObject(sampleJob)
 	})
@@ -125,7 +125,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 			gomega.Expect(util.DeleteAllJobsInNamespace(ctx, k8sClient, ns)).Should(gomega.Succeed())
 			// Force remove workloads to be sure that cluster queue can be removed.
 			gomega.Expect(util.DeleteWorkloadsInNamespace(ctx, k8sClient, ns)).Should(gomega.Succeed())
-			gomega.Expect(util.DeleteObject(ctx, k8sClient, localQueue)).Should(gomega.Succeed())
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, localQueue, true)
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue, true)
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, onDemandRF, true)
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, spotRF, true)

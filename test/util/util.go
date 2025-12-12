@@ -1000,8 +1000,12 @@ func ExpectWorkloadsFinalizedOrGone(ctx context.Context, k8sClient client.Client
 }
 
 func ExpectEventsForObjects(eventWatcher watch.Interface, objs sets.Set[types.NamespacedName], filter func(*corev1.Event) bool) {
+	ExpectEventsForObjectsWithTimeout(eventWatcher, objs, filter, Timeout)
+}
+
+func ExpectEventsForObjectsWithTimeout(eventWatcher watch.Interface, objs sets.Set[types.NamespacedName], filter func(*corev1.Event) bool, timeout time.Duration) {
 	gotObjs := sets.New[types.NamespacedName]()
-	timeoutCh := time.After(Timeout)
+	timeoutCh := time.After(timeout)
 readCh:
 	for !gotObjs.Equal(objs) {
 		select {
@@ -1009,6 +1013,12 @@ readCh:
 			gomega.ExpectWithOffset(1, ok).To(gomega.BeTrue())
 			event, ok := evt.Object.(*corev1.Event)
 			gomega.ExpectWithOffset(1, ok).To(gomega.BeTrue())
+			
+			// Debug log
+			if event.InvolvedObject.Kind == "Pod" {
+				ginkgo.By(fmt.Sprintf("Observed event: Reason=%s, Message=%q, Object=%s/%s", event.Reason, event.Message, event.InvolvedObject.Namespace, event.InvolvedObject.Name))
+			}
+
 			if filter(event) {
 				objKey := types.NamespacedName{Namespace: event.InvolvedObject.Namespace, Name: event.InvolvedObject.Name}
 				gotObjs.Insert(objKey)

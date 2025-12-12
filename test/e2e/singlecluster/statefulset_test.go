@@ -85,7 +85,7 @@ var _ = ginkgo.Describe("StatefulSet integration", func() {
 			statefulSet := statefulsettesting.MakeStatefulSet("sts", ns.Name).
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				RequestAndLimit(corev1.ResourceCPU, "200m").
-				TerminationGracePeriod(1).
+				TerminationGracePeriod(0).
 				Replicas(3).
 				Queue(lq.Name).
 				Obj()
@@ -105,7 +105,7 @@ var _ = ginkgo.Describe("StatefulSet integration", func() {
 				conflictingStatefulSet := statefulsettesting.MakeStatefulSet("sts-conflict", ns.Name).
 					Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 					RequestAndLimit(corev1.ResourceCPU, "200m").
-					TerminationGracePeriod(1).
+					TerminationGracePeriod(0).
 					Replicas(1).
 					Queue(lq.Name).
 					Obj()
@@ -143,7 +143,7 @@ var _ = ginkgo.Describe("StatefulSet integration", func() {
 			statefulSet := statefulsettesting.MakeStatefulSet("sts", ns.Name).
 				Image(util.GetAgnHostImageOld(), util.BehaviorWaitForDeletion).
 				RequestAndLimit(corev1.ResourceCPU, "200m").
-				TerminationGracePeriod(1).
+				TerminationGracePeriod(0).
 				Replicas(3).
 				Queue(lq.Name).
 				Obj()
@@ -194,7 +194,7 @@ var _ = ginkgo.Describe("StatefulSet integration", func() {
 			statefulSet := statefulsettesting.MakeStatefulSet("sts", ns.Name).
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				RequestAndLimit(corev1.ResourceCPU, "200m").
-				TerminationGracePeriod(1).
+				TerminationGracePeriod(0).
 				Replicas(3).
 				Queue(lq.Name).
 				Obj()
@@ -279,7 +279,7 @@ var _ = ginkgo.Describe("StatefulSet integration", func() {
 			statefulSet := statefulsettesting.MakeStatefulSet("sts", ns.Name).
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				RequestAndLimit(corev1.ResourceCPU, "200m").
-				TerminationGracePeriod(1).
+				TerminationGracePeriod(0).
 				Replicas(3).
 				Queue(lq.Name).
 				Obj()
@@ -386,7 +386,7 @@ var _ = ginkgo.Describe("StatefulSet integration", func() {
 			statefulSet := statefulsettesting.MakeStatefulSet("sts", ns.Name).
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				RequestAndLimit(corev1.ResourceCPU, "200m").
-				TerminationGracePeriod(1).
+				TerminationGracePeriod(0).
 				Replicas(3).
 				Queue(localQueueName).
 				Obj()
@@ -456,7 +456,7 @@ var _ = ginkgo.Describe("StatefulSet integration", func() {
 			lowPrioritySTS := statefulsettesting.MakeStatefulSet("low-priority", ns.Name).
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				RequestAndLimit(corev1.ResourceCPU, "1").
-				TerminationGracePeriod(1).
+				TerminationGracePeriod(0).
 				Replicas(3).
 				Queue(lq.Name).
 				WorkloadPriorityClass(lowPriorityWPC.Name).
@@ -494,7 +494,7 @@ var _ = ginkgo.Describe("StatefulSet integration", func() {
 			highPrioritySTS := statefulsettesting.MakeStatefulSet("high-priority", ns.Name).
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				RequestAndLimit(corev1.ResourceCPU, "1").
-				TerminationGracePeriod(1).
+				TerminationGracePeriod(0).
 				Replicas(3).
 				Queue(lq.Name).
 				WorkloadPriorityClass(highPriorityWPC.Name).
@@ -551,7 +551,7 @@ var _ = ginkgo.Describe("StatefulSet integration", func() {
 			statefulSet := statefulsettesting.MakeStatefulSet("sts", ns.Name).
 				Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 				RequestAndLimit(corev1.ResourceCPU, "200m").
-				TerminationGracePeriod(1).
+				TerminationGracePeriod(0).
 				Replicas(3).
 				Queue(lq.Name).
 				Obj()

@@ -15,8 +15,8 @@ controller:
 fairSharing:
   preemptionStrategies: ["LessThanOrEqualToFinalShare", "LessThanInitialShare"]
 clientConnection:
-  qps: 50
-  burst: 100
+  qps: 1000
+  burst: 1000
 integrations:
   frameworks:
   - "batch/job"

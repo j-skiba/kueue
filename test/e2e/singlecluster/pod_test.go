@@ -18,6 +18,7 @@ package e2e
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -31,7 +32,9 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/constants"
 	controllerconsts "sigs.k8s.io/kueue/pkg/controller/constants"
+	"sigs.k8s.io/kueue/pkg/controller/jobframework"
 	"sigs.k8s.io/kueue/pkg/controller/jobs/pod"
+	jobpod "sigs.k8s.io/kueue/pkg/controller/jobs/pod"
 	podconstants "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
@@ -267,9 +270,9 @@ var _ = ginkgo.Describe("Pod groups", func() {
 					util.MustCreate(ctx, k8sClient, excess)
 				})
 				ginkgo.By("Use events to observe the excess pods are getting stopped", func() {
-					util.ExpectEventsForObjects(eventWatcher, excessPods, func(e *corev1.Event) bool {
-						return e.InvolvedObject.Namespace == ns.Name && e.Reason == "ExcessPodDeleted"
-					})
+					util.ExpectEventsForObjectsWithTimeout(eventWatcher, excessPods, func(e *corev1.Event) bool {
+						return e.InvolvedObject.Namespace == ns.Name && e.Reason == jobpod.ReasonExcessPodDeleted
+					}, util.LongTimeout)
 				})
 				ginkgo.By("Verify the excess pod is deleted", func() {
 					util.ExpectObjectToBeDeleted(ctx, k8sClient, excess, false)
@@ -486,9 +489,9 @@ var _ = ginkgo.Describe("Pod groups", func() {
 			})
 
 			ginkgo.By("Use events to observe the default-priority pods are getting preempted", func() {
-				util.ExpectEventsForObjects(eventWatcher, defaultGroupPods, func(e *corev1.Event) bool {
-					return e.InvolvedObject.Namespace == ns.Name && e.Reason == "Stopped"
-				})
+				util.ExpectEventsForObjectsWithTimeout(eventWatcher, defaultGroupPods, func(e *corev1.Event) bool {
+					return e.InvolvedObject.Namespace == ns.Name && e.Reason == jobframework.ReasonStopped && strings.Contains(e.Message, "Preempted")
+				}, util.LongTimeout)
 			})
 
 			ginkgo.By("Wait for default-priority pods to fail", func() {

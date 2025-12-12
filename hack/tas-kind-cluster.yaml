@@ -13,6 +13,9 @@ nodes:
         controllerManager:
           extraArgs:
             v: "3"
+        etcd:
+          local:
+            dataDir: /tmp/k8s-etcd-data
         apiServer:
           extraArgs:
             enable-aggregator-routing: "true"

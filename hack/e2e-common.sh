@@ -224,6 +224,11 @@ function cluster_kind_load_image {
         # See: https://github.com/kubernetes-sigs/kind/issues/3795
         echo "Loading image '$2' to cluster '$1'"
         while IFS= read -r node; do
+            # Check if image already exists on the node
+            if docker exec "$node" ctr --namespace=k8s.io images list -q | grep -q "^$2$"; then
+                echo "  Image '$2' already exists on node '$node', skipping load."
+                continue
+            fi
             echo "  Loading image to node: $node"
             if ! docker save "$2" | docker exec -i "$node" ctr --namespace=k8s.io images import --digests --snapshotter=overlayfs -; then
                 echo "Failed to load image '$2' to node '$node'"

@@ -19,7 +19,6 @@ package leaderworkerset
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -45,7 +44,6 @@ var (
 	baseCmpOpts = cmp.Options{
 		cmpopts.EquateEmpty(),
 		cmpopts.IgnoreFields(metav1.ObjectMeta{}, "ResourceVersion"),
-		cmpopts.IgnoreFields(metav1.ObjectMeta{}, "DeletionTimestamp"),
 	}
 )
 
@@ -66,6 +64,7 @@ func TestReconciler(t *testing.T) {
 		wantEvents                    []utiltesting.EventRecord
 		wantErr                       error
 		enableTopologyAwareScheduling bool
+		wantDeletedWorkloads          []string
 	}{
 		"should create prebuilt workload": {
 			leaderWorkerSet:     leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
@@ -618,7 +617,6 @@ func TestReconciler(t *testing.T) {
 				*utiltestingapi.MakeWorkload(GetWorkloadName(types.UID(testUID), testLWS, "1"), testNS).
 					OwnerReference(gvk, testLWS, testUID).
 					OwnerReference(corev1.SchemeGroupVersion.WithKind("Pod"), "test-pod2", "test-pod2-uid").
-					DeletionTimestamp(time.Now()).
 					Annotation(podconstants.IsGroupWorkloadAnnotationKey, podconstants.IsGroupWorkloadAnnotationValue).
 					Finalizers(kueue.ResourceInUseFinalizerName).
 					PodSets(
@@ -636,6 +634,7 @@ func TestReconciler(t *testing.T) {
 					Priority(0).
 					Obj(),
 			},
+			wantDeletedWorkloads: []string{GetWorkloadName(types.UID(testUID), testLWS, "1")},
 		},
 	}
 	for name, tc := range cases {
@@ -684,6 +683,22 @@ func TestReconciler(t *testing.T) {
 			err = kClient.List(ctx, &gotWorkloads, client.InNamespace(tc.leaderWorkerSet.Namespace))
 			if err != nil {
 				t.Fatalf("Could not get Workloads after reconcile: %v", err)
+			}
+
+			if len(tc.wantDeletedWorkloads) > 0 {
+				deletedWorkloads := make(map[string]bool)
+				for _, name := range tc.wantDeletedWorkloads {
+					deletedWorkloads[name] = true
+				}
+				for i, wl := range gotWorkloads.Items {
+					if deletedWorkloads[wl.Name] {
+						if wl.DeletionTimestamp == nil {
+							t.Errorf("Workload %s should be deleted", wl.Name)
+						}
+						// Clear DeletionTimestamp for comparison
+						gotWorkloads.Items[i].DeletionTimestamp = nil
+					}
+				}
 			}
 
 			if diff := cmp.Diff(tc.wantWorkloads, gotWorkloads.Items, baseCmpOpts...); diff != "" {

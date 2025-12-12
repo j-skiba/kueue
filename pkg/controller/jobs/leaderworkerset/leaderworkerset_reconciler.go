@@ -81,6 +81,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&leaderworkersetv1.LeaderWorkerSet{}).
+		Owns(&kueue.Workload{}).
 		Named("leaderworkerset").
 		WithEventFilter(r).
 		Complete(r)
@@ -255,7 +256,11 @@ func podSets(lws *leaderworkersetv1.LeaderWorkerSet) ([]kueue.PodSet, error) {
 }
 
 func (r *Reconciler) deleteWorkload(ctx context.Context, wl *kueue.Workload) error {
-	return client.IgnoreNotFound(r.client.Delete(ctx, wl))
+	err := r.client.Delete(ctx, wl)
+	if err != nil && client.IgnoreNotFound(err) != nil {
+		return err
+	}
+	return nil
 }
 
 var _ predicate.Predicate = (*Reconciler)(nil)

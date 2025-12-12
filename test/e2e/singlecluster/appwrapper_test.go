@@ -129,7 +129,7 @@ var _ = ginkgo.Describe("AppWrapper", func() {
 				Template: testingdeploy.MakeDeployment(deploymentKey.Name, deploymentKey.Namespace).
 					Image(util.GetAgnHostImage(), util.BehaviorWaitForDeletion).
 					RequestAndLimit(corev1.ResourceCPU, "200m").
-					TerminationGracePeriod(1).
+					TerminationGracePeriod(0).
 					Replicas(3).
 					SetTypeMeta().
 					Obj(),

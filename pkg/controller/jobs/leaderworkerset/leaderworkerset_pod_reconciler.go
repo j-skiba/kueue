@@ -71,7 +71,9 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 	log := ctrl.LoggerFrom(ctx)
 	log.V(2).Info("Reconcile LeaderWorkerSet Pod")
 
-	if utilpod.IsTerminated(pod) {
+	// IsTerminated returns true ONLY if the pod is in Succeeded or Failed phase. It returns false if the pod is Running (even if it has a DeletionTimestamp and is terminating!). Thus, when a running pod is deleted, the finalizer is never removed, causing it to be stuck in Terminating state forever (or until forced).
+	// open question
+	if utilpod.IsTerminated(pod) || pod.DeletionTimestamp != nil {
 		err = client.IgnoreNotFound(clientutil.Patch(ctx, r.client, pod, func() (bool, error) {
 			removed := controllerutil.RemoveFinalizer(pod, podconstants.PodFinalizer)
 			if removed {

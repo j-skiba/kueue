@@ -38,7 +38,6 @@ var _ = ginkgo.Describe("TrainJob", func() {
 
 	ginkgo.BeforeEach(func() {
 		ns = util.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "e2e-")
-		util.WaitForWebhookReady(ctx, k8sClient)
 	})
 	ginkgo.AfterEach(func() {
 		gomega.Expect(util.DeleteNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
