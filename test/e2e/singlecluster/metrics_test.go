@@ -175,7 +175,6 @@ var _ = ginkgo.Describe("Metrics", func() {
 
 			ginkgo.By("deleting the cluster queue", func() {
 				util.ExpectObjectToBeDeleted(ctx, k8sClient, workload, true)
-				util.ExpectObjectToBeDeleted(ctx, k8sClient, localQueue, true)
 				util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue, true)
 			})
 
@@ -213,7 +212,8 @@ var _ = ginkgo.Describe("Metrics", func() {
 				{"kueue_admission_attempt_duration_seconds"},
 				{"kueue_cluster_queue_weighted_share", clusterQueue.Name},
 
-				{"kueue_cluster_queue_weighted_share", clusterQueue.Name},
+				{"kueue_local_queue_pending_workloads", "active", "0", ns.Name, localQueue.Name},
+				{"kueue_local_queue_pending_workloads", "inadmissible", "0", ns.Name, localQueue.Name},
 			}
 
 			ginkgo.By("checking that metrics that should not have been deleted are still available", func() {
@@ -532,14 +532,8 @@ var _ = ginkgo.Describe("Metrics", func() {
 				util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue2, true)
 			})
 
-			cleanupMetrics := [][]string{
-				{"kueue_local_queue_evicted_workloads_total", ns.Name, localQueue2.Name},
-				{"kueue_local_queue_resource_reservation", ns.Name, localQueue1.Name},
-				{"kueue_local_queue_resource_usage", ns.Name, localQueue1.Name},
-			}
-
 			ginkgo.By("checking that eviction and preemption metrics are no longer available", func() {
-				util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, cleanupMetrics)
+				util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, metrics)
 			})
 		})
 	})
