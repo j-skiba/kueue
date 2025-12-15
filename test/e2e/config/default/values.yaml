@@ -37,16 +37,18 @@ managerConfig:
       leaderElect: true
     controller:
       groupKindConcurrency:
-        Job.batch: 5
-        Pod: 5
-        Workload.kueue.x-k8s.io: 5
+        Job.batch: 10
+        Pod: 10
+        Workload.kueue.x-k8s.io: 10
+        LeaderWorkerSet.leaderworkerset.x-k8s.io: 10
+        RayJob.ray.io: 10
+        RayCluster.ray.io: 10
+        StatefulSet.apps: 10
+        Deployment.apps: 10
         LocalQueue.kueue.x-k8s.io: 1
         ClusterQueue.kueue.x-k8s.io: 1
         ResourceFlavor.kueue.x-k8s.io: 1
     fairSharing: {}
-    clientConnection:
-      qps: 1000
-      burst: 1000
     integrations:
       frameworks:
         - "batch/job"

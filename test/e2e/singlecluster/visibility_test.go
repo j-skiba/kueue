@@ -136,14 +136,14 @@ var _ = ginkgo.Describe("Kueue visibility server", ginkgo.Serial, func() {
 			gomega.Expect(util.DeleteWorkloadsInNamespace(ctx, k8sClient, nsA)).Should(gomega.Succeed())
 			gomega.Expect(util.DeleteWorkloadsInNamespace(ctx, k8sClient, nsB)).Should(gomega.Succeed())
 
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, lowPriorityClass, true)
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, midPriorityClass, true)
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, highPriorityClass, true)
-
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, localQueueA, true)
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, localQueueB, true)
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue, true)
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, defaultRF, true)
+
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, lowPriorityClass, true)
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, midPriorityClass, true)
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, highPriorityClass, true)
 		})
 
 		ginkgo.It("Should allow fetching information about pending workloads in ClusterQueue (v1beta1)", func() {

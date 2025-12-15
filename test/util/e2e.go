@@ -139,7 +139,6 @@ func CreateClientUsingCluster(kContext string) (client.WithWatch, *rest.Config, 
 		return nil, nil, fmt.Errorf("unable to get kubeconfig for context %q: %w", kContext, err)
 	}
 	gomega.ExpectWithOffset(1, cfg).NotTo(gomega.BeNil())
-	SetClientQPS(cfg)
 
 	err = apiextensionsv1.AddToScheme(scheme.Scheme)
 	gomega.ExpectWithOffset(1, err).NotTo(gomega.HaveOccurred())
@@ -203,7 +202,6 @@ func CreateKueueClientset(user string) kueueclientset.Interface {
 	cfg, err := config.GetConfigWithContext("")
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	gomega.Expect(cfg).NotTo(gomega.BeNil())
-	SetClientQPS(cfg)
 	if user != "" {
 		cfg.Impersonate.UserName = user
 	}

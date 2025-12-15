@@ -9,15 +9,15 @@ nodes:
     scheduler:
       extraArgs:
         v: "3"
+        bind-address: "0.0.0.0"      # Unlocks monitoring
     controllerManager:
       extraArgs:
         v: "3"
-        concurrent-gc-syncs: "100"
-        kube-api-qps: "100"
-        kube-api-burst: "200"
+        bind-address: "0.0.0.0"      # Unlocks monitoring
     etcd:
       local:
-        dataDir: /tmp/k8s-etcd-data
+        extraArgs:
+          listen-metrics-urls: "http://0.0.0.0:2381"
     apiServer:
       extraArgs:
         enable-aggregator-routing: "true"

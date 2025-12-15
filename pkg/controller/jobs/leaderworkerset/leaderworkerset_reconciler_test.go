@@ -64,7 +64,7 @@ func TestReconciler(t *testing.T) {
 		wantEvents                    []utiltesting.EventRecord
 		wantErr                       error
 		enableTopologyAwareScheduling bool
-		wantDeletedWorkloads          []string
+
 	}{
 		"should create prebuilt workload": {
 			leaderWorkerSet:     leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
@@ -551,7 +551,7 @@ func TestReconciler(t *testing.T) {
 			},
 			enableTopologyAwareScheduling: false,
 		},
-		"should delete the redundant prebuilt workload": {
+		"should release the redundant prebuilt workload": {
 			leaderWorkerSet:     leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
 			wantLeaderWorkerSet: leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
 			workloads: []kueue.Workload{
@@ -615,7 +615,6 @@ func TestReconciler(t *testing.T) {
 					Priority(0).
 					Obj(),
 				*utiltestingapi.MakeWorkload(GetWorkloadName(types.UID(testUID), testLWS, "1"), testNS).
-					OwnerReference(gvk, testLWS, testUID).
 					OwnerReference(corev1.SchemeGroupVersion.WithKind("Pod"), "test-pod2", "test-pod2-uid").
 					Annotation(podconstants.IsGroupWorkloadAnnotationKey, podconstants.IsGroupWorkloadAnnotationValue).
 					Finalizers(kueue.ResourceInUseFinalizerName).
@@ -634,7 +633,49 @@ func TestReconciler(t *testing.T) {
 					Priority(0).
 					Obj(),
 			},
-			wantDeletedWorkloads: []string{GetWorkloadName(types.UID(testUID), testLWS, "1")},
+		},
+		"should adopt the existing prebuilt workload": {
+			leaderWorkerSet:     leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
+			wantLeaderWorkerSet: leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
+			workloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload(GetWorkloadName(types.UID(testUID), testLWS, "0"), testNS).
+					Annotation(podconstants.IsGroupWorkloadAnnotationKey, podconstants.IsGroupWorkloadAnnotationValue).
+					Finalizers(kueue.ResourceInUseFinalizerName).
+					PodSets(
+						kueue.PodSet{
+							Name: kueue.DefaultPodSetName,
+							Template: corev1.PodTemplateSpec{
+								Spec: corev1.PodSpec{
+									Containers: []corev1.Container{
+										{Name: "c", Image: "pause"},
+									},
+								},
+							},
+							Count: 1,
+						}).
+					Priority(0).
+					Obj(),
+			},
+			wantWorkloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload(GetWorkloadName(types.UID(testUID), testLWS, "0"), testNS).
+					OwnerReference(gvk, testLWS, testUID).
+					Annotation(podconstants.IsGroupWorkloadAnnotationKey, podconstants.IsGroupWorkloadAnnotationValue).
+					Finalizers(kueue.ResourceInUseFinalizerName).
+					PodSets(
+						kueue.PodSet{
+							Name: kueue.DefaultPodSetName,
+							Template: corev1.PodTemplateSpec{
+								Spec: corev1.PodSpec{
+									Containers: []corev1.Container{
+										{Name: "c", Image: "pause"},
+									},
+								},
+							},
+							Count: 1,
+						}).
+					Priority(0).
+					Obj(),
+			},
 		},
 	}
 	for name, tc := range cases {
@@ -685,21 +726,7 @@ func TestReconciler(t *testing.T) {
 				t.Fatalf("Could not get Workloads after reconcile: %v", err)
 			}
 
-			if len(tc.wantDeletedWorkloads) > 0 {
-				deletedWorkloads := make(map[string]bool)
-				for _, name := range tc.wantDeletedWorkloads {
-					deletedWorkloads[name] = true
-				}
-				for i, wl := range gotWorkloads.Items {
-					if deletedWorkloads[wl.Name] {
-						if wl.DeletionTimestamp == nil {
-							t.Errorf("Workload %s should be deleted", wl.Name)
-						}
-						// Clear DeletionTimestamp for comparison
-						gotWorkloads.Items[i].DeletionTimestamp = nil
-					}
-				}
-			}
+
 
 			if diff := cmp.Diff(tc.wantWorkloads, gotWorkloads.Items, baseCmpOpts...); diff != "" {
 				t.Errorf("Workloads after reconcile (-want,+got):\n%s", diff)
