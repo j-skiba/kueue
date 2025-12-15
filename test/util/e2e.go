@@ -508,49 +508,31 @@ func CreateNamespaceFromObjectWithLog(ctx context.Context, k8sClient client.Clie
 	return ns
 }
 
-func GetKueueMetrics(ctx context.Context, k8sClient client.Client, cfg *rest.Config, restClient *rest.RESTClient, curlPodName, curlContainerName string) (string, error) {
+func GetKueueMetrics(ctx context.Context, cfg *rest.Config, restClient *rest.RESTClient, curlPodName, curlContainerName string) (string, error) {
 	kueueNS := GetKueueNamespace()
-	// Scrape metrics from all controller manager pods to ensure we get metrics regardless of who is leader or how requests are routed
-	pods := &corev1.PodList{}
-	if err := k8sClient.List(ctx, pods, client.InNamespace(kueueNS), client.MatchingLabels{"control-plane": "controller-manager"}); err != nil {
-		return "", err
-	}
-
-	if len(pods.Items) == 0 {
-		return "", fmt.Errorf("no controller manager pods found in namespace %s", kueueNS)
-	}
-
-	var allMetrics strings.Builder
-	for _, pod := range pods.Items {
-		metricsOutput, stderr, err := KExecute(ctx, cfg, restClient, kueueNS, curlPodName, curlContainerName, []string{
-			"/bin/sh", "-c",
-			fmt.Sprintf(
-				"curl -v -k -H \"Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)\" https://%s:8443/metrics",
-				pod.Status.PodIP,
-			),
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to curl pod %s: %w, stderr: %s", pod.Name, err, string(stderr))
-		}
-		allMetrics.WriteString(string(metricsOutput))
-		allMetrics.WriteString("\n")
-	}
-	return allMetrics.String(), nil
+	metricsOutput, _, err := KExecute(ctx, cfg, restClient, kueueNS, curlPodName, curlContainerName, []string{
+		"/bin/sh", "-c",
+		fmt.Sprintf(
+			"curl -s -k -H \"Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)\" https://%s.%s.svc.cluster.local:8443/metrics",
+			defaultMetricsServiceName, kueueNS,
+		),
+	})
+	return string(metricsOutput), err
 }
 
-func ExpectMetricsToBeAvailable(ctx context.Context, k8sClient client.Client, cfg *rest.Config, restClient *rest.RESTClient, curlPodName, curlContainerName string, metrics [][]string) {
+func ExpectMetricsToBeAvailable(ctx context.Context, cfg *rest.Config, restClient *rest.RESTClient, curlPodName, curlContainerName string, metrics [][]string) {
 	ginkgo.GinkgoHelper()
 	gomega.Eventually(func(g gomega.Gomega) {
-		metricsOutput, err := GetKueueMetrics(ctx, k8sClient, cfg, restClient, curlPodName, curlContainerName)
+		metricsOutput, err := GetKueueMetrics(ctx, cfg, restClient, curlPodName, curlContainerName)
 		g.Expect(err).NotTo(gomega.HaveOccurred())
 		g.Expect(metricsOutput).Should(utiltesting.ContainMetrics(metrics))
 	}, LongTimeout, Interval).Should(gomega.Succeed())
 }
 
-func ExpectMetricsNotToBeAvailable(ctx context.Context, k8sClient client.Client, cfg *rest.Config, restClient *rest.RESTClient, curlPodName, curlContainerName string, metrics [][]string) {
+func ExpectMetricsNotToBeAvailable(ctx context.Context, cfg *rest.Config, restClient *rest.RESTClient, curlPodName, curlContainerName string, metrics [][]string) {
 	ginkgo.GinkgoHelper()
 	gomega.Eventually(func(g gomega.Gomega) {
-		metricsOutput, err := GetKueueMetrics(ctx, k8sClient, cfg, restClient, curlPodName, curlContainerName)
+		metricsOutput, err := GetKueueMetrics(ctx, cfg, restClient, curlPodName, curlContainerName)
 		g.Expect(err).NotTo(gomega.HaveOccurred())
 		g.Expect(metricsOutput).Should(utiltesting.ExcludeMetrics(metrics))
 	}, LongTimeout, Interval).Should(gomega.Succeed())

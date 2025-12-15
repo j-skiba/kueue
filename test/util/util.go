@@ -1013,12 +1013,6 @@ readCh:
 			gomega.ExpectWithOffset(1, ok).To(gomega.BeTrue())
 			event, ok := evt.Object.(*corev1.Event)
 			gomega.ExpectWithOffset(1, ok).To(gomega.BeTrue())
-			
-			// Debug log
-			if event.InvolvedObject.Kind == "Pod" {
-				ginkgo.By(fmt.Sprintf("Observed event: Reason=%s, Message=%q, Object=%s/%s", event.Reason, event.Message, event.InvolvedObject.Namespace, event.InvolvedObject.Name))
-			}
-
 			if filter(event) {
 				objKey := types.NamespacedName{Namespace: event.InvolvedObject.Namespace, Name: event.InvolvedObject.Name}
 				gotObjs.Insert(objKey)

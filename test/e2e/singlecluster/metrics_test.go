@@ -170,7 +170,7 @@ var _ = ginkgo.Describe("Metrics", func() {
 			}
 
 			ginkgo.By("checking that default metrics are available", func() {
-				util.ExpectMetricsToBeAvailable(ctx, k8sClient, cfg, restClient, curlPod.Name, curlContainerName, metrics)
+				util.ExpectMetricsToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, metrics)
 			})
 
 			ginkgo.By("deleting the cluster queue", func() {
@@ -205,7 +205,7 @@ var _ = ginkgo.Describe("Metrics", func() {
 			}
 
 			ginkgo.By("checking that metrics that should have been deleted are no longer available", func() {
-				util.ExpectMetricsNotToBeAvailable(ctx, k8sClient, cfg, restClient, curlPod.Name, curlContainerName, deletedMetrics)
+				util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, deletedMetrics)
 			})
 
 			notDeletedMetrics := [][]string{
@@ -217,7 +217,7 @@ var _ = ginkgo.Describe("Metrics", func() {
 			}
 
 			ginkgo.By("checking that metrics that should not have been deleted are still available", func() {
-				util.ExpectMetricsToBeAvailable(ctx, k8sClient, cfg, restClient, curlPod.Name, curlContainerName, notDeletedMetrics)
+				util.ExpectMetricsToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, notDeletedMetrics)
 			})
 		})
 	})
@@ -293,7 +293,7 @@ var _ = ginkgo.Describe("Metrics", func() {
 			}
 
 			ginkgo.By("checking that admission check metrics are available", func() {
-				util.ExpectMetricsToBeAvailable(ctx, k8sClient, cfg, restClient, curlPod.Name, curlContainerName, metrics)
+				util.ExpectMetricsToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, metrics)
 			})
 
 			ginkgo.By("deleting the cluster queue", func() {
@@ -304,7 +304,7 @@ var _ = ginkgo.Describe("Metrics", func() {
 			})
 
 			ginkgo.By("checking that admission check metrics are no longer available", func() {
-				util.ExpectMetricsNotToBeAvailable(ctx, k8sClient, cfg, restClient, curlPod.Name, curlContainerName, metrics)
+				util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, metrics)
 			})
 		})
 	})
@@ -516,7 +516,7 @@ var _ = ginkgo.Describe("Metrics", func() {
 			}
 
 			ginkgo.By("checking that eviction and preemption metrics are available", func() {
-				util.ExpectMetricsToBeAvailable(ctx, k8sClient, cfg, restClient, curlPod.Name, curlContainerName, metrics)
+				util.ExpectMetricsToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, metrics)
 			})
 
 			ginkgo.By("delete the cluster queue", func() {
@@ -539,7 +539,7 @@ var _ = ginkgo.Describe("Metrics", func() {
 			}
 
 			ginkgo.By("checking that eviction and preemption metrics are no longer available", func() {
-				util.ExpectMetricsNotToBeAvailable(ctx, k8sClient, cfg, restClient, curlPod.Name, curlContainerName, cleanupMetrics)
+				util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, cleanupMetrics)
 			})
 		})
 	})

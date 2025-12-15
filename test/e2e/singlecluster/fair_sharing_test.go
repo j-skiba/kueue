@@ -110,35 +110,12 @@ var _ = ginkgo.Describe("Fair Sharing", ginkgo.Serial, ginkgo.Ordered, ginkgo.Co
 			}
 
 			ginkgo.By("checking cluster queues")
-			ginkgo.By("checking cluster queues")
-			gomega.Eventually(func(g gomega.Gomega) {
-				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cq1), cq1)).Should(gomega.Succeed())
-				// We expect 4 workloads to be admitted. If not yet admitted, we should retry.
-				if cq1.Status.AdmittedWorkloads != 4 {
-					// Debug logging for pending workloads
-					wls := &kueue.WorkloadList{}
-					_ = k8sClient.List(ctx, wls, client.InNamespace(ns.Name))
-					for _, wl := range wls.Items {
-						ginkgo.GinkgoLogr.Info("Workload status", "name", wl.Name, "admitted", wl.Status.Admission != nil, "conditions", wl.Status.Conditions)
-					}
-				}
-				g.Expect(cq1.Status.AdmittedWorkloads).Should(gomega.Equal(int32(4)))
-			}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
 
 			gomega.Eventually(func(g gomega.Gomega) {
 				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cq1), cq1)).Should(gomega.Succeed())
 				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cq2), cq2)).Should(gomega.Succeed())
 				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cq3), cq3)).Should(gomega.Succeed())
 
-				if cq1.Status.FairSharing != nil && cq1.Status.FairSharing.WeightedShare == 0 {
-					usageStr := ""
-					for _, fu := range cq1.Status.FlavorsUsage {
-						for _, ru := range fu.Resources {
-							usageStr += fmt.Sprintf("%s/%s: %s (%d m); ", fu.Name, ru.Name, ru.Total.String(), ru.Total.MilliValue())
-						}
-					}
-					ginkgo.GinkgoLogr.Info("DEBUG: CQ1 Status", "admitted", cq1.Status.AdmittedWorkloads, "share", cq1.Status.FairSharing.WeightedShare, "usage_details", usageStr)
-				}
 				g.Expect(cq1.Status.AdmittedWorkloads).Should(gomega.Equal(int32(4)))
 				g.Expect(cq1.Status.FairSharing).ShouldNot(gomega.BeNil())
 				g.Expect(cq1.Status.FairSharing.WeightedShare).Should(gomega.Equal(int64(50)))

@@ -171,7 +171,7 @@ var _ = ginkgo.Describe("WaitForPodsReady with tiny Timeout and no RecoveryTimeo
 		})
 
 		ginkgo.By("verifying that the metric is updated", func() {
-			util.ExpectMetricsToBeAvailable(ctx, k8sClient, cfg, restClient, curlPod.Name, curlContainerName, [][]string{
+			util.ExpectMetricsToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, [][]string{
 				{"kueue_evicted_workloads_once_total", cq.Name, kueue.WorkloadEvictedByPodsReadyTimeout, kueue.WorkloadWaitForStart, "1"},
 			})
 		})
@@ -338,7 +338,7 @@ var _ = ginkgo.Describe("WaitForPodsReady with default Timeout and a tiny Recove
 		})
 
 		ginkgo.By("verifying that the metric is updated", func() {
-			util.ExpectMetricsToBeAvailable(ctx, k8sClient, cfg, restClient, curlPod.Name, curlContainerName, [][]string{
+			util.ExpectMetricsToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, [][]string{
 				{"kueue_evicted_workloads_once_total", cq.Name, kueue.WorkloadEvictedByPodsReadyTimeout, kueue.WorkloadWaitForRecovery, "1"},
 			})
 		})
@@ -460,7 +460,7 @@ var _ = ginkgo.Describe("WaitForPodsReady with default Timeout and a long Recove
 		})
 
 		ginkgo.By("verifying that the metric is updated", func() {
-			util.ExpectMetricsToBeAvailable(ctx, k8sClient, cfg, restClient, curlPod.Name, curlContainerName, [][]string{
+			util.ExpectMetricsToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, [][]string{
 				{"kueue_ready_wait_time_seconds_count", cq.Name, ""},
 				{"kueue_admitted_until_ready_wait_time_seconds_count", cq.Name, ""},
 				{"kueue_local_queue_ready_wait_time_seconds", ns.Name, lq.Name, ""},
@@ -479,7 +479,7 @@ var _ = ginkgo.Describe("WaitForPodsReady with default Timeout and a long Recove
 		})
 
 		ginkgo.By("verifying that the metric is not updated", func() {
-			util.ExpectMetricsNotToBeAvailable(ctx, k8sClient, cfg, restClient, curlPod.Name, curlContainerName, [][]string{
+			util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, [][]string{
 				{"kueue_evicted_workloads_once_total", ns.Name},
 			})
 		})
