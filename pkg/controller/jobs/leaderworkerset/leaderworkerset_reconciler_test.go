@@ -64,7 +64,6 @@ func TestReconciler(t *testing.T) {
 		wantEvents                    []utiltesting.EventRecord
 		wantErr                       error
 		enableTopologyAwareScheduling bool
-
 	}{
 		"should create prebuilt workload": {
 			leaderWorkerSet:     leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
@@ -551,7 +550,7 @@ func TestReconciler(t *testing.T) {
 			},
 			enableTopologyAwareScheduling: false,
 		},
-		"should release the redundant prebuilt workload": {
+		"should delete LeaderWorkerSet ownerReference from the redundant prebuilt workload": {
 			leaderWorkerSet:     leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
 			wantLeaderWorkerSet: leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
 			workloads: []kueue.Workload{
@@ -616,49 +615,6 @@ func TestReconciler(t *testing.T) {
 					Obj(),
 				*utiltestingapi.MakeWorkload(GetWorkloadName(types.UID(testUID), testLWS, "1"), testNS).
 					OwnerReference(corev1.SchemeGroupVersion.WithKind("Pod"), "test-pod2", "test-pod2-uid").
-					Annotation(podconstants.IsGroupWorkloadAnnotationKey, podconstants.IsGroupWorkloadAnnotationValue).
-					Finalizers(kueue.ResourceInUseFinalizerName).
-					PodSets(
-						kueue.PodSet{
-							Name: kueue.DefaultPodSetName,
-							Template: corev1.PodTemplateSpec{
-								Spec: corev1.PodSpec{
-									Containers: []corev1.Container{
-										{Name: "c", Image: "pause"},
-									},
-								},
-							},
-							Count: 1,
-						}).
-					Priority(0).
-					Obj(),
-			},
-		},
-		"should adopt the existing prebuilt workload": {
-			leaderWorkerSet:     leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
-			wantLeaderWorkerSet: leaderworkerset.MakeLeaderWorkerSet(testLWS, testNS).UID(testUID).Obj(),
-			workloads: []kueue.Workload{
-				*utiltestingapi.MakeWorkload(GetWorkloadName(types.UID(testUID), testLWS, "0"), testNS).
-					Annotation(podconstants.IsGroupWorkloadAnnotationKey, podconstants.IsGroupWorkloadAnnotationValue).
-					Finalizers(kueue.ResourceInUseFinalizerName).
-					PodSets(
-						kueue.PodSet{
-							Name: kueue.DefaultPodSetName,
-							Template: corev1.PodTemplateSpec{
-								Spec: corev1.PodSpec{
-									Containers: []corev1.Container{
-										{Name: "c", Image: "pause"},
-									},
-								},
-							},
-							Count: 1,
-						}).
-					Priority(0).
-					Obj(),
-			},
-			wantWorkloads: []kueue.Workload{
-				*utiltestingapi.MakeWorkload(GetWorkloadName(types.UID(testUID), testLWS, "0"), testNS).
-					OwnerReference(gvk, testLWS, testUID).
 					Annotation(podconstants.IsGroupWorkloadAnnotationKey, podconstants.IsGroupWorkloadAnnotationValue).
 					Finalizers(kueue.ResourceInUseFinalizerName).
 					PodSets(
@@ -725,8 +681,6 @@ func TestReconciler(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Could not get Workloads after reconcile: %v", err)
 			}
-
-
 
 			if diff := cmp.Diff(tc.wantWorkloads, gotWorkloads.Items, baseCmpOpts...); diff != "" {
 				t.Errorf("Workloads after reconcile (-want,+got):\n%s", diff)

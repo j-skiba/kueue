@@ -17,8 +17,6 @@ limitations under the License.
 package e2e
 
 import (
-	"os/exec"
-
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -74,26 +72,6 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 		lq = utiltestingapi.MakeLocalQueue(localQueueName, ns.Name).ClusterQueue(cq.Name).Obj()
 		util.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, lq)
 	})
-	ginkgo.JustAfterEach(func() {
-		if ginkgo.CurrentSpecReport().Failed() {
-			ginkgo.By("Dumping LWS state after failure")
-			cmd := exec.Command("kubectl", "get", "all,statefulsets,pods", "-n", ns.Name, "-o", "wide")
-			cmd.Stdout = ginkgo.GinkgoWriter
-			cmd.Stderr = ginkgo.GinkgoWriter
-			_ = cmd.Run()
-
-			cmd = exec.Command("kubectl", "logs", "-n", ns.Name, "-l", "leaderworkerset.sigs.k8s.io/name=lws", "--all-containers", "--tail=-1", "--prefix")
-			cmd.Stdout = ginkgo.GinkgoWriter
-			cmd.Stderr = ginkgo.GinkgoWriter
-			_ = cmd.Run()
-
-			ginkgo.By("Describing Pods to see finalizers")
-			cmd = exec.Command("kubectl", "describe", "pods", "-n", ns.Name)
-			cmd.Stdout = ginkgo.GinkgoWriter
-			cmd.Stderr = ginkgo.GinkgoWriter
-			_ = cmd.Run()
-		}
-	})
 
 	ginkgo.AfterEach(func() {
 		gomega.Expect(util.DeleteAllLeaderWorkerSetsInNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
@@ -110,7 +88,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Size(1).
 				Replicas(1).
 				RequestAndLimit(corev1.ResourceCPU, "200m").
-				TerminationGracePeriod(0).
+				TerminationGracePeriod(1).
 				Queue(lq.Name).
 				Obj()
 
@@ -162,7 +140,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Size(3).
 				Replicas(1).
 				RequestAndLimit(corev1.ResourceCPU, "200m").
-				TerminationGracePeriod(0).
+				TerminationGracePeriod(1).
 				Queue(lq.Name).
 				Obj()
 			ginkgo.By("Create a LeaderWorkerSet", func() {
@@ -210,7 +188,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Size(3).
 				Replicas(2).
 				RequestAndLimit(corev1.ResourceCPU, "200m").
-				TerminationGracePeriod(0).
+				TerminationGracePeriod(1).
 				Queue(lq.Name).
 				Obj()
 
@@ -267,7 +245,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 					Size(3).
 					Replicas(1).
 					RequestAndLimit(corev1.ResourceCPU, "200m").
-					TerminationGracePeriod(0).
+					TerminationGracePeriod(1).
 					Queue(lq.Name).
 					StartupPolicy(startupPolicyType).
 					Obj()
@@ -348,7 +326,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 					Size(3).
 					Replicas(2).
 					RequestAndLimit(corev1.ResourceCPU, "200m").
-					TerminationGracePeriod(0).
+					TerminationGracePeriod(1).
 					Queue(lq.Name).
 					StartupPolicy(startupPolicyType).
 					Obj()
@@ -432,7 +410,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 					Size(3).
 					Replicas(1).
 					RequestAndLimit(corev1.ResourceCPU, "200m").
-					TerminationGracePeriod(0).
+					TerminationGracePeriod(1).
 					Queue(lq.Name).
 					StartupPolicy(startupPolicyType).
 					Obj()
@@ -509,7 +487,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 
 				ginkgo.By("Check workloads are deleted", func() {
 					util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, createdWorkload1, false, util.LongTimeout)
-
+					util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, createdWorkload2, false, util.LongTimeout)
 				})
 			},
 			ginkgo.Entry("LeaderCreatedStartupPolicy", leaderworkersetv1.LeaderCreatedStartupPolicy),
@@ -523,7 +501,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 					Size(3).
 					Replicas(2).
 					RequestAndLimit(corev1.ResourceCPU, "200m").
-					TerminationGracePeriod(0).
+					TerminationGracePeriod(1).
 					Queue(lq.Name).
 					LeaderTemplate(corev1.PodTemplateSpec{
 						Spec: corev1.PodSpec{
@@ -543,7 +521,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 						},
 					}).
 					StartupPolicy(startupPolicyType).
-					TerminationGracePeriod(0).
+					TerminationGracePeriod(1).
 					Obj()
 
 				ginkgo.By("Create a LeaderWorkerSet", func() {
@@ -587,8 +565,8 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				})
 
 				ginkgo.By("Check workloads are deleted", func() {
-					util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, createdWorkload1, false, util.VeryLongTimeout)
-					util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, createdWorkload2, false, util.VeryLongTimeout)
+					util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, createdWorkload1, false, util.LongTimeout)
+					util.ExpectObjectToBeDeletedWithTimeout(ctx, k8sClient, createdWorkload2, false, util.LongTimeout)
 				})
 			},
 			ginkgo.Entry("LeaderCreatedStartupPolicy", leaderworkersetv1.LeaderCreatedStartupPolicy),
@@ -619,7 +597,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 						NodeSelector: map[string]string{},
 					},
 				}).
-				TerminationGracePeriod(0).
+				TerminationGracePeriod(1).
 				Obj()
 
 			ginkgo.By("Create a LeaderWorkerSet", func() {
@@ -737,13 +715,11 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Size(3).
 				Replicas(1).
 				RequestAndLimit(corev1.ResourceCPU, "1").
-				TerminationGracePeriod(0).
+				TerminationGracePeriod(1).
 				Queue(lq.Name).
 				WorkloadPriorityClass(lowPriorityWPC.Name).
 				Obj()
 			ginkgo.By("Create a low priority LeaderWorkerSet", func() {
-				req := lowPriorityLWS.Spec.LeaderWorkerTemplate.WorkerTemplate.Spec.Containers[0].Resources.Requests
-				ginkgo.GinkgoWriter.Printf("DEBUG: LowPriorityLWS CPU Request: %v\n", req.Cpu())
 				util.MustCreate(ctx, k8sClient, lowPriorityLWS)
 			})
 
@@ -778,7 +754,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Size(3).
 				Replicas(1).
 				RequestAndLimit(corev1.ResourceCPU, "1").
-				TerminationGracePeriod(0).
+				TerminationGracePeriod(1).
 				Queue(lq.Name).
 				WorkloadPriorityClass(highPriorityWPC.Name).
 				Obj()
@@ -837,7 +813,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Size(3).
 				Replicas(1).
 				RequestAndLimit(corev1.ResourceCPU, "1").
-				TerminationGracePeriod(0).
+				TerminationGracePeriod(1).
 				Queue(lq.Name).
 				WorkloadPriorityClass(lowPriorityWPC.Name).
 				Obj()
@@ -882,7 +858,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Size(3).
 				Replicas(1).
 				RequestAndLimit(corev1.ResourceCPU, "1").
-				TerminationGracePeriod(0).
+				TerminationGracePeriod(1).
 				Queue(lq.Name).
 				WorkloadPriorityClass(lowPriorityWPC.Name).
 				Obj()
@@ -957,7 +933,7 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 				Size(3).
 				Replicas(1).
 				RequestAndLimit(corev1.ResourceCPU, "200m").
-				TerminationGracePeriod(0).
+				TerminationGracePeriod(1).
 				Queue(lq.Name).
 				Obj()
 

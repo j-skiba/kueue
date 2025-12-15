@@ -13,9 +13,6 @@ nodes:
         controllerManager:
           extraArgs:
             v: "3"
-            concurrent-gc-syncs: "100"
-            kube-api-qps: "100"
-            kube-api-burst: "200"
         apiServer:
           extraArgs:
             enable-aggregator-routing: "true"
