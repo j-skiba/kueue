@@ -367,7 +367,7 @@ function install_kuberay {
     cluster_kind_load_image "${1}" "${KUBERAY_RAY_IMAGE}"
     cluster_kind_load_image "${1}" "${KUBERAY_IMAGE}"
     # create used instead of apply - https://github.com/ray-project/kuberay/issues/504
-    kubectl apply --kubeconfig="$2" --server-side --force-conflicts -k "${KUBERAY_MANIFEST}"
+    kubectl create --kubeconfig="$2" -k "${KUBERAY_MANIFEST}"
 }
 
 # $1 cluster name

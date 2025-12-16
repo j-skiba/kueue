@@ -212,6 +212,7 @@ var _ = ginkgo.Describe("Metrics", func() {
 				{"kueue_admission_attempt_duration_seconds"},
 				{"kueue_cluster_queue_weighted_share", clusterQueue.Name},
 
+				// Cleared metrics with 0 value
 				{"kueue_local_queue_pending_workloads", "active", "0", ns.Name, localQueue.Name},
 				{"kueue_local_queue_pending_workloads", "inadmissible", "0", ns.Name, localQueue.Name},
 			}

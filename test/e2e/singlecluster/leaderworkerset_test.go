@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/kueue/test/util"
 )
 
-var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
+var _ = ginkgo.Describe("LeaderWorkerSet integration", func() {
 	var (
 		ns                 *corev1.Namespace
 		rf                 *kueue.ResourceFlavor
@@ -72,7 +72,6 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 		lq = utiltestingapi.MakeLocalQueue(localQueueName, ns.Name).ClusterQueue(cq.Name).Obj()
 		util.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, lq)
 	})
-
 	ginkgo.AfterEach(func() {
 		gomega.Expect(util.DeleteAllLeaderWorkerSetsInNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
 		gomega.Expect(util.DeleteNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
@@ -472,8 +471,13 @@ var _ = ginkgo.Describe("LeaderWorkerSet E2E", func() {
 					gomega.Expect(k8sClient.Get(ctx, wlLookupKey1, createdWorkload1)).To(gomega.Succeed())
 				})
 
-				createdWorkload2 := &kueue.Workload{}
-				wlLookupKey2 := types.NamespacedName{Name: leaderworkerset.GetWorkloadName(lws.UID, lws.Name, "1"), Namespace: ns.Name}
+				createdWorkload2 := &kueue.Workload{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      leaderworkerset.GetWorkloadName(lws.UID, lws.Name, "1"),
+						Namespace: ns.Name,
+					},
+				}
+				wlLookupKey2 := types.NamespacedName{Name: createdWorkload2.Name, Namespace: createdWorkload2.Namespace}
 				ginkgo.By("Check workload for group 2 is released", func() {
 					gomega.Eventually(func(g gomega.Gomega) {
 						err := k8sClient.Get(ctx, wlLookupKey2, createdWorkload2)

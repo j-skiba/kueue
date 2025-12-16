@@ -71,15 +71,6 @@ var _ = ginkgo.Describe("Kueue visibility server", ginkgo.Serial, func() {
 		gomega.Expect(util.DeleteNamespace(ctx, k8sClient, nsB)).To(gomega.Succeed())
 		util.ExpectObjectToBeDeleted(ctx, k8sClient, defaultRF, true)
 		util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue, true)
-		if highPriorityClass != nil {
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, highPriorityClass, true)
-		}
-		if midPriorityClass != nil {
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, midPriorityClass, true)
-		}
-		if lowPriorityClass != nil {
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, lowPriorityClass, true)
-		}
 		util.ExpectAllPodsInNamespaceDeleted(ctx, k8sClient, nsA)
 		util.ExpectAllPodsInNamespaceDeleted(ctx, k8sClient, nsB)
 	})

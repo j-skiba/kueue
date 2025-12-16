@@ -151,7 +151,7 @@ var _ = ginkgo.Describe("Kueue", func() {
 							Template: corev1.PodTemplateSpec{
 								Spec: corev1.PodSpec{
 									RestartPolicy:                 corev1.RestartPolicyNever,
-									TerminationGracePeriodSeconds: ptr.To[int64](0),
+									TerminationGracePeriodSeconds: ptr.To[int64](1),
 									Containers: []corev1.Container{
 										{
 											Name:    "c",
