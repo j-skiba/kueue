@@ -286,7 +286,9 @@ func TestRunWithPodsetsInfo(t *testing.T) {
 							},
 						},
 						Spec: &kftrainerapi.PodTemplateSpecOverride{
-							NodeSelector: map[string]string{"new-selector": "value"},
+							NodeSelector:    map[string]string{"new-selector": "value"},
+							Tolerations:     nil, // Explicitly nil as per PodSetInfo defaults or lack thereof
+							SchedulingGates: nil,
 						},
 					},
 				}).
