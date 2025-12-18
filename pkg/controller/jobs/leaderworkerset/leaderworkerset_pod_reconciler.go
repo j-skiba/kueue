@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	leaderworkersetv1 "sigs.k8s.io/lws/api/leaderworkerset/v1"
 
-	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 	"sigs.k8s.io/kueue/pkg/constants"
 	controllerconstants "sigs.k8s.io/kueue/pkg/controller/constants"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
@@ -71,8 +71,8 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 	log := ctrl.LoggerFrom(ctx)
 	log.V(2).Info("Reconcile LeaderWorkerSet Pod")
 
-	if utilpod.IsTerminated(pod) || pod.DeletionTimestamp != nil {
-		err = client.IgnoreNotFound(clientutil.Patch(ctx, r.client, pod, func() (bool, error) {
+	if utilpod.IsTerminated(pod) {
+		err = client.IgnoreNotFound(clientutil.Patch(ctx, r.client, pod, func() (client.Object, bool, error) {
 			removed := controllerutil.RemoveFinalizer(pod, podconstants.PodFinalizer)
 			if removed {
 				log.V(3).Info(
@@ -82,18 +82,18 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req reconcile.Request) (r
 					"group", pod.Labels[podconstants.GroupNameLabel],
 				)
 			}
-			return removed, nil
+			return pod, removed, nil
 		}))
 	} else {
-		err = client.IgnoreNotFound(clientutil.Patch(ctx, r.client, pod, func() (bool, error) {
+		err = client.IgnoreNotFound(clientutil.Patch(ctx, r.client, pod, func() (client.Object, bool, error) {
 			updated, err := r.setDefault(ctx, pod)
 			if err != nil {
-				return false, err
+				return nil, false, err
 			}
 			if updated {
 				log.V(3).Info("Updating pod in group", "pod", klog.KObj(pod), "group", pod.Labels[podconstants.GroupNameLabel])
 			}
-			return updated, nil
+			return pod, updated, nil
 		}))
 	}
 
