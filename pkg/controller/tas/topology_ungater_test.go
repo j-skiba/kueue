@@ -842,16 +842,16 @@ func TestReconcile(t *testing.T) {
 			wantCounts: []counts{
 				{
 					NodeSelector: map[string]string{
-						tasBlockLabel: "b1",
-						tasRackLabel:  "r1",
+						tasBlockLabel:        "b1",
+						tasRackLabel:         "r1",
 						corev1.LabelHostname: "x1",
 					},
 					Count: 1,
 				},
 				{
 					NodeSelector: map[string]string{
-						tasBlockLabel: "b1",
-						tasRackLabel:  "r1",
+						tasBlockLabel:        "b1",
+						tasRackLabel:         "r1",
 						corev1.LabelHostname: "x2",
 					},
 					Count: 1,

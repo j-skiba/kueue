@@ -403,7 +403,6 @@ func (r *nodeFailureReconciler) handleReadyNode(ctx context.Context, node *corev
 	return requiresRequeue, nil
 }
 
-
 func (r *nodeFailureReconciler) isNodeUnhealthyForWorkload(ctx context.Context, node *corev1.Node, wl *kueue.Workload) (bool, bool, error) {
 	taints := node.Spec.Taints
 	if len(taints) == 0 {
@@ -418,7 +417,7 @@ func (r *nodeFailureReconciler) isNodeUnhealthyForWorkload(ctx context.Context, 
 	// But PodSets in Spec are templates.
 	// Simplest is to check against all PodSets in the workload. If any PodSet that is assigned to this node
 	// does NOT tolerate the taint, then it's untolerated.
-	
+
 	podsAreAssigned := false
 	var podSetsToCheck []kueue.PodSet
 	for _, psa := range wl.Status.Admission.PodSetAssignments {
@@ -489,7 +488,7 @@ func (r *nodeFailureReconciler) isNodeUnhealthyForWorkload(ctx context.Context, 
 	// We need to check if pods are healthy.
 	// "In case of NoExecute ... pods would be terminated" -> Unhealthy
 	// "In case of NoSchedule ... If pods are running ... fine. if ... failing ... do node swap"
-	
+
 	// If allowRunning is true, we tolerate NoSchedule if the pods are RUNNING.
 	allowRunning := true
 	for _, t := range untoleratedTaints {

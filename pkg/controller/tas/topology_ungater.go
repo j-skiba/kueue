@@ -356,8 +356,12 @@ func assignGatedPodsToDomains(
 		}
 	}
 
-	if rankToGatedPod, ok := readRanksIfAvailable(log, psa, pods, psReq, offset, maxRank); ok {
-		return assignGatedPodsToDomainsByRanks(psa, rankToGatedPod)
+	rankToPod, ok := readRanksIfAvailable(log, psa, pods, psReq, offset, maxRank)
+	if ok {
+		if verifyDomainsForRanks(log, psa, rankToPod) {
+			return assignGatedPodsToDomainsByRanks(psa, rankToPod)
+		}
+		log.V(3).Info("Fallback to greedy assignment due to topology mismatch for running pods", "podSetName", psa.Name)
 	}
 	return assignGatedPodsToDomainsGreedy(log, psa, pods)
 }
@@ -473,7 +477,7 @@ func readRanksForLabels(
 	}
 
 	for _, pod := range pods {
-// pod.DeletionTimestamp check reverted to force conflict for terminating pods
+		// pod.DeletionTimestamp check reverted to force conflict for terminating pods
 		podIndex, err := utilpod.ReadUIntFromLabelBelowBound(pod, *psReq.PodIndexLabel, int(maxRank))
 		if err != nil {
 			// the Pod has no rank information - ranks cannot be used
@@ -516,4 +520,41 @@ func isAdmittedByTAS(w *kueue.Workload) bool {
 			func(psa kueue.PodSetAssignment) bool {
 				return psa.TopologyAssignment != nil
 			})
+}
+
+func verifyDomainsForRanks(
+	log logr.Logger,
+	psa *kueue.PodSetAssignment,
+	rankToPod map[int]*corev1.Pod) bool {
+	totalPodCount := 0
+	for count := range utiltas.PodCounts(psa.TopologyAssignment) {
+		totalPodCount += int(count)
+	}
+	rankToDomainID := make([]utiltas.TopologyDomainID, totalPodCount)
+	index := int32(0)
+	for domain := range utiltas.InternalSeqFrom(psa.TopologyAssignment) {
+		for s := range domain.Count {
+			rankToDomainID[index+s] = utiltas.DomainID(domain.Values)
+		}
+		index += domain.Count
+	}
+
+	for rank, pod := range rankToPod {
+		if utilpod.HasGate(pod, kueue.TopologySchedulingGate) {
+			continue
+		}
+		if rank >= len(rankToDomainID) {
+			continue
+		}
+		expectedDomainID := rankToDomainID[rank]
+		levelKeys := psa.TopologyAssignment.Levels
+		podLevelValues := utiltas.LevelValues(levelKeys, pod.Spec.NodeSelector)
+		podDomainID := utiltas.DomainID(podLevelValues)
+
+		if expectedDomainID != podDomainID {
+			log.V(3).Info("Topology assignment mismatch for running pod", "pod", klog.KObj(pod), "rank", rank, "expectedDomainID", expectedDomainID, "actualDomainID", podDomainID)
+			return false
+		}
+	}
+	return true
 }
