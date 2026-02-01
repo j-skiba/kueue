@@ -55,6 +55,7 @@ type ReplicatedJobRequirements struct {
 	PodAnnotations map[string]string
 	Image          string
 	Args           []string
+	RestartPolicy  corev1.RestartPolicy
 }
 
 // MakeJobSet creates a wrapper for a suspended JobSet
@@ -87,6 +88,9 @@ func (j *JobSetWrapper) ReplicatedJobs(replicatedJobs ...ReplicatedJobRequiremen
 			jt.Spec.BackoffLimit = ptr.To[int32](0)
 			spec := &jt.Spec.Template.Spec
 			spec.RestartPolicy = corev1.RestartPolicyNever
+			if req.RestartPolicy != "" {
+				spec.RestartPolicy = req.RestartPolicy
+			}
 			spec.TerminationGracePeriodSeconds = ptr.To[int64](0)
 			spec.Containers = []corev1.Container{
 				{

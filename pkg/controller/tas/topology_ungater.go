@@ -240,6 +240,7 @@ func (r *topologyUngater) Reconcile(ctx context.Context, req reconcile.Request) 
 					maxRank[psa.Name] += int32(offset)
 				}
 			}
+			log.Info("Processing PodSetAssignment", "podSet", psa.Name, "assignment", psa.TopologyAssignment)
 			gatedPodsToDomains := assignGatedPodsToDomains(log, &psa, pods, psNameToTopologyRequest[psa.Name], rankOffsets[psa.Name], maxRank[psa.Name])
 			if len(gatedPodsToDomains) > 0 {
 				toUngate := podsToUngateInfo(&psa, gatedPodsToDomains)
@@ -311,9 +312,9 @@ func (r *topologyUngater) podsForPodSet(ctx context.Context, ns, wlName string, 
 	}
 	result := make([]*corev1.Pod, 0, len(pods.Items))
 	for i := range pods.Items {
-		if utilpod.IsTerminated(&pods.Items[i]) {
-			// ignore failed or succeeded pods as they need to be replaced, and
-			// so we don't want to count them as already ungated Pods.
+		if pods.Items[i].Status.Phase == corev1.PodSucceeded {
+			// Only ignore succeeded pods. We need to see Failed/Terminating pods
+			// to trigger greedy assignment fallback.
 			continue
 		}
 		result = append(result, &pods.Items[i])
@@ -348,6 +349,13 @@ func assignGatedPodsToDomains(
 	psReq *kueue.PodSetTopologyRequest,
 	offset int32,
 	maxRank int32) []podWithDomain {
+	for _, pod := range pods {
+		if !utilpod.HasGate(pod, kueue.TopologySchedulingGate) && (utilpod.IsTerminated(pod) || !pod.DeletionTimestamp.IsZero()) {
+			log.V(3).Info("Fallback to greedy assignment due to terminated or terminating pods", "pod", klog.KObj(pod))
+			return assignGatedPodsToDomainsGreedy(log, psa, pods)
+		}
+	}
+
 	if rankToGatedPod, ok := readRanksIfAvailable(log, psa, pods, psReq, offset, maxRank); ok {
 		return assignGatedPodsToDomainsByRanks(psa, rankToGatedPod)
 	}
@@ -370,6 +378,11 @@ func assignGatedPodsToDomainsByRanks(
 		}
 		index += domain.Count
 	}
+	// Log the rank to domain ID mapping
+	// logr keys must be strings, so we convert the map to a format logr accepts or just log the list
+	// rankToDomainID is a slice where index=rank
+	ctrl.Log.Info("Assigned domains by rank", "podSetName", psa.Name, "rankToDomainID", rankToDomainID)
+
 	for rank, pod := range rankToGatedPod {
 		toUngate = append(toUngate, podWithDomain{
 			pod:      pod,
@@ -390,6 +403,9 @@ func assignGatedPodsToDomainsGreedy(
 		if utilpod.HasGate(pod, kueue.TopologySchedulingGate) {
 			gatedPods = append(gatedPods, pod)
 		} else {
+			if utilpod.IsTerminated(pod) || pod.DeletionTimestamp != nil {
+				continue
+			}
 			levelValues := utiltas.LevelValues(levelKeys, pod.Spec.NodeSelector)
 			domainID := utiltas.DomainID(levelValues)
 			domainIDToUngatedCnt[domainID]++
@@ -457,6 +473,7 @@ func readRanksForLabels(
 	}
 
 	for _, pod := range pods {
+// pod.DeletionTimestamp check reverted to force conflict for terminating pods
 		podIndex, err := utilpod.ReadUIntFromLabelBelowBound(pod, *psReq.PodIndexLabel, int(maxRank))
 		if err != nil {
 			// the Pod has no rank information - ranks cannot be used
