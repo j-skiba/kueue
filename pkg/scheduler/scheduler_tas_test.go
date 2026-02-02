@@ -6307,8 +6307,8 @@ func TestScheduleForTASWhenWorkloadModifiedConcurrently(t *testing.T) {
 					cmpopts.IgnoreFields(utiltesting.EventRecord{}, "Message"),
 				); diff != "" {
 					t.Errorf("Unexpected events (-want/+got):\n%s", diff)
-				})
-			}
+				}
+			})
 		}
 	}
 }

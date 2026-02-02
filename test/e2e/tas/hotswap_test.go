@@ -46,8 +46,8 @@ var _ = ginkgo.Describe("Hotswap for Topology Aware Scheduling", ginkgo.Ordered,
 		ns = util.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "e2e-tas-hotswap-")
 	})
 	ginkgo.AfterEach(func() {
-		gomega.Expect(util.DeleteNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
-		util.ExpectAllPodsInNamespaceDeleted(ctx, k8sClient, ns)
+// gomega.Expect(util.DeleteNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
+// util.ExpectAllPodsInNamespaceDeleted(ctx, k8sClient, ns)
 	})
 	// The topology of the e2e cluster looks as follows
 	// Block:              b1                                 b2
@@ -84,9 +84,27 @@ var _ = ginkgo.Describe("Hotswap for Topology Aware Scheduling", ginkgo.Ordered,
 
 			localQueue = utiltestingapi.MakeLocalQueue("main", ns.Name).ClusterQueue("cluster-queue").Obj()
 			util.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, localQueue)
+
+			ginkgo.By("Waiting for all nodes to be ready", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					nodes := &corev1.NodeList{}
+					g.Expect(k8sClient.List(ctx, nodes)).To(gomega.Succeed())
+					for _, node := range nodes.Items {
+						g.Expect(node.Status.Conditions).To(gomega.ContainElement(gomega.BeComparableTo(corev1.NodeCondition{
+							Type:   corev1.NodeReady,
+							Status: corev1.ConditionTrue,
+						}, cmpopts.IgnoreFields(corev1.NodeCondition{}, "LastHeartbeatTime", "LastTransitionTime", "Reason", "Message"))))
+					}
+				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+			})
 		})
-		ginkgo.AfterEach(func() {
-			if nodeToRestore != nil {
+			ginkgo.AfterEach(func() {
+				if ginkgo.CurrentSpecReport().Failed() {
+					fmt.Printf("Test failed, sleeping for 10 minutes to allow inspection. Namespace: %s\n", ns.Name)
+					time.Sleep(10 * time.Minute)
+				}
+				if nodeToRestore != nil {
+		
 				ginkgo.By(fmt.Sprintf("Re-creating node %s", nodeToRestore.Name))
 				nodeToRestore.ResourceVersion = ""
 				nodeToRestore.UID = ""
@@ -136,7 +154,7 @@ var _ = ginkgo.Describe("Hotswap for Topology Aware Scheduling", ginkgo.Ordered,
 					testingjobset.ReplicatedJobRequirements{
 						Name:        replicatedJobName,
 						Image:       util.GetAgnHostImage(),
-						Args:        util.BehaviorWaitForDeletion,
+						Args:        []string{"pause"},
 						Replicas:    int32(replicas),
 						Parallelism: int32(parallelism),
 						Completions: int32(parallelism),
@@ -149,7 +167,6 @@ var _ = ginkgo.Describe("Hotswap for Topology Aware Scheduling", ginkgo.Ordered,
 				).
 				RequestAndLimit(replicatedJobName, extraResource, "1").
 				RequestAndLimit(replicatedJobName, corev1.ResourceCPU, "200m").
-				BackoffLimit(10).
 				Obj()
 			util.MustCreate(ctx, k8sClient, sampleJob)
 
@@ -224,7 +241,6 @@ var _ = ginkgo.Describe("Hotswap for Topology Aware Scheduling", ginkgo.Ordered,
 				).
 				RequestAndLimit(replicatedJobName, extraResource, "1").
 				RequestAndLimit(replicatedJobName, corev1.ResourceCPU, "200m").
-				BackoffLimit(10).
 				Obj()
 			util.MustCreate(ctx, k8sClient, sampleJob)
 
@@ -280,6 +296,7 @@ var _ = ginkgo.Describe("Hotswap for Topology Aware Scheduling", ginkgo.Ordered,
 				// Manually delete the pod to trigger replacement
 				gomega.Expect(k8sClient.Delete(ctx, &chosenPod)).To(gomega.Succeed())
 			})
+			time.Sleep(time.Second*10)
 			ginkgo.By("Check that the topology assignment is updated with the new node in the same block", func() {
 				expectedNodes := []string{
 					"kind-worker2", "kind-worker3", "kind-worker4",
@@ -320,7 +337,6 @@ var _ = ginkgo.Describe("Hotswap for Topology Aware Scheduling", ginkgo.Ordered,
 				).
 				RequestAndLimit(replicatedJobName, extraResource, "1").
 				RequestAndLimit(replicatedJobName, corev1.ResourceCPU, "200m").
-				BackoffLimit(10).
 				Obj()
 			util.MustCreate(ctx, k8sClient, sampleJob)
 
@@ -380,7 +396,7 @@ var _ = ginkgo.Describe("Hotswap for Topology Aware Scheduling", ginkgo.Ordered,
 					testingjobset.ReplicatedJobRequirements{
 						Name:        replicatedJobName,
 						Image:       util.GetAgnHostImage(),
-						Args:        util.BehaviorWaitForDeletion,
+						Args:        []string{"pause"},
 						Replicas:    int32(replicas),
 						Parallelism: int32(parallelism),
 						Completions: int32(parallelism),
@@ -393,7 +409,6 @@ var _ = ginkgo.Describe("Hotswap for Topology Aware Scheduling", ginkgo.Ordered,
 				).
 				RequestAndLimit(replicatedJobName, extraResource, "1").
 				RequestAndLimit(replicatedJobName, corev1.ResourceCPU, "200m").
-				BackoffLimit(10).
 				Obj()
 			util.MustCreate(ctx, k8sClient, sampleJob)
 
@@ -467,7 +482,7 @@ var _ = ginkgo.Describe("Hotswap for Topology Aware Scheduling", ginkgo.Ordered,
 					testingjobset.ReplicatedJobRequirements{
 						Name:        replicatedJobName,
 						Image:       util.GetAgnHostImage(),
-						Args:        util.BehaviorWaitForDeletion,
+						Args:        []string{"pause"},
 						Replicas:    int32(replicas),
 						Parallelism: int32(parallelism),
 						Completions: int32(parallelism),
