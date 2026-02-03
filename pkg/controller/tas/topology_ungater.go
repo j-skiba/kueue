@@ -26,7 +26,6 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -543,8 +542,7 @@ func verifyDomainsForRanks(
 }
 
 func isAdmittedByTAS(w *kueue.Workload) bool {
-	return w.Status.Admission != nil &&
-		apimeta.IsStatusConditionTrue(w.Status.Conditions, kueue.WorkloadAdmitted) &&
+	return w.Status.Admission != nil && workload.IsAdmitted(w) &&
 		slices.ContainsFunc(w.Status.Admission.PodSetAssignments,
 			func(psa kueue.PodSetAssignment) bool {
 				return psa.TopologyAssignment != nil

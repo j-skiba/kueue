@@ -100,4 +100,3 @@ func GetNodeCondition(node *corev1.Node, conditionType corev1.NodeConditionType)
 func IsLowestLevelHostname(levels []string) bool {
 	return len(levels) > 0 && levels[len(levels)-1] == corev1.LabelHostname
 }
-

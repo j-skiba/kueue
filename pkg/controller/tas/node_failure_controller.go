@@ -223,7 +223,6 @@ func hasTASAssignmentOnNode(wl *kueue.Workload, nodeName string) bool {
 	return false
 }
 
-
 func (r *nodeFailureReconciler) getWorkloadsForImmediateReplacement(ctx context.Context, nodeName string) (sets.Set[types.NamespacedName], error) {
 	tasWorkloadsOnNode, err := r.getWorkloadsOnNode(ctx, nodeName)
 	if err != nil {

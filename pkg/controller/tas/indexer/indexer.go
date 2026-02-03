@@ -85,7 +85,6 @@ func indexResourceFlavorTopologyName(o client.Object) []string {
 	return []string{string(*flavor.Spec.TopologyName)}
 }
 
-
 func SetupIndexes(ctx context.Context, indexer client.FieldIndexer) error {
 	if err := indexer.IndexField(ctx, &corev1.Pod{}, TASKey, indexPodTAS); err != nil {
 		return fmt.Errorf("setting index pod TAS: %w", err)
