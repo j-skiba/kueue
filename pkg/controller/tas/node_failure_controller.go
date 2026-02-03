@@ -63,7 +63,7 @@ const (
 type nodeFailureReconciler struct {
 	client      client.Client
 	clock       clock.Clock
-	logName     string
+	log         logr.Logger
 	recorder    record.EventRecorder
 	roleTracker *roletracker.RoleTracker
 }
@@ -102,7 +102,7 @@ func (r *nodeFailureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
-		keepMonitoring, err := r.handleReadyNode(ctx, &node, affectedWorkloads)
+		keepMonitoring, err := r.handleHealthyNode(ctx, &node, affectedWorkloads)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -142,11 +142,11 @@ func (r *nodeFailureReconciler) Update(e event.TypedUpdateEvent[*corev1.Node]) b
 	newReady := utiltas.IsNodeStatusConditionTrue(e.ObjectNew.Status.Conditions, corev1.NodeReady)
 	oldReady := utiltas.IsNodeStatusConditionTrue(e.ObjectOld.Status.Conditions, corev1.NodeReady)
 	if oldReady != newReady {
-		r.logger().V(4).Info("Node Ready status changed, triggering reconcile", "node", klog.KObj(e.ObjectNew), "oldReady", oldReady, "newReady", newReady)
+		r.log.V(4).Info("Node Ready status changed, triggering reconcile", "node", klog.KObj(e.ObjectNew), "oldReady", oldReady, "newReady", newReady)
 		return true
 	}
 	if features.Enabled(features.TASTaintEviction) && !taintsEqual(e.ObjectOld.Spec.Taints, e.ObjectNew.Spec.Taints) {
-		r.logger().V(4).Info("Node taints changed, triggering reconcile", "node", klog.KObj(e.ObjectNew))
+		r.log.V(4).Info("Node taints changed, triggering reconcile", "node", klog.KObj(e.ObjectNew))
 		return true
 	}
 	return false
@@ -163,15 +163,11 @@ func (r *nodeFailureReconciler) Delete(e event.TypedDeleteEvent[*corev1.Node]) b
 func newNodeFailureReconciler(client client.Client, recorder record.EventRecorder, roleTracker *roletracker.RoleTracker) *nodeFailureReconciler {
 	return &nodeFailureReconciler{
 		client:      client,
-		logName:     TASNodeFailureController,
+		log:         roletracker.WithReplicaRole(ctrl.Log.WithName(TASNodeFailureController), roleTracker),
 		clock:       clock.RealClock{},
 		recorder:    recorder,
 		roleTracker: roleTracker,
 	}
-}
-
-func (r *nodeFailureReconciler) logger() logr.Logger {
-	return roletracker.WithReplicaRole(ctrl.Log.WithName(r.logName), r.roleTracker)
 }
 
 func (r *nodeFailureReconciler) SetupWithManager(mgr ctrl.Manager, cfg *config.Configuration) (string, error) {
@@ -194,38 +190,16 @@ func (r *nodeFailureReconciler) SetupWithManager(mgr ctrl.Manager, cfg *config.C
 // getWorkloadsOnNode gets all workloads that have the given node assigned in TAS topology assignment
 func (r *nodeFailureReconciler) getWorkloadsOnNode(ctx context.Context, nodeName string) (sets.Set[types.NamespacedName], error) {
 	var allWorkloads kueue.WorkloadList
-	if err := r.client.List(ctx, &allWorkloads); err != nil {
+	if err := r.client.List(ctx, &allWorkloads, client.MatchingFields{indexer.WorkloadTASNodeKey: nodeName}); err != nil {
 		return nil, fmt.Errorf("failed to list workloads: %w", err)
 	}
 	tasWorkloadsOnNode := sets.New[types.NamespacedName]()
 	for _, wl := range allWorkloads.Items {
-		if hasTASAssignmentOnNode(&wl, nodeName) {
-			tasWorkloadsOnNode.Insert(types.NamespacedName{Name: wl.Name, Namespace: wl.Namespace})
-		}
+		tasWorkloadsOnNode.Insert(types.NamespacedName{Name: wl.Name, Namespace: wl.Namespace})
 	}
 	return tasWorkloadsOnNode, nil
 }
 
-func hasTASAssignmentOnNode(wl *kueue.Workload, nodeName string) bool {
-	if !isAdmittedByTAS(wl) {
-		return false
-	}
-	for _, podSetAssignment := range wl.Status.Admission.PodSetAssignments {
-		topologyAssignment := podSetAssignment.TopologyAssignment
-		if topologyAssignment == nil {
-			continue
-		}
-		if !utiltas.IsLowestLevelHostname(topologyAssignment.Levels) {
-			continue
-		}
-		for value := range utiltas.LowestLevelValues(topologyAssignment) {
-			if value == nodeName {
-				return true
-			}
-		}
-	}
-	return false
-}
 
 func (r *nodeFailureReconciler) getWorkloadsForImmediateReplacement(ctx context.Context, nodeName string) (sets.Set[types.NamespacedName], error) {
 	tasWorkloadsOnNode, err := r.getWorkloadsOnNode(ctx, nodeName)
@@ -324,15 +298,15 @@ func (r *nodeFailureReconciler) reconcileForReplaceNodeOnPodTermination(ctx cont
 	}
 }
 
-// handleReadyNode evaluate if a Ready node is unhealthy for its assigned workloads due to untolerated taints.
+// handleHealthyNode evaluate if a Ready node is unhealthy for its assigned workloads due to untolerated taints.
+// It also clears the unhealthyNodes field for each of the specified workloads if it is no longer unhealthy.
 // It returns whether any workload needs monitoring (leading to a requeue), and whether an error was encountered.
-func (r *nodeFailureReconciler) handleReadyNode(ctx context.Context, node *corev1.Node, affectedWorkloads sets.Set[types.NamespacedName]) (bool, error) {
-	log := ctrl.LoggerFrom(ctx)
+func (r *nodeFailureReconciler) handleHealthyNode(ctx context.Context, node *corev1.Node, affectedWorkloads sets.Set[types.NamespacedName]) (bool, error) {
 	var workloadProcessingErrors []error
 	keepMonitoring := false
 
 	for wlKey := range affectedWorkloads {
-		log = log.WithValues("workload", klog.KRef(wlKey.Namespace, wlKey.Name))
+		log := r.log.WithValues("workload", klog.KRef(wlKey.Namespace, wlKey.Name))
 		var wl kueue.Workload
 		if err := r.client.Get(ctx, wlKey, &wl); err != nil {
 			if apierrors.IsNotFound(err) {

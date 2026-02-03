@@ -649,7 +649,6 @@ func (s *Scheduler) admit(ctx context.Context, e *entry, cq *schdcache.ClusterQu
 			s.prepareWorkload(log, wl, cq, admission)
 			if features.Enabled(features.TopologyAwareScheduling) && workload.HasUnhealthyNodes(e.Obj) {
 				log.V(5).Info("Clearing the topology assignment recovery field from the workload status after successful recovery")
-				log.V(2).Info("Clearing unhealthy nodes from workload status", "workload", klog.KObj(e.Obj), "unhealthyNodes", e.Obj.Status.UnhealthyNodes)
 				wl.Status.UnhealthyNodes = nil
 			}
 			return true, nil

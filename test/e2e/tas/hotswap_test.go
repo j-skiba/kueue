@@ -99,7 +99,6 @@ var _ = ginkgo.Describe("Hotswap for Topology Aware Scheduling", ginkgo.Ordered,
 		})
 		ginkgo.AfterEach(func() {
 			if nodeToRestore != nil {
-
 				ginkgo.By(fmt.Sprintf("Re-creating node %s", nodeToRestore.Name))
 				nodeToRestore.ResourceVersion = ""
 				nodeToRestore.UID = ""

@@ -34,6 +34,7 @@ const (
 	ReadyNode                     = "metadata.ready"
 	SchedulableNode               = "spec.schedulable"
 	ResourceFlavorTopologyNameKey = "spec.topologyName"
+	WorkloadTASNodeKey            = "status.admission.podSetAssignments.topologyAssignment.nodeNames"
 )
 
 func indexPodTAS(o client.Object) []string {
@@ -85,6 +86,22 @@ func indexResourceFlavorTopologyName(o client.Object) []string {
 	return []string{string(*flavor.Spec.TopologyName)}
 }
 
+func indexWorkloadTASNodes(o client.Object) []string {
+	wl, ok := o.(*kueue.Workload)
+	if !ok || !utiltas.IsAdmittedByTAS(wl) {
+		return nil
+	}
+	nodes := make([]string, 0)
+	for _, psa := range wl.Status.Admission.PodSetAssignments {
+		if psa.TopologyAssignment != nil && utiltas.IsLowestLevelHostname(psa.TopologyAssignment.Levels) {
+			for val := range utiltas.LowestLevelValues(psa.TopologyAssignment) {
+				nodes = append(nodes, val)
+			}
+		}
+	}
+	return nodes
+}
+
 func SetupIndexes(ctx context.Context, indexer client.FieldIndexer) error {
 	if err := indexer.IndexField(ctx, &corev1.Pod{}, TASKey, indexPodTAS); err != nil {
 		return fmt.Errorf("setting index pod TAS: %w", err)
@@ -104,6 +121,9 @@ func SetupIndexes(ctx context.Context, indexer client.FieldIndexer) error {
 
 	if err := indexer.IndexField(ctx, &kueue.ResourceFlavor{}, ResourceFlavorTopologyNameKey, indexResourceFlavorTopologyName); err != nil {
 		return fmt.Errorf("setting index resource flavor topology name: %w", err)
+	}
+	if err := indexer.IndexField(ctx, &kueue.Workload{}, WorkloadTASNodeKey, indexWorkloadTASNodes); err != nil {
+		return fmt.Errorf("setting index workload TAS nodes: %w", err)
 	}
 	return nil
 }

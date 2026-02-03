@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"strconv"
 
 	"github.com/go-logr/logr"
@@ -173,7 +172,7 @@ func (r *topologyUngater) Reconcile(ctx context.Context, req reconcile.Request) 
 		log.V(3).Info("There are pending ungate operations")
 		return reconcile.Result{}, errPendingUngateOps
 	}
-	if !isAdmittedByTAS(wl) {
+	if !utiltas.IsAdmittedByTAS(wl) {
 		// this is a safeguard. In particular, it helps to prevent the race
 		// condition if the workload is evicted before the reconcile is
 		// triggered.
@@ -240,7 +239,6 @@ func (r *topologyUngater) Reconcile(ctx context.Context, req reconcile.Request) 
 					maxRank[psa.Name] += int32(offset)
 				}
 			}
-			log.Info("Processing PodSetAssignment", "podSet", psa.Name, "assignment", psa.TopologyAssignment)
 			gatedPodsToDomains := assignGatedPodsToDomains(log, &psa, pods, psNameToTopologyRequest[psa.Name], rankOffsets[psa.Name], maxRank[psa.Name])
 			if len(gatedPodsToDomains) > 0 {
 				toUngate := podsToUngateInfo(&psa, gatedPodsToDomains)
@@ -286,15 +284,15 @@ func (r *topologyUngater) Reconcile(ctx context.Context, req reconcile.Request) 
 }
 
 func (r *topologyUngater) Create(event event.TypedCreateEvent[*kueue.Workload]) bool {
-	return isAdmittedByTAS(event.Object)
+	return utiltas.IsAdmittedByTAS(event.Object)
 }
 
 func (r *topologyUngater) Delete(event event.TypedDeleteEvent[*kueue.Workload]) bool {
-	return isAdmittedByTAS(event.Object)
+	return utiltas.IsAdmittedByTAS(event.Object)
 }
 
 func (r *topologyUngater) Update(event event.TypedUpdateEvent[*kueue.Workload]) bool {
-	return isAdmittedByTAS(event.ObjectNew)
+	return utiltas.IsAdmittedByTAS(event.ObjectNew)
 }
 
 func (r *topologyUngater) Generic(event.TypedGenericEvent[*kueue.Workload]) bool {
@@ -382,7 +380,6 @@ func assignGatedPodsToDomainsByRanks(
 		}
 		index += domain.Count
 	}
-
 	for rank, pod := range rankToGatedPod {
 		toUngate = append(toUngate, podWithDomain{
 			pod:      pod,
@@ -506,13 +503,6 @@ func readRanksForLabels(
 	return result, nil
 }
 
-func isAdmittedByTAS(w *kueue.Workload) bool {
-	return w.Status.Admission != nil && workload.IsAdmitted(w) &&
-		slices.ContainsFunc(w.Status.Admission.PodSetAssignments,
-			func(psa kueue.PodSetAssignment) bool {
-				return psa.TopologyAssignment != nil
-			})
-}
 
 func verifyDomainsForRanks(
 	log logr.Logger,
