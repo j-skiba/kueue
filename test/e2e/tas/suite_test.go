@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -28,13 +29,16 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	configapi "sigs.k8s.io/kueue/apis/config/v1beta2"
 	clientutil "sigs.k8s.io/kueue/pkg/util/client"
 	"sigs.k8s.io/kueue/test/util"
 )
 
 var (
-	k8sClient client.WithWatch
-	ctx       context.Context
+	k8sClient       client.WithWatch
+	ctx             context.Context
+	defaultKueueCfg *configapi.Configuration
+	kindClusterName = os.Getenv("KIND_CLUSTER_NAME")
 )
 
 func TestAPIs(t *testing.T) {
@@ -56,21 +60,21 @@ var _ = ginkgo.BeforeSuite(func() {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	ctx = ginkgo.GinkgoT().Context()
 
-	/*
-		waitForAvailableStart := time.Now()
+	defaultKueueCfg = util.GetKueueConfiguration(ctx, k8sClient)
 
-		util.WaitForKueueAvailability(ctx, k8sClient)
-		util.WaitForJobSetAvailability(ctx, k8sClient)
-		util.WaitForKubeFlowTrainingOperatorAvailability(ctx, k8sClient)
-		util.WaitForKubeFlowMPIOperatorAvailability(ctx, k8sClient)
-		util.WaitForAppWrapperAvailability(ctx, k8sClient)
-		util.WaitForLeaderWorkerSetAvailability(ctx, k8sClient)
-		util.WaitForKubeRayOperatorAvailability(ctx, k8sClient)
-		ginkgo.GinkgoLogr.Info(
-			"Kueue and all required operators are available in the cluster",
-			"waitingTime", time.Since(waitForAvailableStart),
-		)
-	*/
+	waitForAvailableStart := time.Now()
+
+	util.WaitForKueueAvailability(ctx, k8sClient)
+	util.WaitForJobSetAvailability(ctx, k8sClient)
+	util.WaitForKubeFlowTrainingOperatorAvailability(ctx, k8sClient)
+	util.WaitForKubeFlowMPIOperatorAvailability(ctx, k8sClient)
+	util.WaitForAppWrapperAvailability(ctx, k8sClient)
+	util.WaitForLeaderWorkerSetAvailability(ctx, k8sClient)
+	util.WaitForKubeRayOperatorAvailability(ctx, k8sClient)
+	ginkgo.GinkgoLogr.Info(
+		"Kueue and all required operators are available in the cluster",
+		"waitingTime", time.Since(waitForAvailableStart),
+	)
 
 	nodes := &corev1.NodeList{}
 	requiredLabels := client.MatchingLabels{}
@@ -90,4 +94,8 @@ var _ = ginkgo.BeforeSuite(func() {
 			g.Expect(err).NotTo(gomega.HaveOccurred())
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 	}
+})
+
+var _ = ginkgo.AfterSuite(func() {
+	util.UpdateKueueConfiguration(ctx, k8sClient, defaultKueueCfg, kindClusterName)
 })
