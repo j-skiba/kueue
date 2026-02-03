@@ -261,21 +261,15 @@ func (r *topologyUngater) Reconcile(ctx context.Context, req reconcile.Request) 
 		podWithUngateInfo := &allToUngate[i]
 		var ungated bool
 		e := utilclient.Patch(ctx, r.client, podWithUngateInfo.pod, func() (bool, error) {
-			if !utilpod.HasGate(podWithUngateInfo.pod, kueue.TopologySchedulingGate) {
-				return false, nil
+			ungated = utilpod.Ungate(podWithUngateInfo.pod, kueue.TopologySchedulingGate)
+			if ungated {
+				log.V(3).Info("ungating pod", "pod", klog.KObj(podWithUngateInfo.pod), "nodeLabels", podWithUngateInfo.nodeLabels)
+				if podWithUngateInfo.pod.Spec.NodeSelector == nil {
+					podWithUngateInfo.pod.Spec.NodeSelector = make(map[string]string)
+				}
+				maps.Copy(podWithUngateInfo.pod.Spec.NodeSelector, podWithUngateInfo.nodeLabels)
 			}
-
-			if podWithUngateInfo.pod.Spec.NodeSelector == nil {
-				podWithUngateInfo.pod.Spec.NodeSelector = make(map[string]string)
-			}
-			maps.Copy(podWithUngateInfo.pod.Spec.NodeSelector, podWithUngateInfo.nodeLabels)
-
-			if len(podWithUngateInfo.pod.Spec.SchedulingGates) == 1 {
-				ungated = utilpod.Ungate(podWithUngateInfo.pod, kueue.TopologySchedulingGate)
-			} else {
-				ungated = false
-			}
-			return true, nil
+			return ungated, nil
 		})
 		if e != nil {
 			// We won't observe this cleanup in the event handler.
@@ -318,9 +312,9 @@ func (r *topologyUngater) podsForPodSet(ctx context.Context, ns, wlName string, 
 	}
 	result := make([]*corev1.Pod, 0, len(pods.Items))
 	for i := range pods.Items {
-		if utilpod.IsTerminated(&pods.Items[i]) { 
-			// Only ignore succeeded pods. We need to see Failed/Terminating pods
-			// to trigger greedy assignment fallback.
+		if utilpod.IsTerminated(&pods.Items[i]) {
+			// ignore failed or succeeded pods as they need to be replaced, and
+			// so we don't want to count them as already ungated Pods.
 			continue
 		}
 		result = append(result, &pods.Items[i])
@@ -388,10 +382,6 @@ func assignGatedPodsToDomainsByRanks(
 		}
 		index += domain.Count
 	}
-	// Log the rank to domain ID mapping
-	// logr keys must be strings, so we convert the map to a format logr accepts or just log the list
-	// rankToDomainID is a slice where index=rank
-	ctrl.Log.Info("Assigned domains by rank", "podSetName", psa.Name, "rankToDomainID", rankToDomainID)
 
 	for rank, pod := range rankToGatedPod {
 		toUngate = append(toUngate, podWithDomain{
@@ -480,7 +470,6 @@ func readRanksForLabels(
 	}
 
 	for _, pod := range pods {
-		// pod.DeletionTimestamp check reverted to force conflict for terminating pods
 		podIndex, err := utilpod.ReadUIntFromLabelBelowBound(pod, *psReq.PodIndexLabel, int(maxRank))
 		if err != nil {
 			// the Pod has no rank information - ranks cannot be used

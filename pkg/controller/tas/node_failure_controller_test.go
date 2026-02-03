@@ -233,6 +233,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 				basePod.DeepCopy(),
 			},
 			reconcileRequests: []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
+			wantRequeue:       1 * time.Second,
 		},
 
 		"Node Deleted - marked as unavailable": {
@@ -271,7 +272,6 @@ func TestNodeFailureReconciler(t *testing.T) {
 			},
 		},
 		"Node has untolerated NoSchedule taint, pods running -> Healthy": {
-			featureGates: map[featuregate.Feature]bool{features.TASReplaceNodeOnPodTermination: true},
 			initObjs: []client.Object{
 				baseNode.Clone().StatusConditions(corev1.NodeCondition{
 					Type:               corev1.NodeReady,
@@ -287,8 +287,9 @@ func TestNodeFailureReconciler(t *testing.T) {
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: nil,
+			featureGates:       map[featuregate.Feature]bool{features.TASTaintEviction: true},
 		},
-		"Node has untolerated NoSchedule taint, pods failed -> Unhealthy": {
+		"Node has untolerated NoSchedule taint, pods failed -> Healthy": {
 			initObjs: []client.Object{
 				baseNode.Clone().StatusConditions(corev1.NodeCondition{
 					Type:               corev1.NodeReady,
@@ -299,9 +300,10 @@ func TestNodeFailureReconciler(t *testing.T) {
 				failedPod,
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
-			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			wantUnhealthyNodes: nil,
+			featureGates:       map[featuregate.Feature]bool{features.TASTaintEviction: true},
 		},
-		"Node has untolerated NoSchedule taint, pods absent (cannot start) -> Unhealthy": {
+		"Node has untolerated NoSchedule taint, pods absent (cannot start) -> Healthy": {
 			initObjs: []client.Object{
 				baseNode.Clone().StatusConditions(corev1.NodeCondition{
 					Type:               corev1.NodeReady,
@@ -312,9 +314,10 @@ func TestNodeFailureReconciler(t *testing.T) {
 				// No pod
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
-			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			wantUnhealthyNodes: nil,
+			featureGates:       map[featuregate.Feature]bool{features.TASTaintEviction: true},
 		},
-		"Node has untolerated NoSchedule taint, pods pending -> Unhealthy": {
+		"Node has untolerated NoSchedule taint, pods pending -> Healthy": {
 			initObjs: []client.Object{
 				baseNode.Clone().StatusConditions(corev1.NodeCondition{
 					Type:               corev1.NodeReady,
@@ -329,9 +332,10 @@ func TestNodeFailureReconciler(t *testing.T) {
 				}(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
-			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			wantUnhealthyNodes: nil,
+			featureGates:       map[featuregate.Feature]bool{features.TASTaintEviction: true},
 		},
-		"Node has untolerated NoSchedule taint, pods pending and not bound -> Unhealthy": {
+		"Node has untolerated NoSchedule taint, pods pending and not bound -> Healthy": {
 			initObjs: []client.Object{
 				baseNode.Clone().StatusConditions(corev1.NodeCondition{
 					Type:               corev1.NodeReady,
@@ -347,9 +351,10 @@ func TestNodeFailureReconciler(t *testing.T) {
 				}(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
-			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			wantUnhealthyNodes: nil,
+			featureGates:       map[featuregate.Feature]bool{features.TASTaintEviction: true},
 		},
-		"Node has untolerated NoSchedule taint, one pod running, one pod pending and not bound -> Unhealthy": {
+		"Node has untolerated NoSchedule taint, one pod running, one pod pending and not bound -> Healthy": {
 			initObjs: []client.Object{
 				baseNode.Clone().StatusConditions(corev1.NodeCondition{
 					Type:               corev1.NodeReady,
@@ -373,7 +378,8 @@ func TestNodeFailureReconciler(t *testing.T) {
 				}(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
-			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			wantUnhealthyNodes: nil,
+			featureGates:       map[featuregate.Feature]bool{features.TASTaintEviction: true},
 		},
 		"Node has untolerated NoExecute taint -> Unhealthy": {
 			initObjs: []client.Object{
@@ -387,6 +393,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			featureGates:       map[featuregate.Feature]bool{features.TASTaintEviction: true},
 		},
 		"Node has tolerated NoSchedule taint -> Healthy": {
 			initObjs: []client.Object{
@@ -417,6 +424,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: nil,
+			featureGates:       map[featuregate.Feature]bool{features.TASTaintEviction: true},
 		},
 		"Node has NoExecute taint with TolerationSeconds -> Healthy (wait for eviction)": {
 			initObjs: []client.Object{
@@ -452,6 +460,8 @@ func TestNodeFailureReconciler(t *testing.T) {
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: nil,
+			wantRequeue:        1 * time.Second,
+			featureGates:       map[featuregate.Feature]bool{features.TASTaintEviction: true},
 		},
 		"Node has NoExecute taint with TolerationSeconds, pod terminating -> Unhealthy": {
 			initObjs: []client.Object{
@@ -487,6 +497,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			featureGates:       map[featuregate.Feature]bool{features.TASTaintEviction: true},
 		},
 	}
 	for name, tc := range tests {
