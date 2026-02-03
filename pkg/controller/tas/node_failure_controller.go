@@ -154,9 +154,6 @@ func (r *nodeFailureReconciler) Update(e event.TypedUpdateEvent[*corev1.Node]) b
 		r.log.V(4).Info("Node Ready status changed, triggering reconcile", "node", klog.KObj(e.ObjectNew), "oldReady", oldReady, "newReady", newReady)
 		return true
 	}
-	// If the new node is NotReady and the old node was NotReady, we don't need to trigger reconcile
-	// because there is a RequeueAfter for the NotReady state.
-	// But if the taints changed, we might need to reconcile.
 	if !taintsEqual(e.ObjectOld.Spec.Taints, e.ObjectNew.Spec.Taints) {
 		r.log.V(4).Info("Node taints changed, triggering reconcile", "node", klog.KObj(e.ObjectNew))
 		return true
