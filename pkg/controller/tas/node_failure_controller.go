@@ -468,7 +468,7 @@ func (r *nodeFailureReconciler) isNodeUnhealthyForWorkload(ctx context.Context, 
 	// Filter pods for this node
 	var podsOnNode []corev1.Pod
 	for _, pod := range podsForWl.Items {
-		if pod.Spec.NodeName == node.Name || (pod.Spec.NodeName == "" && pod.Spec.NodeSelector[corev1.LabelHostname] == node.Name) {
+		if pod.Spec.NodeName == node.Name {
 			podsOnNode = append(podsOnNode, pod)
 		}
 	}
