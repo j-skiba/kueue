@@ -249,7 +249,7 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 
 		mode := e.assignment.RepresentativeMode()
 
-		if features.Enabled(features.TASFailedNodeReplacementFailFast) && workload.HasTopologyAssignmentWithUnhealthyNode(e.Obj) && mode == flavorassigner.NoFit {
+		if features.Enabled(features.TASFailedNodeReplacementFailFast) && workload.HasTopologyAssignmentWithUnhealthyNode(e.Obj) && mode != flavorassigner.Fit {
 			// evict workload we couldn't find the replacement for
 			if err := s.evictWorkloadAfterFailedTASReplacement(ctx, log, e.Obj.DeepCopy()); client.IgnoreNotFound(err) != nil {
 				log.V(2).Error(err, "Failed to evict workload")

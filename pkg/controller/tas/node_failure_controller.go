@@ -253,11 +253,21 @@ func (r *nodeFailureReconciler) getWorkloadsForImmediateReplacement(ctx context.
 			return nil, fmt.Errorf("failed to list pods for workload %s: %w", wlKey, err)
 		}
 		shouldReplace := false
+		hasPodsOnNode := false
+		anyRunning := false
 		for _, pod := range podsForWl.Items {
-			if pod.Spec.NodeName == nodeName && (!pod.DeletionTimestamp.IsZero() || utilpod.IsTerminated(&pod)) {
-				shouldReplace = true
-				break
+			if pod.Spec.NodeName == nodeName {
+				hasPodsOnNode = true
+				isTerminating := pod.DeletionTimestamp != nil
+				isTerminated := utilpod.IsTerminated(&pod)
+				if !isTerminating && !isTerminated {
+					anyRunning = true
+					break
+				}
 			}
+		}
+		if hasPodsOnNode && !anyRunning {
+			shouldReplace = true
 		}
 		if shouldReplace {
 			affectedWorkloads.Insert(wlKey)
@@ -489,7 +499,7 @@ func (r *nodeFailureReconciler) isNodeUnhealthyForWorkload(ctx context.Context, 
 	// Filter pods for this node
 	var podsOnNode []corev1.Pod
 	for _, pod := range podsForWl.Items {
-		if pod.Spec.NodeName == node.Name {
+		if pod.Spec.NodeName == node.Name || (pod.Spec.NodeName == "" && pod.Spec.NodeSelector[corev1.LabelHostname] == node.Name) {
 			podsOnNode = append(podsOnNode, pod)
 		}
 	}

@@ -204,14 +204,6 @@ func (j *JobSetWrapper) ManagedBy(c string) *JobSetWrapper {
 	return j
 }
 
-// BackoffLimit sets the backoff limit for all replicated jobs.
-func (j *JobSetWrapper) BackoffLimit(limit int32) *JobSetWrapper {
-	for i := range j.Spec.ReplicatedJobs {
-		j.Spec.ReplicatedJobs[i].Template.Spec.BackoffLimit = ptr.To(limit)
-	}
-	return j
-}
-
 // OwnerReference adds a ownerReference to the default container.
 func (j *JobSetWrapper) OwnerReference(ownerName string, ownerGVK schema.GroupVersionKind) *JobSetWrapper {
 	utiltesting.AppendOwnerReference(j, ownerGVK, ownerName, ownerName, ptr.To(true), ptr.To(true))

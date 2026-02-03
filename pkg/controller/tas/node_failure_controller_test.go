@@ -185,6 +185,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
 		},
 		"Node NotReady, pod terminating, marked as unavailable": {
+			featureGates: map[featuregate.Feature]bool{features.TASReplaceNodeOnPodTermination: true},
 			initObjs: []client.Object{
 				baseNode.Clone().StatusConditions(corev1.NodeCondition{
 					Type:               corev1.NodeReady,
@@ -313,6 +314,67 @@ func TestNodeFailureReconciler(t *testing.T) {
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
 		},
+		"Node has untolerated NoSchedule taint, pods pending -> Unhealthy": {
+			initObjs: []client.Object{
+				baseNode.Clone().StatusConditions(corev1.NodeCondition{
+					Type:               corev1.NodeReady,
+					Status:             corev1.ConditionTrue,
+					LastTransitionTime: now}).
+					Taints(corev1.Taint{Key: "foo", Effect: corev1.TaintEffectNoSchedule}).Obj(),
+				baseWorkload.DeepCopy(),
+				func() *corev1.Pod {
+					p := basePod.DeepCopy()
+					p.Status.Phase = corev1.PodPending
+					return p
+				}(),
+			},
+			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
+			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+		},
+		"Node has untolerated NoSchedule taint, pods pending and not bound -> Unhealthy": {
+			initObjs: []client.Object{
+				baseNode.Clone().StatusConditions(corev1.NodeCondition{
+					Type:               corev1.NodeReady,
+					Status:             corev1.ConditionTrue,
+					LastTransitionTime: now}).
+					Taints(corev1.Taint{Key: "foo", Effect: corev1.TaintEffectNoSchedule}).Obj(),
+				baseWorkload.DeepCopy(),
+				func() *corev1.Pod {
+					p := basePod.DeepCopy()
+					p.Spec.NodeName = ""
+					p.Status.Phase = corev1.PodPending
+					return p
+				}(),
+			},
+			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
+			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+		},
+		"Node has untolerated NoSchedule taint, one pod running, one pod pending and not bound -> Unhealthy": {
+			initObjs: []client.Object{
+				baseNode.Clone().StatusConditions(corev1.NodeCondition{
+					Type:               corev1.NodeReady,
+					Status:             corev1.ConditionTrue,
+					LastTransitionTime: now}).
+					Taints(corev1.Taint{Key: "foo", Effect: corev1.TaintEffectNoSchedule}).Obj(),
+				baseWorkload.DeepCopy(),
+				func() *corev1.Pod {
+					p := basePod.DeepCopy()
+					p.ObjectMeta.Name = "running-pod"
+					p.Status.Phase = corev1.PodRunning
+					return p
+				}(),
+				func() *corev1.Pod {
+					p := basePod.DeepCopy()
+					p.ObjectMeta.Name = "pending-pod"
+					p.Spec.NodeName = ""
+					p.Spec.NodeSelector = map[string]string{corev1.LabelHostname: nodeName}
+					p.Status.Phase = corev1.PodPending
+					return p
+				}(),
+			},
+			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
+			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+		},
 		"Node has untolerated NoExecute taint -> Unhealthy": {
 			initObjs: []client.Object{
 				baseNode.Clone().StatusConditions(corev1.NodeCondition{
@@ -426,7 +488,6 @@ func TestNodeFailureReconciler(t *testing.T) {
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
 		},
-
 	}
 	for name, tc := range tests {
 		fakeClock.SetTime(testStartTime)

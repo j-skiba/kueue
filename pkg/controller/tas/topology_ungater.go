@@ -261,15 +261,21 @@ func (r *topologyUngater) Reconcile(ctx context.Context, req reconcile.Request) 
 		podWithUngateInfo := &allToUngate[i]
 		var ungated bool
 		e := utilclient.Patch(ctx, r.client, podWithUngateInfo.pod, func() (bool, error) {
-			ungated = utilpod.Ungate(podWithUngateInfo.pod, kueue.TopologySchedulingGate)
-			if ungated {
-				log.V(3).Info("ungating pod", "pod", klog.KObj(podWithUngateInfo.pod), "nodeLabels", podWithUngateInfo.nodeLabels)
-				if podWithUngateInfo.pod.Spec.NodeSelector == nil {
-					podWithUngateInfo.pod.Spec.NodeSelector = make(map[string]string)
-				}
-				maps.Copy(podWithUngateInfo.pod.Spec.NodeSelector, podWithUngateInfo.nodeLabels)
+			if !utilpod.HasGate(podWithUngateInfo.pod, kueue.TopologySchedulingGate) {
+				return false, nil
 			}
-			return ungated, nil
+
+			if podWithUngateInfo.pod.Spec.NodeSelector == nil {
+				podWithUngateInfo.pod.Spec.NodeSelector = make(map[string]string)
+			}
+			maps.Copy(podWithUngateInfo.pod.Spec.NodeSelector, podWithUngateInfo.nodeLabels)
+
+			if len(podWithUngateInfo.pod.Spec.SchedulingGates) == 1 {
+				ungated = utilpod.Ungate(podWithUngateInfo.pod, kueue.TopologySchedulingGate)
+			} else {
+				ungated = false
+			}
+			return true, nil
 		})
 		if e != nil {
 			// We won't observe this cleanup in the event handler.
@@ -312,7 +318,7 @@ func (r *topologyUngater) podsForPodSet(ctx context.Context, ns, wlName string, 
 	}
 	result := make([]*corev1.Pod, 0, len(pods.Items))
 	for i := range pods.Items {
-		if pods.Items[i].Status.Phase == corev1.PodSucceeded {
+		if utilpod.IsTerminated(&pods.Items[i]) { 
 			// Only ignore succeeded pods. We need to see Failed/Terminating pods
 			// to trigger greedy assignment fallback.
 			continue
@@ -407,9 +413,6 @@ func assignGatedPodsToDomainsGreedy(
 		if utilpod.HasGate(pod, kueue.TopologySchedulingGate) {
 			gatedPods = append(gatedPods, pod)
 		} else {
-			if utilpod.IsTerminated(pod) || pod.DeletionTimestamp != nil {
-				continue
-			}
 			levelValues := utiltas.LevelValues(levelKeys, pod.Spec.NodeSelector)
 			domainID := utiltas.DomainID(levelValues)
 			domainIDToUngatedCnt[domainID]++
