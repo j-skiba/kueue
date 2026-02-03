@@ -21,10 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strconv"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -172,7 +174,7 @@ func (r *topologyUngater) Reconcile(ctx context.Context, req reconcile.Request) 
 		log.V(3).Info("There are pending ungate operations")
 		return reconcile.Result{}, errPendingUngateOps
 	}
-	if !utiltas.IsAdmittedByTAS(wl) {
+	if !isAdmittedByTAS(wl) {
 		// this is a safeguard. In particular, it helps to prevent the race
 		// condition if the workload is evicted before the reconcile is
 		// triggered.
@@ -284,15 +286,15 @@ func (r *topologyUngater) Reconcile(ctx context.Context, req reconcile.Request) 
 }
 
 func (r *topologyUngater) Create(event event.TypedCreateEvent[*kueue.Workload]) bool {
-	return utiltas.IsAdmittedByTAS(event.Object)
+	return isAdmittedByTAS(event.Object)
 }
 
 func (r *topologyUngater) Delete(event event.TypedDeleteEvent[*kueue.Workload]) bool {
-	return utiltas.IsAdmittedByTAS(event.Object)
+	return isAdmittedByTAS(event.Object)
 }
 
 func (r *topologyUngater) Update(event event.TypedUpdateEvent[*kueue.Workload]) bool {
-	return utiltas.IsAdmittedByTAS(event.ObjectNew)
+	return isAdmittedByTAS(event.ObjectNew)
 }
 
 func (r *topologyUngater) Generic(event.TypedGenericEvent[*kueue.Workload]) bool {
@@ -503,7 +505,6 @@ func readRanksForLabels(
 	return result, nil
 }
 
-
 func verifyDomainsForRanks(
 	log logr.Logger,
 	psa *kueue.PodSetAssignment,
@@ -539,4 +540,13 @@ func verifyDomainsForRanks(
 		}
 	}
 	return true
+}
+
+func isAdmittedByTAS(w *kueue.Workload) bool {
+	return w.Status.Admission != nil &&
+		apimeta.IsStatusConditionTrue(w.Status.Conditions, kueue.WorkloadAdmitted) &&
+		slices.ContainsFunc(w.Status.Admission.PodSetAssignments,
+			func(psa kueue.PodSetAssignment) bool {
+				return psa.TopologyAssignment != nil
+			})
 }

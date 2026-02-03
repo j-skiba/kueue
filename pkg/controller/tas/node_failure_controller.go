@@ -190,14 +190,37 @@ func (r *nodeFailureReconciler) SetupWithManager(mgr ctrl.Manager, cfg *config.C
 // getWorkloadsOnNode gets all workloads that have the given node assigned in TAS topology assignment
 func (r *nodeFailureReconciler) getWorkloadsOnNode(ctx context.Context, nodeName string) (sets.Set[types.NamespacedName], error) {
 	var allWorkloads kueue.WorkloadList
-	if err := r.client.List(ctx, &allWorkloads, client.MatchingFields{indexer.WorkloadTASNodeKey: nodeName}); err != nil {
+	if err := r.client.List(ctx, &allWorkloads); err != nil {
 		return nil, fmt.Errorf("failed to list workloads: %w", err)
 	}
 	tasWorkloadsOnNode := sets.New[types.NamespacedName]()
 	for _, wl := range allWorkloads.Items {
-		tasWorkloadsOnNode.Insert(types.NamespacedName{Name: wl.Name, Namespace: wl.Namespace})
+		if hasTASAssignmentOnNode(&wl, nodeName) {
+			tasWorkloadsOnNode.Insert(types.NamespacedName{Name: wl.Name, Namespace: wl.Namespace})
+		}
 	}
 	return tasWorkloadsOnNode, nil
+}
+
+func hasTASAssignmentOnNode(wl *kueue.Workload, nodeName string) bool {
+	if !isAdmittedByTAS(wl) {
+		return false
+	}
+	for _, podSetAssignment := range wl.Status.Admission.PodSetAssignments {
+		topologyAssignment := podSetAssignment.TopologyAssignment
+		if topologyAssignment == nil {
+			continue
+		}
+		if !utiltas.IsLowestLevelHostname(topologyAssignment.Levels) {
+			continue
+		}
+		for value := range utiltas.LowestLevelValues(topologyAssignment) {
+			if value == nodeName {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 

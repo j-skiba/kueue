@@ -608,9 +608,7 @@ func (s *TASFlavorSnapshot) requiredReplacementDomain(tr *TASPodSetRequests, ta 
 	}
 
 	if slicesRequested(tr.PodSet.TopologyRequest) && (tr.Count%*tr.PodSet.TopologyRequest.PodSetSliceSize != 0) {
-		if domain := s.findIncompleteSliceDomain(tr, ta, tr.Count); domain != "" {
-			return domain
-		}
+		return s.findIncompleteSliceDomain(tr, ta, tr.Count)
 	}
 
 	if !isRequired(tr.PodSet.TopologyRequest) {

@@ -17,11 +17,9 @@ limitations under the License.
 package tas
 
 import (
-	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 )
@@ -103,11 +101,3 @@ func IsLowestLevelHostname(levels []string) bool {
 	return len(levels) > 0 && levels[len(levels)-1] == corev1.LabelHostname
 }
 
-func IsAdmittedByTAS(w *kueue.Workload) bool {
-	return w.Status.Admission != nil &&
-		apimeta.IsStatusConditionTrue(w.Status.Conditions, kueue.WorkloadAdmitted) &&
-		slices.ContainsFunc(w.Status.Admission.PodSetAssignments,
-			func(psa kueue.PodSetAssignment) bool {
-				return psa.TopologyAssignment != nil
-			})
-}
