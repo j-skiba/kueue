@@ -67,6 +67,7 @@ rules:
     verbs:
       - get
       - patch
+      - update
   - apiGroups:
       - ""
     resources:
