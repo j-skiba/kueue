@@ -38,6 +38,7 @@ var (
 	k8sClient       client.WithWatch
 	ctx             context.Context
 	defaultKueueCfg *configapi.Configuration
+	clusterName     string
 )
 
 func TestAPIs(t *testing.T) {
@@ -53,6 +54,8 @@ func TestAPIs(t *testing.T) {
 
 var _ = ginkgo.BeforeSuite(func() {
 	util.SetupLogger()
+
+	clusterName = os.Getenv("KIND_CLUSTER_NAME")
 
 	var err error
 	k8sClient, _, err = util.CreateClientUsingCluster("")
