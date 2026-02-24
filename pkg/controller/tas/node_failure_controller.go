@@ -436,7 +436,7 @@ func (r *nodeFailureReconciler) addUnhealthyNode(ctx context.Context, wl *kueue.
 	return nil
 }
 
-func checkTaintTolerations(logger logr.Logger, taint *corev1.Taint, podSets []kueue.PodSet) taintToleration {
+func checkTaintTolerations(taint *corev1.Taint, podSets []kueue.PodSet) taintToleration {
 	isUntolerated := true
 	isPermanentlyTolerated := true
 
@@ -475,7 +475,7 @@ func classifyNoExecuteTaints(ctx context.Context, taints []corev1.Taint, podSets
 			continue
 		}
 
-		switch checkTaintTolerations(logger, &taint, podSets) {
+		switch checkTaintTolerations(&taint, podSets) {
 		case untoleratedTaint:
 			untolerated = append(untolerated, taint)
 		case toleratedTemporarily:

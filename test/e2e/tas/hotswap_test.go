@@ -279,6 +279,7 @@ var _ = ginkgo.Describe("Hotswap for Topology Aware Scheduling", ginkgo.Ordered,
 					}
 					cfg.FeatureGates[string(features.TASReplaceNodeOnNodeTaints)] = true
 				})
+				util.WaitForKueueAvailability(ctx, k8sClient)
 			})
 
 			ginkgo.AfterAll(func() {
