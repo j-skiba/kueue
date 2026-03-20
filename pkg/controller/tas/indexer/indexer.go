@@ -34,6 +34,7 @@ const (
 	PodNodeSelectorHostnameKey    = "spec.nodeSelector.hostname"
 	PodNodeNameKey                = "spec.nodeName"
 	ResourceFlavorTopologyNameKey = "spec.topologyName"
+	WorkloadTASNodeKey            = "status.admission.podSetAssignments.topologyAssignment.nodeName"
 )
 
 func indexPodTAS(o client.Object) []string {
@@ -85,6 +86,25 @@ func indexResourceFlavorTopologyName(o client.Object) []string {
 	return []string{string(*flavor.Spec.TopologyName)}
 }
 
+func indexWorkloadTASNode(o client.Object) []string {
+	wl, ok := o.(*kueue.Workload)
+	if !ok || wl.Status.Admission == nil {
+		return nil
+	}
+	var nodes []string
+	for _, psa := range wl.Status.Admission.PodSetAssignments {
+		if psa.TopologyAssignment == nil || !utiltas.IsLowestLevelHostname(psa.TopologyAssignment.Levels) {
+			continue
+		}
+		for domain := range utiltas.InternalSeqFrom(psa.TopologyAssignment) {
+			if len(domain.Values) > 0 && domain.Count > 0 {
+				nodes = append(nodes, domain.Values[len(domain.Values)-1])
+			}
+		}
+	}
+	return nodes
+}
+
 func SetupIndexes(ctx context.Context, indexer client.FieldIndexer) error {
 	if err := indexer.IndexField(ctx, &corev1.Pod{}, TASKey, indexPodTAS); err != nil {
 		return fmt.Errorf("setting index pod TAS: %w", err)
@@ -103,6 +123,9 @@ func SetupIndexes(ctx context.Context, indexer client.FieldIndexer) error {
 
 	if err := indexer.IndexField(ctx, &kueue.ResourceFlavor{}, ResourceFlavorTopologyNameKey, indexResourceFlavorTopologyName); err != nil {
 		return fmt.Errorf("setting index resource flavor topology name: %w", err)
+	}
+	if err := indexer.IndexField(ctx, &kueue.Workload{}, WorkloadTASNodeKey, indexWorkloadTASNode); err != nil {
+		return fmt.Errorf("setting index workload TAS node: %w", err)
 	}
 	return nil
 }
