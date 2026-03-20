@@ -35,7 +35,7 @@ const (
 	PodNodeSelectorHostnameKey    = "spec.nodeSelector.hostname"
 	PodNodeNameKey                = "spec.nodeName"
 	ResourceFlavorTopologyNameKey = "spec.topologyName"
-	WorkloadTASNodeKey            = "status.admission.podSetAssignments.topologyAssignment.nodeName"
+	AdmittedWorkloadNodesKey      = "metadata.admittedWorkloadNodes"
 )
 
 func indexPodTAS(o client.Object) []string {
@@ -87,9 +87,9 @@ func indexResourceFlavorTopologyName(o client.Object) []string {
 	return []string{string(*flavor.Spec.TopologyName)}
 }
 
-func indexWorkloadTASNode(o client.Object) []string {
+func indexAdmittedWorkloadNodes(o client.Object) []string {
 	wl, ok := o.(*kueue.Workload)
-	if !ok {
+	if !ok || workload.IsFinished(wl) || workload.IsEvicted(wl) {
 		return nil
 	}
 
@@ -115,8 +115,8 @@ func SetupIndexes(ctx context.Context, indexer client.FieldIndexer) error {
 	if err := indexer.IndexField(ctx, &kueue.ResourceFlavor{}, ResourceFlavorTopologyNameKey, indexResourceFlavorTopologyName); err != nil {
 		return fmt.Errorf("setting index resource flavor topology name: %w", err)
 	}
-	if err := indexer.IndexField(ctx, &kueue.Workload{}, WorkloadTASNodeKey, indexWorkloadTASNode); err != nil {
-		return fmt.Errorf("setting index workload TAS node: %w", err)
+	if err := indexer.IndexField(ctx, &kueue.Workload{}, AdmittedWorkloadNodesKey, indexAdmittedWorkloadNodes); err != nil {
+		return fmt.Errorf("setting index admitted workload nodes: %w", err)
 	}
 	return nil
 }
