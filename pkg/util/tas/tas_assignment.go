@@ -20,7 +20,6 @@ import (
 	"iter"
 	"slices"
 
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
@@ -255,22 +254,6 @@ func V1Beta2From(ta *TopologyAssignment) *kueue.TopologyAssignment {
 		return nil
 	}
 	return singleCompactSliceEncoding(ta)
-}
-
-// NodeNamesInPodSetAssignments extracts the unique set of node names that a Workload is assigned to.
-func NodeNamesInPodSetAssignments(psas []kueue.PodSetAssignment) []string {
-	nodesSet := sets.New[string]()
-	for _, psa := range psas {
-		if psa.TopologyAssignment == nil || !IsLowestLevelHostname(psa.TopologyAssignment.Levels) {
-			continue
-		}
-		for domain := range InternalSeqFrom(psa.TopologyAssignment) {
-			if len(domain.Values) > 0 && domain.Count > 0 {
-				nodesSet.Insert(domain.Values[len(domain.Values)-1])
-			}
-		}
-	}
-	return nodesSet.UnsortedList()
 }
 
 func HasTASAssignmentOnNode(psa []kueue.PodSetAssignment, nodeName string) bool {

@@ -89,11 +89,11 @@ func indexResourceFlavorTopologyName(o client.Object) []string {
 
 func indexWorkloadTASNode(o client.Object) []string {
 	wl, ok := o.(*kueue.Workload)
-	if !ok || !workload.IsAdmittedByTAS(wl) {
+	if !ok {
 		return nil
 	}
 
-	return utiltas.NodeNamesInPodSetAssignments(wl.Status.Admission.PodSetAssignments)
+	return workload.TASAssignedNodeNames(wl)
 }
 
 func SetupIndexes(ctx context.Context, indexer client.FieldIndexer) error {
