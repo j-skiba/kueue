@@ -309,7 +309,7 @@ func (r *nodeReconciler) getWorkloadsOnNode(ctx context.Context, nodeName string
 		tasWorkloadsOnNode.Insert(types.NamespacedName{Name: wl.Name, Namespace: wl.Namespace})
 	}
 
-	logger := r.logger().V(4).WithValues("node", nodeName)
+	logger := ctrl.LoggerFrom(ctx).WithValues("node", nodeName)
 	// Also find workloads from any pods that are assigned to this node by TopologyAssignment
 	// but not yet bound. These might be stale "late" pods for a workload that has already
 	// been reassigned to another node.
