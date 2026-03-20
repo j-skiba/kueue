@@ -2699,6 +2699,37 @@ func TestUsedNodes(t *testing.T) {
 			},
 			want: nil,
 		},
+		"quota reserved but waiting for admission check": {
+			wl: &kueue.Workload{
+				Status: kueue.WorkloadStatus{
+					Conditions: []metav1.Condition{{Type: kueue.WorkloadQuotaReserved, Status: metav1.ConditionTrue}},
+					Admission: &kueue.Admission{
+						PodSetAssignments: []kueue.PodSetAssignment{
+							{
+								TopologyAssignment: &kueue.TopologyAssignment{
+									Levels: []string{"zone", corev1.LabelHostname},
+									Slices: []kueue.TopologyAssignmentSlice{
+										{
+											DomainCount: 1,
+											ValuesPerLevel: []kueue.TopologyAssignmentSliceLevelValues{
+												{Universal: ptr.To("zone-1")},
+												{Individual: &kueue.TopologyAssignmentSliceLevelIndividualValues{
+													Roots: []string{"node-1"},
+												}},
+											},
+											PodCounts: kueue.TopologyAssignmentSlicePodCounts{
+												Universal: ptr.To[int32](1),
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			want: nil,
+		},
 		"admitted without tas": {
 			wl: &kueue.Workload{
 				Status: kueue.WorkloadStatus{
