@@ -26,6 +26,7 @@ import (
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	utiltas "sigs.k8s.io/kueue/pkg/util/tas"
+	"sigs.k8s.io/kueue/pkg/workload"
 )
 
 const (
@@ -88,21 +89,11 @@ func indexResourceFlavorTopologyName(o client.Object) []string {
 
 func indexWorkloadTASNode(o client.Object) []string {
 	wl, ok := o.(*kueue.Workload)
-	if !ok || wl.Status.Admission == nil {
+	if !ok || !workload.IsAdmittedByTAS(wl) {
 		return nil
 	}
-	var nodes []string
-	for _, psa := range wl.Status.Admission.PodSetAssignments {
-		if psa.TopologyAssignment == nil || !utiltas.IsLowestLevelHostname(psa.TopologyAssignment.Levels) {
-			continue
-		}
-		for domain := range utiltas.InternalSeqFrom(psa.TopologyAssignment) {
-			if len(domain.Values) > 0 && domain.Count > 0 {
-				nodes = append(nodes, domain.Values[len(domain.Values)-1])
-			}
-		}
-	}
-	return nodes
+
+	return utiltas.NodeNamesInPodSetAssignments(wl.Status.Admission.PodSetAssignments)
 }
 
 func SetupIndexes(ctx context.Context, indexer client.FieldIndexer) error {
