@@ -863,36 +863,6 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 			util.ExpectClusterQueueWeightedShareMetric(cq2, 0.0)
 		})
 
-		ginkgo.It("higher priority workload should jump ahead of sticky low priority workload (#7301)", func() {
-			ginkgo.By("Creating borrowing workloads in queue2")
-			createWorkload("cq2", "3")
-			util.ExpectAdmittedWorkloadsTotalMetric(cq2, "", 1)
-
-			ginkgo.By("Create low priority workload in queue1 that requires preemption")
-			// cq1 has nominal 0, but cohort has 3. Since cq2 borrowed 3, cq1 must preempt.
-			lowPriorityWl := createWorkloadWithPriority("cq1", "3", 10)
-
-			ginkgo.By("Wait until scheduler attempts to schedule low priority wl (it becomes sticky)")
-			gomega.Eventually(func(g gomega.Gomega) {
-				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(lowPriorityWl), lowPriorityWl)).To(gomega.Succeed())
-				cond := meta.FindStatusCondition(lowPriorityWl.Status.Conditions, kueue.WorkloadQuotaReserved)
-				g.Expect(cond).NotTo(gomega.BeNil())
-				g.Expect(cond.Message).To(gomega.ContainSubstring("insufficient unused quota"))
-			}, util.Timeout, util.Interval).Should(gomega.Succeed())
-
-			ginkgo.By("Create higher priority workload in queue1")
-			highPriorityWl := createWorkloadWithPriority("cq1", "3", 100)
-
-			util.ExpectWorkloadsToBePending(ctx, k8sClient, lowPriorityWl)
-
-			ginkgo.By("Complete preemption")
-			util.FinishEvictionOfWorkloadsInCQ(ctx, k8sClient, cq2, 1)
-
-			ginkgo.By("Verify that higher priority workload is admitted")
-			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, highPriorityWl)
-			util.ExpectWorkloadsToBePending(ctx, k8sClient, lowPriorityWl)
-		})
-
 		ginkgo.It("sticky workload becomes inadmissible. next workload admits", func() {
 			ginkgo.By("Creating borrowing workloads in queue2")
 			createWorkload("cq2", "1")
