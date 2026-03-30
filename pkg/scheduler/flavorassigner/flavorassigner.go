@@ -501,30 +501,23 @@ type preemptionOracle interface {
 }
 
 type FlavorAssigner struct {
-	wl                *workload.Info
-	cq                *schdcache.ClusterQueueSnapshot
-	resourceFlavors   map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor
-	enableFairSharing bool
-	oracle            preemptionOracle
-
-	// replaceWorkloadSlice identifies the workload slice that will be replaced by this workload.
-	// It must be considered during flavor computation and included in the preemption targets.
-	//
-	// Note: This value may be nil in the following cases:
-	//   - Workload slicing is not enabled (either globally or for this specific workload).
-	//   - The current workload does not represent a scale-up slice.
-	// In these scenarios, flavor assignment proceeds as in the original flow—i.e., as for regular,
-	// non-sliced workloads.
+	wl                   *workload.Info
+	cq                   *schdcache.ClusterQueueSnapshot
+	resourceFlavors      map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor
+	enableFairSharing    bool
+	oracle               preemptionOracle
+	wlReservation        *schdcache.ReservationInfo
 	replaceWorkloadSlice *workload.Info
 }
 
-func New(wl *workload.Info, cq *schdcache.ClusterQueueSnapshot, resourceFlavors map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor, enableFairSharing bool, oracle preemptionOracle, preemptWorkloadSlice *workload.Info) *FlavorAssigner {
+func New(wl *workload.Info, cq *schdcache.ClusterQueueSnapshot, resourceFlavors map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor, enableFairSharing bool, oracle preemptionOracle, preemptWorkloadSlice *workload.Info, wlReservation *schdcache.ReservationInfo) *FlavorAssigner {
 	return &FlavorAssigner{
 		wl:                   wl,
 		cq:                   cq,
 		resourceFlavors:      resourceFlavors,
 		enableFairSharing:    enableFairSharing,
 		oracle:               oracle,
+		wlReservation:        wlReservation,
 		replaceWorkloadSlice: preemptWorkloadSlice,
 	}
 }
@@ -1017,7 +1010,12 @@ func flavorSelector(spec *corev1.PodSpec, allowedKeys sets.Set[string]) nodeaffi
 func (a *FlavorAssigner) fitsResourceQuota(log logr.Logger, fr resources.FlavorResource, assumedUsage int64, requestUsage int64, rQuota schdcache.ResourceQuota) (preemptionMode, int, *Status) {
 	var status Status
 
-	available := a.cq.Available(fr)
+	var excludedUsage resources.FlavorResourceQuantities
+	if a.wlReservation != nil {
+		excludedUsage = a.wlReservation.Usage
+	}
+
+	available := a.cq.AvailableFor(fr, excludedUsage)
 	maxCapacity := a.cq.PotentialAvailable(fr)
 	val := assumedUsage + requestUsage
 
@@ -1028,7 +1026,7 @@ func (a *FlavorAssigner) fitsResourceQuota(log logr.Logger, fr resources.FlavorR
 		return noFit, 0, &status
 	}
 
-	borrow, mayReclaimInHierarchy := classical.FindHeightOfLowestSubtreeThatFits(a.cq, fr, val)
+	borrow, mayReclaimInHierarchy := classical.FindHeightOfLowestSubtreeThatFits(a.cq, fr, val, excludedUsage)
 	// Fit
 	if val <= available {
 		return fit, borrow, nil

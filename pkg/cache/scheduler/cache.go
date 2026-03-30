@@ -124,6 +124,13 @@ func WithLocalQueueMetrics(value *metrics.LocalQueueMetricsConfig) Option {
 	}
 }
 
+type ReservationInfo struct {
+	Usage         resources.FlavorResourceQuantities
+	ClusterQueue  kueue.ClusterQueueReference
+	OwnerPriority int64
+	Victims       sets.Set[workload.Reference]
+}
+
 // Cache keeps track of the Workloads that got admitted through ClusterQueues.
 type Cache struct {
 	sync.RWMutex
@@ -139,6 +146,8 @@ type Cache struct {
 	resourceMetricsEnabled bool
 	// Tracks Workload's ClusterQueue assignment throughout its presence in the cache, which is when they reserve quota (`QuotaReserved=True`).
 	workloadAssignedQueues map[workload.Reference]kueue.ClusterQueueReference
+
+	preemptionReservations map[workload.Reference]*ReservationInfo
 
 	hm hierarchy.Manager[*clusterQueue, *cohort]
 
@@ -157,6 +166,7 @@ func New(client client.Client, options ...Option) *Cache {
 		workloadAssignedQueues: make(map[workload.Reference]kueue.ClusterQueueReference),
 		hm:                     hierarchy.NewManager(newCohort),
 		tasCache:               NewTASCache(client),
+		preemptionReservations: make(map[workload.Reference]*ReservationInfo),
 	}
 	for _, option := range options {
 		option(cache)
@@ -1039,4 +1049,26 @@ func resourceFloat(name corev1.ResourceName, v int64) float64 {
 // Key is the key used to index the queue.
 func queueKey(q *kueue.LocalQueue) queue.LocalQueueReference {
 	return queue.NewLocalQueueReference(q.Namespace, kueue.LocalQueueName(q.Name))
+}
+
+func (c *Cache) ReserveResources(preemptor *workload.Info, usage resources.FlavorResourceQuantities, victims []workload.Reference, clusterQueue kueue.ClusterQueueReference, priority int64) {
+	c.Lock()
+	defer c.Unlock()
+
+	wlKey := workload.Key(preemptor.Obj)
+	victimSet := sets.New(victims...)
+
+	c.preemptionReservations[wlKey] = &ReservationInfo{
+		Usage:         usage,
+		ClusterQueue:  clusterQueue,
+		OwnerPriority: priority,
+		Victims:       victimSet,
+	}
+}
+
+func (c *Cache) UnreserveResources(wlKey workload.Reference) {
+	c.Lock()
+	defer c.Unlock()
+
+	delete(c.preemptionReservations, wlKey)
 }

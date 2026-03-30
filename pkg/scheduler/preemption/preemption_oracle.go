@@ -39,6 +39,12 @@ type PreemptionOracle struct {
 // SimulatePreemption runs the preemption algorithm for a given flavor resource to check if
 // preemption and reclaim are possible in this flavor resource.
 func (p *PreemptionOracle) SimulatePreemption(log logr.Logger, cq *schdcache.ClusterQueueSnapshot, wl workload.Info, fr resources.FlavorResource, quantity int64) (preemptioncommon.PreemptionPossibility, int) {
+	wlReservation := p.snapshot.Reservations[workload.Key(wl.Obj)]
+	var excludedUsage resources.FlavorResourceQuantities
+	if wlReservation != nil {
+		excludedUsage = wlReservation.Usage
+	}
+
 	candidates := p.preemptor.getTargets(&preemptionCtx{
 		clock:             p.preemptor.clock,
 		log:               log,
@@ -50,7 +56,7 @@ func (p *PreemptionOracle) SimulatePreemption(log logr.Logger, cq *schdcache.Clu
 	})
 
 	if len(candidates) == 0 {
-		borrow, _ := classical.FindHeightOfLowestSubtreeThatFits(cq, fr, quantity)
+		borrow, _ := classical.FindHeightOfLowestSubtreeThatFits(cq, fr, quantity, excludedUsage)
 		return preemptioncommon.NoCandidates, borrow
 	}
 
@@ -59,7 +65,7 @@ func (p *PreemptionOracle) SimulatePreemption(log logr.Logger, cq *schdcache.Clu
 		workloadsToPreempt[i] = c.WorkloadInfo
 	}
 	revertRemoval := p.snapshot.SimulateWorkloadRemoval(workloadsToPreempt)
-	borrowAfterPreemptions, _ := classical.FindHeightOfLowestSubtreeThatFits(cq, fr, quantity)
+	borrowAfterPreemptions, _ := classical.FindHeightOfLowestSubtreeThatFits(cq, fr, quantity, excludedUsage)
 	revertRemoval()
 
 	for _, candidate := range candidates {

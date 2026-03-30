@@ -92,6 +92,14 @@ func LocalAvailable(node flatResourceNode, fr resources.FlavorResource) int64 {
 	return max(0, node.getResourceNode().localQuota(fr)-node.getResourceNode().Usage[fr])
 }
 
+func LocalAvailableFor(node flatResourceNode, fr resources.FlavorResource, excludedUsage resources.FlavorResourceQuantities) int64 {
+	usage := node.getResourceNode().Usage[fr]
+	if excludedUsage != nil {
+		usage -= excludedUsage[fr]
+	}
+	return max(0, node.getResourceNode().localQuota(fr)-usage)
+}
+
 // available determines how much capacity remains for the current
 // node, taking into account usage and BorrowingLimits. It finds remaining
 // capacity which is stored locally. If the node has a parent, it
@@ -101,20 +109,25 @@ func LocalAvailable(node flatResourceNode, fr resources.FlavorResource) int64 {
 // This function may return a negative number in the case of
 // overadmission - e.g. capacity was removed or the node moved to
 // another Cohort.
-func available(node hierarchicalResourceNode, fr resources.FlavorResource) int64 {
+func available(node hierarchicalResourceNode, fr resources.FlavorResource, excludedUsage resources.FlavorResourceQuantities) int64 {
 	r := node.getResourceNode()
-	if !node.HasParent() {
-		return r.SubtreeQuota[fr] - r.Usage[fr]
+	usage := r.Usage[fr]
+	if excludedUsage != nil {
+		usage -= excludedUsage[fr]
 	}
-	parentAvailable := available(node.parentHRN(), fr)
+	if !node.HasParent() {
+		return r.SubtreeQuota[fr] - usage
+	}
+	parentAvailable := available(node.parentHRN(), fr, excludedUsage)
 
 	if borrowingLimit := r.Quotas[fr].BorrowingLimit; borrowingLimit != nil {
 		storedInParent := r.SubtreeQuota[fr] - r.localQuota(fr)
-		usedInParent := max(0, r.Usage[fr]-r.localQuota(fr))
+		usedInParent := max(0, usage-r.localQuota(fr))
 		withMaxFromParent := storedInParent - usedInParent + *borrowingLimit
 		parentAvailable = min(withMaxFromParent, parentAvailable)
 	}
-	return LocalAvailable(node, fr) + parentAvailable
+	localAvailable := max(0, r.localQuota(fr)-usage)
+	return localAvailable + parentAvailable
 }
 
 // potentialAvailable returns the maximum capacity available to this node,

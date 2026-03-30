@@ -347,7 +347,13 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 		}
 
 		usage := e.assignmentUsage()
-		if !fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets) {
+		wlReservation := snapshot.Reservations[workload.Key(e.Obj)]
+		var excludedUsage resources.FlavorResourceQuantities
+		if wlReservation != nil {
+			excludedUsage = wlReservation.Usage
+		}
+
+		if !fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets, excludedUsage) {
 			setSkipped(e, "Workload no longer fits after processing another workload")
 			if mode == flavorassigner.Preempt {
 				skippedPreemptions[cq.Name]++
@@ -373,6 +379,12 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 			if preempted != 0 {
 				e.inadmissibleMsg += fmt.Sprintf(". Pending the preemption of %d workload(s)", preempted)
 				e.requeueReason = qcache.RequeueReasonPendingPreemption
+
+				var victimKeys []workload.Reference
+				for _, target := range preemptionTargets {
+					victimKeys = append(victimKeys, workload.Key(target.WorkloadInfo.Obj))
+				}
+				s.cache.ReserveResources(&e.Info, usage.Quota, victimKeys, e.clusterQueueSnapshot.Name, int64(priority.Priority(e.Obj)))
 			} else if errors > 0 {
 				e.inadmissibleMsg += fmt.Sprintf(". Preempting %d workload(s) failed, will retry.", errors)
 				e.requeueReason = qcache.RequeueReasonPreemptionFailed
@@ -524,14 +536,14 @@ func (s *Scheduler) nominate(ctx context.Context, workloads []workload.Info, sna
 	return entries, inadmissibleEntries
 }
 
-func fits(snapshot *schdcache.Snapshot, cq *schdcache.ClusterQueueSnapshot, usage *workload.Usage, preemptedWorkloads preemption.PreemptedWorkloads, newTargets []*preemption.Target) bool {
+func fits(snapshot *schdcache.Snapshot, cq *schdcache.ClusterQueueSnapshot, usage *workload.Usage, preemptedWorkloads preemption.PreemptedWorkloads, newTargets []*preemption.Target, excludedUsage resources.FlavorResourceQuantities) bool {
 	workloads := slices.Collect(maps.Values(preemptedWorkloads))
 	for _, target := range newTargets {
 		workloads = append(workloads, target.WorkloadInfo)
 	}
 	revertUsage := snapshot.SimulateWorkloadRemoval(workloads)
 	defer revertUsage()
-	return cq.Fits(*usage)
+	return cq.Fits(*usage, excludedUsage)
 }
 
 // resourcesToReserve calculates how much of the available resources in cq/cohort assignment should be reserved.
@@ -610,7 +622,8 @@ func (s *Scheduler) getInitialAssignments(log logr.Logger, wl *workload.Info, sn
 
 	preemptionTargets, replaceableWorkloadSlice := workloadslicing.ReplacedWorkloadSlice(wl, snap)
 
-	flvAssigner := flavorassigner.New(wl, cq, snap.ResourceFlavors, fairsharing.Enabled(s.fairSharing), preemption.NewOracle(s.preemptor, snap), replaceableWorkloadSlice)
+	wlReservation := snap.Reservations[workload.Key(wl.Obj)]
+	flvAssigner := flavorassigner.New(wl, cq, snap.ResourceFlavors, fairsharing.Enabled(s.fairSharing), preemption.NewOracle(s.preemptor, snap), replaceableWorkloadSlice, wlReservation)
 	fullAssignment := flvAssigner.Assign(log, nil)
 
 	arm := fullAssignment.RepresentativeMode()
@@ -692,7 +705,6 @@ func updateAssignmentForTAS(snapshot *schdcache.Snapshot, cq *schdcache.ClusterQ
 // admit sets the admitting clusterQueue and flavors into the workload of
 // the entry, and asynchronously updates the object in the apiserver after
 // assuming it in the cache.
-// Note: this does not necessarily make the workload "admitted".
 func (s *Scheduler) admit(ctx context.Context, e *entry, cq *schdcache.ClusterQueueSnapshot) error {
 	log := ctrl.LoggerFrom(ctx)
 	admission := &kueue.Admission{
@@ -705,6 +717,7 @@ func (s *Scheduler) admit(ctx context.Context, e *entry, cq *schdcache.ClusterQu
 	if err != nil {
 		return err
 	}
+	s.cache.UnreserveResources(workload.Key(e.Obj))
 
 	newWorkload := e.Obj.DeepCopy()
 	s.admissionRoutineWrapper.Run(func() {
