@@ -4110,8 +4110,8 @@ func TestWorkloadsTopologyRequests_ErrorBranches(t *testing.T) {
 		"more than one flavor assigned (onlyFlavor fails); RepresentativeMode must be NoFit": {
 			cq: schdcache.ClusterQueueSnapshot{
 				TASFlavors: map[kueue.ResourceFlavorReference]*schdcache.TASFlavorSnapshot{
-					"flavor-a": nil,
-					"flavor-b": nil,
+					"flavor-a": {},
+					"flavor-b": {},
 				},
 			},
 			assignment: Assignment{
@@ -4136,7 +4136,7 @@ func TestWorkloadsTopologyRequests_ErrorBranches(t *testing.T) {
 					},
 				},
 			}),
-			wantErr: "more than one flavor assigned: flavor-a, flavor-b",
+			wantErr: "more than one TAS flavor assigned: flavor-a, flavor-b",
 		},
 	}
 
@@ -4152,7 +4152,7 @@ func TestWorkloadsTopologyRequests_ErrorBranches(t *testing.T) {
 			}
 			if tc.wantErr != "" {
 				if errMsg != tc.wantErr {
-					if tc.wantErr == "more than one flavor assigned: flavor-a, flavor-b" && errMsg == "more than one flavor assigned: flavor-b, flavor-a" {
+					if tc.wantErr == "more than one TAS flavor assigned: flavor-a, flavor-b" && errMsg == "more than one TAS flavor assigned: flavor-b, flavor-a" {
 
 					} else {
 						t.Errorf("Error mismatch (-want +got):\n%s", cmp.Diff(tc.wantErr, errMsg))
