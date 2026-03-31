@@ -1891,6 +1891,7 @@ func TestHierarchicalPreemptions(t *testing.T) {
 				if diff := cmp.Diff(beforeSnapshot, snapshotWorkingCopy, snapCmpOpts); diff != "" {
 					t.Errorf("Snapshot was modified (-initial,+end):\n%s", diff)
 				}
+				cqCache.CleanPreemptionReservations()
 			})
 		}
 	}

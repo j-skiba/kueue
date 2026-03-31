@@ -38,9 +38,12 @@ type resourceNode struct {
 	// Usage is the quantity which counts against this node's
 	// SubtreeQuota. For ClusterQueues, this is simply its
 	// usage. For Cohorts, this is the sum of childrens'
-	// usages past childrens' localQuota.
+	// usage, constrained by LendingLimits.
 	Usage resources.FlavorResourceQuantities
-}
+	// Reservations is the quantity which is reserved for preempting workloads.
+	// It is only defined for ClusterQueues.
+	Reservations resources.FlavorResourceQuantities
+	}
 
 func NewResourceNode() resourceNode {
 	return resourceNode{
@@ -57,6 +60,15 @@ func (r resourceNode) Clone() resourceNode {
 		Quotas:       r.Quotas,
 		SubtreeQuota: r.SubtreeQuota,
 		Usage:        maps.Clone(r.Usage),
+		Reservations: maps.Clone(r.Reservations),
+	}
+}
+
+func (r resourceNode) CloneWithoutUsage() resourceNode {
+	return resourceNode{
+		Quotas:       r.Quotas,
+		SubtreeQuota: r.SubtreeQuota,
+		Usage:        make(resources.FlavorResourceQuantities),
 	}
 }
 
@@ -92,12 +104,8 @@ func LocalAvailable(node flatResourceNode, fr resources.FlavorResource) int64 {
 	return max(0, node.getResourceNode().localQuota(fr)-node.getResourceNode().Usage[fr])
 }
 
-func LocalAvailableFor(node flatResourceNode, fr resources.FlavorResource, excludedUsage resources.FlavorResourceQuantities) int64 {
-	usage := node.getResourceNode().Usage[fr]
-	if excludedUsage != nil {
-		usage -= excludedUsage[fr]
-	}
-	return max(0, node.getResourceNode().localQuota(fr)-usage)
+func LocalAvailableFor(node flatResourceNode, fr resources.FlavorResource) int64 {
+	return max(0, node.getResourceNode().localQuota(fr)-node.getResourceNode().Usage[fr])
 }
 
 // available determines how much capacity remains for the current
@@ -109,16 +117,13 @@ func LocalAvailableFor(node flatResourceNode, fr resources.FlavorResource, exclu
 // This function may return a negative number in the case of
 // overadmission - e.g. capacity was removed or the node moved to
 // another Cohort.
-func available(node hierarchicalResourceNode, fr resources.FlavorResource, excludedUsage resources.FlavorResourceQuantities) int64 {
+func available(node hierarchicalResourceNode, fr resources.FlavorResource) int64 {
 	r := node.getResourceNode()
 	usage := r.Usage[fr]
-	if excludedUsage != nil {
-		usage -= excludedUsage[fr]
-	}
 	if !node.HasParent() {
 		return r.SubtreeQuota[fr] - usage
 	}
-	parentAvailable := available(node.parentHRN(), fr, excludedUsage)
+	parentAvailable := available(node.parentHRN(), fr)
 
 	if borrowingLimit := r.Quotas[fr].BorrowingLimit; borrowingLimit != nil {
 		storedInParent := r.SubtreeQuota[fr] - r.localQuota(fr)

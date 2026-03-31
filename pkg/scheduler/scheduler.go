@@ -342,6 +342,7 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 		// We skip multiple-preemptions per cohort if any of the targets are overlapping
 		if preemptedWorkloads.HasAny(e.preemptionTargets) {
 			setSkipped(e, "Workload has overlapping preemption targets with another workload")
+			log.V(2).Info("Workload skipped due to overlapping preemption targets", "workload", klog.KObj(e.Obj))
 			skippedPreemptions[cq.Name]++
 			continue
 		}
@@ -355,6 +356,7 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 
 		if !fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets, excludedUsage) {
 			setSkipped(e, "Workload no longer fits after processing another workload")
+			log.V(2).Info("Workload skipped because it no longer fits", "workload", klog.KObj(e.Obj), "preemptionTargets", len(e.preemptionTargets))
 			if mode == flavorassigner.Preempt {
 				skippedPreemptions[cq.Name]++
 			}
@@ -537,13 +539,17 @@ func (s *Scheduler) nominate(ctx context.Context, workloads []workload.Info, sna
 }
 
 func fits(snapshot *schdcache.Snapshot, cq *schdcache.ClusterQueueSnapshot, usage *workload.Usage, preemptedWorkloads preemption.PreemptedWorkloads, newTargets []*preemption.Target, excludedUsage resources.FlavorResourceQuantities) bool {
+	if len(excludedUsage) > 0 {
+		revert := cq.SimulateReservationRemoval(excludedUsage)
+		defer revert()
+	}
 	workloads := slices.Collect(maps.Values(preemptedWorkloads))
 	for _, target := range newTargets {
 		workloads = append(workloads, target.WorkloadInfo)
 	}
 	revertUsage := snapshot.SimulateWorkloadRemoval(workloads)
 	defer revertUsage()
-	return cq.Fits(*usage, excludedUsage)
+	return cq.Fits(*usage, nil)
 }
 
 // resourcesToReserve calculates how much of the available resources in cq/cohort assignment should be reserved.

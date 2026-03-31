@@ -80,6 +80,7 @@ type clusterQueue struct {
 	perFlavorMultiKueueAdmissionChecks []kueue.AdmissionCheckReference
 	tasFlavors                         map[kueue.ResourceFlavorReference]kueue.TopologyReference
 	admittedWorkloadsCount             int
+	reservationsCount                  int
 	isStopped                          bool
 	workloadInfoOptions                []workload.InfoOption
 
@@ -495,7 +496,7 @@ func (c *clusterQueue) deleteWorkload(log logr.Logger, wlKey workload.Reference)
 
 func (c *clusterQueue) reportActiveWorkloads() {
 	metrics.ReportAdmittedActiveWorkloads(c.Name, c.admittedWorkloadsCount, c.customMetricLabelValues, c.roleTracker)
-	metrics.ReportReservingActiveWorkloads(c.Name, len(c.Workloads), c.customMetricLabelValues, c.roleTracker)
+	metrics.ReportReservingActiveWorkloads(c.Name, len(c.Workloads)+c.reservationsCount, c.customMetricLabelValues, c.roleTracker)
 }
 
 func (c *clusterQueue) reportResourceMetrics(fairSharingEnabled bool) {

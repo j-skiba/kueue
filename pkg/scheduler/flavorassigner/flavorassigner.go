@@ -1015,7 +1015,12 @@ func (a *FlavorAssigner) fitsResourceQuota(log logr.Logger, fr resources.FlavorR
 		excludedUsage = a.wlReservation.Usage
 	}
 
-	available := a.cq.AvailableFor(fr, excludedUsage)
+	if len(excludedUsage) > 0 {
+		revert := a.cq.SimulateReservationRemoval(excludedUsage)
+		defer revert()
+	}
+
+	available := a.cq.Available(fr)
 	maxCapacity := a.cq.PotentialAvailable(fr)
 	val := assumedUsage + requestUsage
 
@@ -1026,7 +1031,7 @@ func (a *FlavorAssigner) fitsResourceQuota(log logr.Logger, fr resources.FlavorR
 		return noFit, 0, &status
 	}
 
-	borrow, mayReclaimInHierarchy := classical.FindHeightOfLowestSubtreeThatFits(a.cq, fr, val, excludedUsage)
+	borrow, mayReclaimInHierarchy := classical.FindHeightOfLowestSubtreeThatFits(a.cq, fr, val)
 	// Fit
 	if val <= available {
 		return fit, borrow, nil

@@ -91,9 +91,25 @@ func (c *ClusterQueueSnapshot) SimulateUsageRemoval(usage workload.Usage) func()
 	}
 }
 
+// SimulateReservationRemoval modifies the snapshot by removing reservation usage, and
+// returns a function used to restore the usage.
+func (c *ClusterQueueSnapshot) SimulateReservationRemoval(usage resources.FlavorResourceQuantities) func() {
+	c.RemoveReservation(usage)
+	return func() {
+		c.AddReservation(usage)
+	}
+}
+
 func (c *ClusterQueueSnapshot) AddUsage(usage workload.Usage) {
 	for fr, q := range usage.Quota {
 		addUsage(c, fr, q)
+	}
+	c.updateTASUsage(usage.TAS, add)
+}
+
+func (c *ClusterQueueSnapshot) AddUsageWithoutParent(usage workload.Usage) {
+	for fr, q := range usage.Quota {
+		c.ResourceNode.Usage[fr] += q
 	}
 	c.updateTASUsage(usage.TAS, add)
 }
@@ -103,6 +119,45 @@ func (c *ClusterQueueSnapshot) RemoveUsage(usage workload.Usage) {
 		removeUsage(c, fr, q)
 	}
 	c.updateTASUsage(usage.TAS, subtract)
+}
+
+func (c *ClusterQueueSnapshot) AddReservation(usage resources.FlavorResourceQuantities) {
+	for fr, q := range usage {
+		addUsage(c, fr, q)
+		if c.ResourceNode.Reservations == nil {
+			c.ResourceNode.Reservations = make(resources.FlavorResourceQuantities)
+		}
+		c.ResourceNode.Reservations[fr] += q
+	}
+}
+
+func (c *ClusterQueueSnapshot) AddReservationWithoutParent(usage resources.FlavorResourceQuantities) {
+	for fr, q := range usage {
+		c.ResourceNode.Usage[fr] += q
+		if c.ResourceNode.Reservations == nil {
+			c.ResourceNode.Reservations = make(resources.FlavorResourceQuantities)
+		}
+		c.ResourceNode.Reservations[fr] += q
+	}
+}
+
+func (c *ClusterQueueSnapshot) RemoveReservation(usage resources.FlavorResourceQuantities) {
+	for fr, q := range usage {
+		removeUsage(c, fr, q)
+		if c.ResourceNode.Reservations != nil {
+			c.ResourceNode.Reservations[fr] -= q
+		}
+	}
+}
+
+func (c *ClusterQueueSnapshot) RemoveAllReservations() {
+	if len(c.ResourceNode.Reservations) == 0 {
+		return
+	}
+	for fr, q := range c.ResourceNode.Reservations {
+		removeUsage(c, fr, q)
+	}
+	c.ResourceNode.Reservations = nil
 }
 
 func (c *ClusterQueueSnapshot) updateTASUsage(usage workload.TASUsage, op usageOp) {
@@ -119,8 +174,12 @@ func (c *ClusterQueueSnapshot) updateTASUsage(usage workload.TASUsage, op usageO
 }
 
 func (c *ClusterQueueSnapshot) Fits(usage workload.Usage, excludedUsage resources.FlavorResourceQuantities) bool {
+	if len(excludedUsage) > 0 {
+		revert := c.SimulateReservationRemoval(excludedUsage)
+		defer revert()
+	}
 	for fr, q := range usage.Quota {
-		if c.AvailableFor(fr, excludedUsage) < q {
+		if c.Available(fr) < q {
 			return false
 		}
 	}
@@ -148,11 +207,11 @@ func (c *ClusterQueueSnapshot) BorrowingWith(fr resources.FlavorResource, val in
 }
 
 func (c *ClusterQueueSnapshot) BorrowingWithFor(fr resources.FlavorResource, val int64, excludedUsage resources.FlavorResourceQuantities) bool {
-	usage := c.ResourceNode.Usage[fr]
-	if excludedUsage != nil {
-		usage -= excludedUsage[fr]
+	if len(excludedUsage) > 0 {
+		revert := c.SimulateReservationRemoval(excludedUsage)
+		defer revert()
 	}
-	return usage+val > c.QuotaFor(fr).Nominal
+	return c.BorrowingWith(fr, val)
 }
 
 // Available returns the current capacity available, before preempting
@@ -160,11 +219,15 @@ func (c *ClusterQueueSnapshot) BorrowingWithFor(fr resources.FlavorResource, val
 // Cohort. When the ClusterQueue/Cohort is in debt, Available
 // will return 0.
 func (c *ClusterQueueSnapshot) Available(fr resources.FlavorResource) int64 {
-	return max(0, available(c, fr, nil))
+	return max(0, available(c, fr))
 }
 
 func (c *ClusterQueueSnapshot) AvailableFor(fr resources.FlavorResource, excludedUsage resources.FlavorResourceQuantities) int64 {
-	return max(0, available(c, fr, excludedUsage))
+	if len(excludedUsage) > 0 {
+		revert := c.SimulateReservationRemoval(excludedUsage)
+		defer revert()
+	}
+	return c.Available(fr)
 }
 
 // PotentialAvailable returns the largest workload this ClusterQueue could

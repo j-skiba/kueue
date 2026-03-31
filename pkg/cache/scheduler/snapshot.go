@@ -234,6 +234,10 @@ func (c *Cache) Snapshot(ctx context.Context, options ...SnapshotOption) (*Snaps
 		return cmp.Compare(b.res.OwnerPriority, a.res.OwnerPriority)
 	})
 
+	for _, cqSnap := range snap.ClusterQueues() {
+		cqSnap.RemoveAllReservations()
+	}
+
 	coveredVictims := sets.New[workload.Reference]()
 	for _, entry := range sortedReservations {
 		res := entry.res
@@ -244,7 +248,7 @@ func (c *Cache) Snapshot(ctx context.Context, options ...SnapshotOption) (*Snaps
 		if cqSnap == nil {
 			continue
 		}
-		cqSnap.AddUsage(workload.Usage{Quota: res.Usage})
+		cqSnap.AddReservation(res.Usage)
 		coveredVictims = coveredVictims.Union(res.Victims)
 	}
 

@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
+	"sigs.k8s.io/kueue/pkg/workload"
 	"sigs.k8s.io/kueue/test/integration/framework"
 	"sigs.k8s.io/kueue/test/util"
 )
@@ -52,7 +53,15 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 		cqs     []*kueue.ClusterQueue
 		lqs     []*kueue.LocalQueue
 		wls     []*kueue.Workload
+		wpcs    []*kueue.WorkloadPriorityClass
 	)
+
+	var createWorkloadPriorityClass = func(name string, value int32) *kueue.WorkloadPriorityClass {
+		wpc := utiltestingapi.MakeWorkloadPriorityClass(name).PriorityValue(value).Obj()
+		util.MustCreate(ctx, k8sClient, wpc)
+		wpcs = append(wpcs, wpc)
+		return wpc
+	}
 
 	var createCohort = func(cohort *kueue.Cohort) *kueue.Cohort {
 		util.MustCreate(ctx, k8sClient, cohort)
@@ -111,6 +120,11 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 		for _, wl := range wls {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, wl, true)
 		}
+		wls = nil
+		for _, wpc := range wpcs {
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, wpc, true)
+		}
+		wpcs = nil
 		for _, lq := range lqs {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, lq, true)
 		}
@@ -863,14 +877,25 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 			util.ExpectClusterQueueWeightedShareMetric(cq2, 0.0)
 		})
 
-		ginkgo.It("sticky workload becomes inadmissible. next workload admits", func() {
+		ginkgo.It("head workload becomes inadmissible. next workload admits", func() {
 			ginkgo.By("Creating borrowing workloads in queue2")
 			createWorkload("cq2", "1")
 			createWorkload("cq2", "1")
 			util.ExpectAdmittedWorkloadsTotalMetric(cq2, "", 2)
 
-			ginkgo.By("Create admissible workload in queue1")
+			ginkgo.By("Create admissible workloads in queue1")
+			createWorkloadPriorityClass("high-priority", 99)
 			highPriorityWl := createWorkloadWithPriority("cq1", "3", 99)
+			gomega.Eventually(func(g gomega.Gomega) {
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(highPriorityWl), highPriorityWl)).To(gomega.Succeed())
+				highPriorityWl.Spec.PriorityClassRef = &kueue.PriorityClassRef{
+					Name:  "high-priority",
+					Kind:  kueue.WorkloadPriorityClassKind,
+					Group: kueue.WorkloadPriorityClassGroup,
+				}
+				g.Expect(k8sClient.Update(ctx, highPriorityWl)).To(gomega.Succeed())
+			}, util.Timeout, util.Interval).Should(gomega.Succeed())
+
 
 			ginkgo.By("Wait until scheduler attempts to schedule priority=99 wl")
 			gomega.Eventually(func(g gomega.Gomega) {
@@ -884,7 +909,7 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 			secondAdmissibleWorkload := createWorkloadWithPriority("cq1", "2", 9)
 
 			ginkgo.By("Validate pending workloads")
-			util.ExpectPendingWorkloadsMetric(cq1, 2, 0)
+			util.ExpectPendingWorkloadsTotalMetric(cq1, 2)
 
 			ginkgo.By("Decreasing cluster capacity, making 99 priority workload inadmissible")
 			updatedCohort := &kueue.Cohort{}
@@ -909,44 +934,54 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 			util.FinishEvictionOfWorkloadsInCQ(ctx, k8sClient, cq2, 2)
 
 			ginkgo.By("Expected Total Admitted Workloads and Weighted Share")
-			util.ExpectAdmittedWorkloadsTotalMetric(cq1, "", 1)
-			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, secondAdmissibleWorkload)
-			util.ExpectClusterQueueWeightedShareMetric(cq1, 1000)
-			util.ExpectClusterQueueWeightedShareMetric(cq2, 0.0)
+			gomega.Eventually(func(g gomega.Gomega) {
+				util.ExpectAdmittedWorkloadsTotalMetric(cq1, "", 1)
+				util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, secondAdmissibleWorkload)
+				util.ExpectClusterQueueWeightedShareMetric(cq1, 1000)
+				util.ExpectClusterQueueWeightedShareMetric(cq2, 0.0)
+			}, util.Timeout, util.Interval).Should(gomega.Succeed())
+
+			ginkgo.By("Verifying high priority workload is still pending")
+			gomega.Eventually(func(g gomega.Gomega) {
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(highPriorityWl), highPriorityWl)).To(gomega.Succeed())
+				g.Expect(workload.IsAdmitted(highPriorityWl)).To(gomega.BeFalse())
+			}, util.Timeout, util.Interval).Should(gomega.Succeed())
 		})
 
-		ginkgo.It("sticky workload deleted, next workload can admit", func() {
+		ginkgo.It("head workload deleted, next workload can admit", func() {
 			ginkgo.By("Creating borrowing workloads in queue2")
 			createWorkloadWithPriority("cq2", "1", 0)
 			createWorkloadWithPriority("cq2", "1", 0)
 			util.ExpectAdmittedWorkloadsTotalMetric(cq2, "", 2)
 
 			ginkgo.By("Create admissible workloads in queue1")
-			stickyWorkload := createWorkloadWithPriority("cq1", "3", 99)
+			headWorkload := createWorkloadWithPriority("cq1", "3", 99)
 
-			ginkgo.By("Verify the workload is counted as pending active")
-			util.ExpectPendingWorkloadsMetric(cq1, 1, 0)
+			ginkgo.By("Verify the workload is counted as pending")
+			util.ExpectPendingWorkloadsTotalMetric(cq1, 1)
 
 			ginkgo.By("Another admissible workload in queue1")
 			createWorkloadWithPriority("cq1", "3", 0)
 
 			ginkgo.By("Validate pending workloads")
-			util.ExpectPendingWorkloadsMetric(cq1, 2, 0)
+			util.ExpectPendingWorkloadsTotalMetric(cq1, 2)
 
-			ginkgo.By("Delete sticky workload")
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, stickyWorkload, true)
+			ginkgo.By("Delete head workload")
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, headWorkload, true)
 
 			ginkgo.By("Validate pending workloads")
-			util.ExpectPendingWorkloadsMetric(cq1, 1, 0)
+			util.ExpectPendingWorkloadsTotalMetric(cq1, 1)
 
 			ginkgo.By("Complete preemption")
 			util.FinishEvictionOfWorkloadsInCQ(ctx, k8sClient, cq2, 2)
 
 			ginkgo.By("Expected Total Admitted Workloads and Weighted Share")
-			util.ExpectAdmittedWorkloadsTotalMetric(cq1, "", 1)
-			util.ExpectAdmittedWorkloadsTotalMetric(cq2, "", 2)
-			util.ExpectClusterQueueWeightedShareMetric(cq1, 1000)
-			util.ExpectClusterQueueWeightedShareMetric(cq2, 0.0)
+			gomega.Eventually(func(g gomega.Gomega) {
+				util.ExpectAdmittedWorkloadsTotalMetric(cq1, "", 1)
+				util.ExpectAdmittedWorkloadsTotalMetric(cq2, "", 2)
+				util.ExpectClusterQueueWeightedShareMetric(cq1, 1000)
+				util.ExpectClusterQueueWeightedShareMetric(cq2, 0.0)
+			}, util.Timeout, util.Interval).Should(gomega.Succeed())
 		})
 	})
 
@@ -1251,6 +1286,7 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing", "featur
 		cqs     []*kueue.ClusterQueue
 		lqs     []*kueue.LocalQueue
 		wls     []*kueue.Workload
+		wpcs    []*kueue.WorkloadPriorityClass
 	)
 
 	var createWorkloadWithPriority = func(queue string, cpuRequests string, priority int32) *kueue.Workload {
@@ -1288,6 +1324,11 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing", "featur
 		for _, wl := range wls {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, wl, true)
 		}
+		wls = nil
+		for _, wpc := range wpcs {
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, wpc, true)
+		}
+		wpcs = nil
 		for _, lq := range lqs {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, lq, true)
 		}
@@ -1404,6 +1445,7 @@ var _ = ginkgo.Describe("Scheduler with AdmissionFairSharing = nil", ginkgo.Labe
 		cqs     []*kueue.ClusterQueue
 		lqs     []*kueue.LocalQueue
 		wls     []*kueue.Workload
+		wpcs    []*kueue.WorkloadPriorityClass
 	)
 
 	var createWorkloadWithPriority = func(queue string, cpuRequests string, priority int32) *kueue.Workload {
@@ -1432,6 +1474,11 @@ var _ = ginkgo.Describe("Scheduler with AdmissionFairSharing = nil", ginkgo.Labe
 		for _, wl := range wls {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, wl, true)
 		}
+		wls = nil
+		for _, wpc := range wpcs {
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, wpc, true)
+		}
+		wpcs = nil
 		for _, lq := range lqs {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, lq, true)
 		}

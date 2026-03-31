@@ -211,16 +211,16 @@ func getNodeHeight(node *schdcache.CohortSnapshot) int {
 // that fits additional val of resource fr. If no such subtree exists, it returns
 // height the whole cohort hierarchy. Note that height of a trivial subtree
 // with only one node is 0. It also returns if the returned subtree is smaller than the whole cohort tree.
-func FindHeightOfLowestSubtreeThatFits(c *schdcache.ClusterQueueSnapshot, fr resources.FlavorResource, val int64, excludedUsage resources.FlavorResourceQuantities) (int, bool) {
-	if !c.BorrowingWithFor(fr, val, excludedUsage) || !c.HasParent() {
+func FindHeightOfLowestSubtreeThatFits(c *schdcache.ClusterQueueSnapshot, fr resources.FlavorResource, val int64) (int, bool) {
+	if !c.BorrowingWith(fr, val) || !c.HasParent() {
 		return 0, c.HasParent()
 	}
-	remaining := val - schdcache.LocalAvailableFor(c, fr, excludedUsage)
+	remaining := val - schdcache.LocalAvailable(c, fr)
 	for trackingNode := range c.PathParentToRoot() {
-		if !trackingNode.BorrowingWithFor(fr, remaining, excludedUsage) {
+		if !trackingNode.BorrowingWith(fr, remaining) {
 			return getNodeHeight(trackingNode), trackingNode.HasParent()
 		}
-		remaining -= schdcache.LocalAvailableFor(trackingNode, fr, excludedUsage)
+		remaining -= schdcache.LocalAvailable(trackingNode, fr)
 	}
 	// no fit found
 	return getNodeHeight(c.Parent().Root()), false

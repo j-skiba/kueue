@@ -526,6 +526,12 @@ func (c *Cache) DeleteClusterQueue(cq *kueue.ClusterQueue) {
 	c.hm.DeleteClusterQueue(cqName)
 	metrics.ClearCacheMetrics(cq.Name)
 
+	for wlKey, res := range c.preemptionReservations {
+		if res.ClusterQueue == cqName {
+			delete(c.preemptionReservations, wlKey)
+		}
+	}
+
 	// Update cohort resources after deletion
 	if parent != nil {
 		updateCohortTreeResourcesIfNoCycle(parent)
@@ -717,6 +723,8 @@ func (c *Cache) deleteFromQueueIfPresent(log logr.Logger, wlKey workload.Referen
 func (c *Cache) DeleteWorkload(log logr.Logger, wlKey workload.Reference) error {
 	c.Lock()
 	defer c.Unlock()
+
+	delete(c.preemptionReservations, wlKey)
 
 	cqName, assigned := c.workloadAssignedQueues[wlKey]
 	if !assigned {
@@ -1056,6 +1064,13 @@ func (c *Cache) ReserveResources(preemptor *workload.Info, usage resources.Flavo
 	defer c.Unlock()
 
 	wlKey := workload.Key(preemptor.Obj)
+	if oldRes, ok := c.preemptionReservations[wlKey]; ok {
+		if cq := c.hm.ClusterQueue(oldRes.ClusterQueue); cq != nil {
+			cq.reservationsCount--
+			cq.reportActiveWorkloads()
+		}
+	}
+	delete(c.preemptionReservations, wlKey)
 	victimSet := sets.New(victims...)
 
 	c.preemptionReservations[wlKey] = &ReservationInfo{
@@ -1064,11 +1079,33 @@ func (c *Cache) ReserveResources(preemptor *workload.Info, usage resources.Flavo
 		OwnerPriority: priority,
 		Victims:       victimSet,
 	}
+	if cq := c.hm.ClusterQueue(clusterQueue); cq != nil {
+		cq.reservationsCount++
+		cq.reportActiveWorkloads()
+	}
 }
 
 func (c *Cache) UnreserveResources(wlKey workload.Reference) {
 	c.Lock()
 	defer c.Unlock()
 
+	if res, ok := c.preemptionReservations[wlKey]; ok {
+		if cq := c.hm.ClusterQueue(res.ClusterQueue); cq != nil {
+			cq.reservationsCount--
+			cq.reportActiveWorkloads()
+		}
+	}
 	delete(c.preemptionReservations, wlKey)
+}
+
+func (c *Cache) CleanPreemptionReservations() {
+	c.Lock()
+	defer c.Unlock()
+	for _, res := range c.preemptionReservations {
+		if cq := c.hm.ClusterQueue(res.ClusterQueue); cq != nil {
+			cq.reservationsCount--
+			cq.reportActiveWorkloads()
+		}
+	}
+	c.preemptionReservations = make(map[workload.Reference]*ReservationInfo)
 }

@@ -379,8 +379,8 @@ func FilterEvictedWorkloads(ctx context.Context, k8sClient client.Client, wls ..
 
 func filterWorkloads(ctx context.Context, k8sClient client.Client, filter func(*kueue.Workload) bool, wls ...*kueue.Workload) []*kueue.Workload {
 	ret := make([]*kueue.Workload, 0, len(wls))
-	var updatedWorkload kueue.Workload
 	for _, wl := range wls {
+		var updatedWorkload kueue.Workload
 		err := k8sClient.Get(ctx, client.ObjectKeyFromObject(wl), &updatedWorkload)
 		if err == nil && filter(&updatedWorkload) {
 			ret = append(ret, wl)

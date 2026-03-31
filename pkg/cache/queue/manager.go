@@ -669,24 +669,30 @@ func (m *Manager) deleteWorkloadWithoutLock(log logr.Logger, wlKey workload.Refe
 func (m *Manager) QueueAssociatedInadmissibleWorkloadsAfter(ctx context.Context, wlKey workload.Reference, action func()) {
 	m.Lock()
 	defer m.Unlock()
+
+	qKey, ok := m.workloadAssignedQueues[wlKey]
+
 	if action != nil {
 		action()
 	}
 
-	qKey, ok := m.workloadAssignedQueues[wlKey]
+	cqNames := sets.New[kueue.ClusterQueueReference]()
 	if !ok {
-		return
-	}
-	q := m.localQueues[qKey]
-	if q == nil {
-		return
-	}
-	cq := m.hm.ClusterQueue(q.ClusterQueue)
-	if cq == nil {
-		return
+		// If we don't know the queue, we must notify all.
+		// This can happen if the workload was never admitted and was deleted.
+		for cqName := range m.hm.ClusterQueues() {
+			cqNames.Insert(cqName)
+		}
+	} else {
+		q := m.localQueues[qKey]
+		if q != nil {
+			cqNames.Insert(q.ClusterQueue)
+		}
 	}
 
-	notifyRetryInadmissibleWithoutLock(m, sets.New(cq.name))
+	if cqNames.Len() > 0 {
+		notifyRetryInadmissibleWithoutLock(m, cqNames)
+	}
 }
 
 // UpdateWorkload updates the workload to the corresponding queue or adds it if

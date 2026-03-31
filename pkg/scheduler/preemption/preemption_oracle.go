@@ -45,6 +45,11 @@ func (p *PreemptionOracle) SimulatePreemption(log logr.Logger, cq *schdcache.Clu
 		excludedUsage = wlReservation.Usage
 	}
 
+	if len(excludedUsage) > 0 {
+		revert := cq.SimulateReservationRemoval(excludedUsage)
+		defer revert()
+	}
+
 	candidates := p.preemptor.getTargets(&preemptionCtx{
 		clock:             p.preemptor.clock,
 		log:               log,
@@ -56,7 +61,7 @@ func (p *PreemptionOracle) SimulatePreemption(log logr.Logger, cq *schdcache.Clu
 	})
 
 	if len(candidates) == 0 {
-		borrow, _ := classical.FindHeightOfLowestSubtreeThatFits(cq, fr, quantity, excludedUsage)
+		borrow, _ := classical.FindHeightOfLowestSubtreeThatFits(cq, fr, quantity)
 		return preemptioncommon.NoCandidates, borrow
 	}
 
@@ -65,7 +70,7 @@ func (p *PreemptionOracle) SimulatePreemption(log logr.Logger, cq *schdcache.Clu
 		workloadsToPreempt[i] = c.WorkloadInfo
 	}
 	revertRemoval := p.snapshot.SimulateWorkloadRemoval(workloadsToPreempt)
-	borrowAfterPreemptions, _ := classical.FindHeightOfLowestSubtreeThatFits(cq, fr, quantity, excludedUsage)
+	borrowAfterPreemptions, _ := classical.FindHeightOfLowestSubtreeThatFits(cq, fr, quantity)
 	revertRemoval()
 
 	for _, candidate := range candidates {

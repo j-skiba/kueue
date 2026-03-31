@@ -49,6 +49,31 @@ func expectAdmissionAttempts(want int, operation string, result metrics.Admissio
 
 var pendingStatuses = []string{metrics.PendingStatusActive, metrics.PendingStatusInadmissible}
 
+func ExpectPendingWorkloadsTotalMetric(cq *kueue.ClusterQueue, expectedTotal int, customLabels ...string) {
+	ginkgo.GinkgoHelper()
+	gomega.Eventually(func(g gomega.Gomega) {
+		var total float64
+		for _, status := range pendingStatuses {
+			lvs := append([]string{cq.Name, status, roletracker.RoleStandalone}, customLabels...)
+			metric := metrics.PendingWorkloads.WithLabelValues(lvs...)
+			v, err := testutil.GetGaugeMetricValue(metric)
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			total += v
+		}
+		g.Expect(total).Should(gomega.Equal(float64(expectedTotal)), "total pending_workloads")
+	}, Timeout, Interval).Should(gomega.Succeed())
+}
+
+func ExpectPendingWorkloadsMetric(cq *kueue.ClusterQueue, active, inadmissible int, customLabels ...string) {
+	ginkgo.GinkgoHelper()
+	vals := []int{active, inadmissible}
+	for i, status := range pendingStatuses {
+		lvs := append([]string{cq.Name, status, roletracker.RoleStandalone}, customLabels...)
+		metric := metrics.PendingWorkloads.WithLabelValues(lvs...)
+		expectGaugeMetric(metric, gomega.Equal(float64(vals[i])), "pending_workloads with status=%s", status)
+	}
+}
+
 func ExpectLQPendingWorkloadsMetric(lq *kueue.LocalQueue, active, inadmissible int, customLabels ...string) {
 	ginkgo.GinkgoHelper()
 	vals := []int{active, inadmissible}
@@ -92,16 +117,6 @@ func ExpectLQByStatusMetric(lq *kueue.LocalQueue, status metav1.ConditionStatus)
 			g.Expect(v).Should(gomega.Equal(wantV), "local_queue_status with status=%s", s)
 		}
 	}, Timeout, Interval).Should(gomega.Succeed())
-}
-
-func ExpectPendingWorkloadsMetric(cq *kueue.ClusterQueue, active, inadmissible int, customLabels ...string) {
-	ginkgo.GinkgoHelper()
-	vals := []int{active, inadmissible}
-	for i, status := range pendingStatuses {
-		lvs := append([]string{cq.Name, status, roletracker.RoleStandalone}, customLabels...)
-		metric := metrics.PendingWorkloads.WithLabelValues(lvs...)
-		expectGaugeMetric(metric, gomega.Equal(float64(vals[i])), "pending_workloads with status=%s", status)
-	}
 }
 
 func ExpectReservingActiveWorkloadsMetric(cq *kueue.ClusterQueue, value int) {
