@@ -179,7 +179,7 @@ func (c *ClusterQueueSnapshot) Fits(usage workload.Usage, excludedUsage resource
 		defer revert()
 	}
 	for fr, q := range usage.Quota {
-		if c.Available(fr) < q {
+		if c.AvailableWithoutReservations(fr) < q {
 			return false
 		}
 	}
@@ -219,7 +219,11 @@ func (c *ClusterQueueSnapshot) BorrowingWithFor(fr resources.FlavorResource, val
 // Cohort. When the ClusterQueue/Cohort is in debt, Available
 // will return 0.
 func (c *ClusterQueueSnapshot) Available(fr resources.FlavorResource) int64 {
-	return max(0, available(c, fr))
+	return max(0, available(c, fr, true))
+}
+
+func (c *ClusterQueueSnapshot) AvailableWithoutReservations(fr resources.FlavorResource) int64 {
+	return max(0, available(c, fr, false))
 }
 
 func (c *ClusterQueueSnapshot) AvailableFor(fr resources.FlavorResource, excludedUsage resources.FlavorResourceQuantities) int64 {

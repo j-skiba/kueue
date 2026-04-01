@@ -44,6 +44,8 @@ type Snapshot struct {
 	ResourceFlavors          map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor
 	InactiveClusterQueueSets sets.Set[kueue.ClusterQueueReference]
 	Reservations             map[workload.Reference]*ReservationInfo
+	AccountingReservations   sets.Set[workload.Reference]
+	NominatedReservations    sets.Set[workload.Reference]
 }
 
 // RemoveWorkload removes a workload from its corresponding ClusterQueue and
@@ -60,6 +62,27 @@ func (s *Snapshot) AddWorkload(wl *workload.Info) {
 	cq := s.ClusterQueue(wl.ClusterQueue)
 	cq.Workloads[workload.Key(wl.Obj)] = wl
 	cq.AddUsage(wl.Usage())
+}
+
+func (s *Snapshot) SimulatePreemption(preemptorUsage resources.FlavorResourceQuantities, victims []*workload.Info) func() {
+	cq := s.ClusterQueue(victims[0].ClusterQueue)
+	for _, v := range victims {
+		s.RemoveWorkload(v)
+	}
+	cq.AddReservation(preemptorUsage)
+	return func() {
+		cq.RemoveReservation(preemptorUsage)
+		for _, v := range victims {
+			s.AddWorkload(v)
+		}
+	}
+}
+
+func (s *Snapshot) SimulateNomination(wl *workload.Info) func() {
+	s.AddWorkload(wl)
+	return func() {
+		s.RemoveWorkload(wl)
+	}
 }
 
 // SimulateWorkloadRemoval modifies the snapshot by removing the usage
@@ -164,6 +187,8 @@ func (c *Cache) Snapshot(ctx context.Context, options ...SnapshotOption) (*Snaps
 		ResourceFlavors:          make(map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor, len(c.resourceFlavors)),
 		InactiveClusterQueueSets: sets.New[kueue.ClusterQueueReference](),
 		Reservations:             make(map[workload.Reference]*ReservationInfo, len(c.preemptionReservations)),
+		AccountingReservations:   sets.New[workload.Reference](),
+		NominatedReservations:    sets.New[workload.Reference](),
 	}
 	for _, cohort := range c.hm.Cohorts() {
 		if hierarchy.HasCycle(cohort) {
@@ -250,6 +275,7 @@ func (c *Cache) Snapshot(ctx context.Context, options ...SnapshotOption) (*Snaps
 		}
 		cqSnap.AddReservation(res.Usage)
 		coveredVictims = coveredVictims.Union(res.Victims)
+		snap.AccountingReservations.Insert(entry.wlKey)
 	}
 
 	return &snap, nil

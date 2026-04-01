@@ -117,13 +117,16 @@ func LocalAvailableFor(node flatResourceNode, fr resources.FlavorResource) int64
 // This function may return a negative number in the case of
 // overadmission - e.g. capacity was removed or the node moved to
 // another Cohort.
-func available(node hierarchicalResourceNode, fr resources.FlavorResource) int64 {
+func available(node hierarchicalResourceNode, fr resources.FlavorResource, includeReservations bool) int64 {
 	r := node.getResourceNode()
 	usage := r.Usage[fr]
+	if includeReservations {
+		usage += r.Reservations[fr]
+	}
 	if !node.HasParent() {
 		return r.SubtreeQuota[fr] - usage
 	}
-	parentAvailable := available(node.parentHRN(), fr)
+	parentAvailable := available(node.parentHRN(), fr, includeReservations)
 
 	if borrowingLimit := r.Quotas[fr].BorrowingLimit; borrowingLimit != nil {
 		storedInParent := r.SubtreeQuota[fr] - r.localQuota(fr)
