@@ -1014,7 +1014,7 @@ func flavorSelector(spec *corev1.PodSpec, allowedKeys sets.Set[string]) nodeaffi
 func (a *FlavorAssigner) fitsResourceQuota(log logr.Logger, fr resources.FlavorResource, assumedUsage int64, requestUsage int64, rQuota schdcache.ResourceQuota) (preemptionMode, int, *Status) {
 	var status Status
 
-	if a.accountingReservations.Has(workload.Key(a.wl.Obj)) || a.nominatedReservations.Has(workload.Key(a.wl.Obj)) {
+	if a.wlReservation == nil && (a.accountingReservations.Has(workload.Key(a.wl.Obj)) || a.nominatedReservations.Has(workload.Key(a.wl.Obj))) {
 		status.appendf("Workload already has a preemption reservation")
 		return noFit, 0, &status
 	}

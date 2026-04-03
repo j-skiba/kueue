@@ -310,6 +310,7 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 
 		if mode == flavorassigner.NoFit {
 			log.V(3).Info("Skipping workload as FlavorAssigner assigned NoFit mode")
+			s.cache.UnreserveResources(workload.Key(e.Obj))
 			continue
 		}
 
