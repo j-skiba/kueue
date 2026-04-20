@@ -507,7 +507,7 @@ func TestScheduleForFairSharing(t *testing.T) {
 							Obj()).
 						Obj(), now).
 					Obj(),
-				*utiltestingapi.MakeWorkload("wl-a", "eng-alpha").
+				*utiltestingapi.MakeWorkload("wl-z", "eng-alpha").
 					Queue("lq-a").
 					PodSets(*utiltestingapi.MakePodSet("one", 1).
 						Request(corev1.ResourceCPU, "5").
@@ -532,7 +532,7 @@ func TestScheduleForFairSharing(t *testing.T) {
 							Obj()).
 						Obj(), now).
 					Obj(),
-				*utiltestingapi.MakeWorkload("wl-a", "eng-alpha").
+				*utiltestingapi.MakeWorkload("wl-z", "eng-alpha").
 					Queue("lq-a").
 					PodSets(*utiltestingapi.MakePodSet("one", 1).
 						Request(corev1.ResourceCPU, "5").
@@ -584,7 +584,7 @@ func TestScheduleForFairSharing(t *testing.T) {
 			},
 			wantAssignments: map[workload.Reference]kueue.Admission{
 				"eng-alpha/c0":   *utiltestingapi.MakeAdmission("cq-c").PodSets(utiltestingapi.MakePodSetAssignment("one").Assignment(corev1.ResourceCPU, "on-demand", "10").Obj()).Obj(),
-				"eng-alpha/wl-a": *utiltestingapi.MakeAdmission("cq-a").PodSets(utiltestingapi.MakePodSetAssignment("one").Assignment(corev1.ResourceCPU, "on-demand", "5").Count(1).Obj()).Obj(),
+				"eng-alpha/wl-z": *utiltestingapi.MakeAdmission("cq-a").PodSets(utiltestingapi.MakePodSetAssignment("one").Assignment(corev1.ResourceCPU, "on-demand", "5").Count(1).Obj()).Obj(),
 			},
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"cq-b": {"eng-alpha/wl-b"},
