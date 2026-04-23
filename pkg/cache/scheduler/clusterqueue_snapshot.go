@@ -57,6 +57,7 @@ type ClusterQueueSnapshot struct {
 	Preemption                kueue.ClusterQueuePreemption
 	FairWeight                float64
 	FlavorFungibility         kueue.FlavorFungibility
+	QueueingStrategy          kueue.QueueingStrategy
 	AdmissionScope            kueue.AdmissionScope
 	ConcurrentAdmissionPolicy *kueue.ConcurrentAdmissionPolicy
 	// Aggregates AdmissionChecks from both .spec.AdmissionChecks and .spec.AdmissionCheckStrategy
@@ -107,6 +108,15 @@ func (c *ClusterQueueSnapshot) SimulateUsageRemoval(usage workload.Usage) func()
 	}
 }
 
+// SimulateReservationRemoval modifies the snapshot by removing reservation usage, and
+// returns a function used to restore the usage.
+func (c *ClusterQueueSnapshot) SimulateReservationRemoval(usage resources.FlavorResourceQuantities) func() {
+	c.RemoveReservation(usage)
+	return func() {
+		c.AddReservation(usage)
+	}
+}
+
 func (c *ClusterQueueSnapshot) AddUsage(usage workload.Usage) {
 	for fr, q := range usage.Quota {
 		addUsage(c, fr, q)
@@ -119,6 +129,28 @@ func (c *ClusterQueueSnapshot) RemoveUsage(usage workload.Usage) {
 		removeUsage(c, fr, q)
 	}
 	c.updateTASUsage(usage.TAS, subtract)
+}
+
+func (c *ClusterQueueSnapshot) AddReservation(usage resources.FlavorResourceQuantities) {
+	for fr, q := range usage {
+		addReservation(c, fr, q)
+	}
+}
+
+func (c *ClusterQueueSnapshot) RemoveReservation(usage resources.FlavorResourceQuantities) {
+	for fr, q := range usage {
+		removeReservation(c, fr, q)
+	}
+}
+
+func (c *ClusterQueueSnapshot) RemoveAllReservations() {
+	if len(c.ResourceNode.Reservations) == 0 {
+		return
+	}
+	for fr, q := range c.ResourceNode.Reservations {
+		removeUsage(c, fr, q)
+	}
+	c.ResourceNode.Reservations = nil
 }
 
 func (c *ClusterQueueSnapshot) updateTASUsage(usage workload.TASUsage, op usageOp) {
@@ -134,9 +166,13 @@ func (c *ClusterQueueSnapshot) updateTASUsage(usage workload.TASUsage, op usageO
 	}
 }
 
-func (c *ClusterQueueSnapshot) Fits(usage workload.Usage) FitsCheck {
+func (c *ClusterQueueSnapshot) Fits(usage workload.Usage, excludedUsage resources.FlavorResourceQuantities) FitsCheck {
+	if len(excludedUsage) > 0 {
+		revert := c.SimulateReservationRemoval(excludedUsage)
+		defer revert()
+	}
 	for fr, q := range usage.Quota {
-		if c.Available(fr).Cmp(q) < 0 {
+		if c.AvailableWithoutReservations(fr).Cmp(q) < 0 {
 			return FitsCheckNoQuota
 		}
 	}
@@ -168,7 +204,11 @@ func (c *ClusterQueueSnapshot) BorrowingWith(fr resources.FlavorResource, val re
 // Cohort. When the ClusterQueue/Cohort is in debt, Available
 // will return 0.
 func (c *ClusterQueueSnapshot) Available(fr resources.FlavorResource) resources.Amount {
-	return resources.MaxAmount(resources.NewAmount(0), available(c, fr))
+	return resources.MaxAmount(resources.NewAmount(0), available(c, fr, true))
+}
+
+func (c *ClusterQueueSnapshot) AvailableWithoutReservations(fr resources.FlavorResource) resources.Amount {
+	return resources.MaxAmount(resources.NewAmount(0), available(c, fr, false))
 }
 
 // PotentialAvailable returns the largest workload this ClusterQueue could

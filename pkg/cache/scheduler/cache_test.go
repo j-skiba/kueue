@@ -118,6 +118,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"b": {
 					Name:                          "b",
@@ -127,6 +128,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"c": {
 					Name:                          "c",
@@ -136,6 +138,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"d": {
 					Name:                          "d",
@@ -145,6 +148,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"e": {
 					Name:                          "e",
@@ -154,6 +158,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        pending,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"f": {
 					Name:                          "f",
@@ -165,7 +170,8 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 						WhenCanBorrow:  kueue.TryNextFlavor,
 						WhenCanPreempt: kueue.TryNextFlavor,
 					},
-					FairWeight: defaultWeight,
+					FairWeight:       defaultWeight,
+					QueueingStrategy: kueue.BestEffortFIFO,
 				},
 			},
 			wantCohorts: map[kueue.CohortReference]sets.Set[kueue.ClusterQueueReference]{
@@ -196,7 +202,8 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 						ReclaimWithinCohort: kueue.PreemptionPolicyLowerPriority,
 						WithinClusterQueue:  kueue.PreemptionPolicyLowerPriority,
 					},
-					FairWeight: defaultWeight,
+					FairWeight:       defaultWeight,
+					QueueingStrategy: kueue.BestEffortFIFO,
 				},
 			},
 		},
@@ -218,6 +225,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					FlavorFungibility:             defaultFlavorFungibility,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    2.0,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 			},
 		},
@@ -244,6 +252,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"b": {
 					Name:                          "b",
@@ -253,6 +262,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"c": {
 					Name:                          "c",
@@ -262,6 +272,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"d": {
 					Name:                          "d",
@@ -271,6 +282,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"e": {
 					Name:                          "e",
@@ -280,6 +292,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        pending,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"f": {
 					Name:                          "f",
@@ -291,7 +304,8 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 						WhenCanBorrow:  kueue.TryNextFlavor,
 						WhenCanPreempt: kueue.TryNextFlavor,
 					},
-					FairWeight: defaultWeight,
+					FairWeight:       defaultWeight,
+					QueueingStrategy: kueue.BestEffortFIFO,
 				},
 			},
 			wantCohorts: map[kueue.CohortReference]sets.Set[kueue.ClusterQueueReference]{
@@ -345,6 +359,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"b": {
 					Name:                          "b",
@@ -354,6 +369,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"c": {
 					Name:                          "c",
@@ -363,6 +379,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"d": {
 					Name:                          "d",
@@ -372,6 +389,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"e": {
 					Name:                          "e",
@@ -381,6 +399,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"f": {
 					Name:                          "f",
@@ -392,7 +411,8 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 						WhenCanBorrow:  kueue.TryNextFlavor,
 						WhenCanPreempt: kueue.TryNextFlavor,
 					},
-					FairWeight: defaultWeight,
+					FairWeight:       defaultWeight,
+					QueueingStrategy: kueue.BestEffortFIFO,
 				},
 			},
 			wantCohorts: map[kueue.CohortReference]sets.Set[kueue.ClusterQueueReference]{
@@ -457,9 +477,10 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					AdmittedUsage: resources.FlavorResourceQuantities{
 						{Flavor: "default", Resource: corev1.ResourceCPU}: resources.NewAmount(5000),
 					},
-					Status:     active,
-					Preemption: defaultPreemption,
-					FairWeight: defaultWeight,
+					Status:           active,
+					Preemption:       defaultPreemption,
+					FairWeight:       defaultWeight,
+					QueueingStrategy: kueue.BestEffortFIFO,
 					Workloads: map[workload.Reference]*workload.Info{
 						"/one": {
 							Obj: utiltestingapi.MakeWorkload("one", "").
@@ -520,6 +541,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 					NamespaceSelector:             labels.Nothing(),
 				},
 				"b": {
@@ -529,6 +551,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 					NamespaceSelector:             labels.Nothing(),
 				},
 				"c": {
@@ -538,6 +561,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 					NamespaceSelector:             labels.Nothing(),
 				},
 			},
@@ -573,6 +597,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"c": {
 					Name:                          "c",
@@ -582,6 +607,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"e": {
 					Name:                          "e",
@@ -591,6 +617,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        pending,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"f": {
 					Name:                          "f",
@@ -602,7 +629,8 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 						WhenCanBorrow:  kueue.TryNextFlavor,
 						WhenCanPreempt: kueue.TryNextFlavor,
 					},
-					FairWeight: defaultWeight,
+					FairWeight:       defaultWeight,
+					QueueingStrategy: kueue.BestEffortFIFO,
 				},
 			},
 			wantCohorts: map[kueue.CohortReference]sets.Set[kueue.ClusterQueueReference]{
@@ -629,6 +657,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"b": {
 					Name:                          "b",
@@ -638,6 +667,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"c": {
 					Name:                          "c",
@@ -647,6 +677,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"d": {
 					Name:                          "d",
@@ -656,6 +687,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"e": {
 					Name:                          "e",
@@ -665,6 +697,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        active,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 				"f": {
 					Name:                          "f",
@@ -676,7 +709,8 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 						WhenCanBorrow:  kueue.TryNextFlavor,
 						WhenCanPreempt: kueue.TryNextFlavor,
 					},
-					FairWeight: defaultWeight,
+					FairWeight:       defaultWeight,
+					QueueingStrategy: kueue.BestEffortFIFO,
 				},
 			},
 			wantCohorts: map[kueue.CohortReference]sets.Set[kueue.ClusterQueueReference]{
@@ -718,6 +752,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					Status:                        pending,
 					Preemption:                    defaultPreemption,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 			},
 		},
@@ -745,7 +780,8 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 						"check1": sets.New[kueue.ResourceFlavorReference](),
 						"check2": sets.New[kueue.ResourceFlavorReference](),
 					},
-					FairWeight: defaultWeight,
+					FairWeight:       defaultWeight,
+					QueueingStrategy: kueue.BestEffortFIFO,
 				},
 			},
 			wantCohorts: map[kueue.CohortReference]sets.Set[kueue.ClusterQueueReference]{},
@@ -777,7 +813,8 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 						"check1": sets.New[kueue.ResourceFlavorReference](),
 						"check2": sets.New[kueue.ResourceFlavorReference](),
 					},
-					FairWeight: defaultWeight,
+					FairWeight:       defaultWeight,
+					QueueingStrategy: kueue.BestEffortFIFO,
 				},
 			},
 			wantCohorts: map[kueue.CohortReference]sets.Set[kueue.ClusterQueueReference]{},
@@ -810,7 +847,8 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 						"check1": sets.New[kueue.ResourceFlavorReference](),
 						"check2": sets.New[kueue.ResourceFlavorReference](),
 					},
-					FairWeight: defaultWeight,
+					FairWeight:       defaultWeight,
+					QueueingStrategy: kueue.BestEffortFIFO,
 				},
 			},
 			wantCohorts: map[kueue.CohortReference]sets.Set[kueue.ClusterQueueReference]{},
@@ -843,7 +881,8 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 						"check1": sets.New[kueue.ResourceFlavorReference](),
 						"check2": sets.New[kueue.ResourceFlavorReference](),
 					},
-					FairWeight: defaultWeight,
+					FairWeight:       defaultWeight,
+					QueueingStrategy: kueue.BestEffortFIFO,
 				},
 			},
 			wantCohorts: map[kueue.CohortReference]sets.Set[kueue.ClusterQueueReference]{},
@@ -905,7 +944,8 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					AdmittedUsage: resources.FlavorResourceQuantities{
 						{Flavor: "f1", Resource: corev1.ResourceCPU}: resources.NewAmount(1000),
 					},
-					FairWeight: defaultWeight,
+					FairWeight:       defaultWeight,
+					QueueingStrategy: kueue.BestEffortFIFO,
 					resourceNode: resourceNode{
 						Usage: resources.FlavorResourceQuantities{
 							{Flavor: "f1", Resource: corev1.ResourceCPU}: resources.NewAmount(2000),
@@ -1003,6 +1043,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					AllocatableResourceGeneration: 1,
 					FlavorFungibility:             defaultFlavorFungibility,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 			},
 		},
@@ -1046,6 +1087,7 @@ func TestCacheClusterQueueOperations(t *testing.T) {
 					AllocatableResourceGeneration: 2,
 					FlavorFungibility:             defaultFlavorFungibility,
 					FairWeight:                    defaultWeight,
+					QueueingStrategy:              kueue.BestEffortFIFO,
 				},
 			},
 			wantCohorts: map[kueue.CohortReference]sets.Set[kueue.ClusterQueueReference]{

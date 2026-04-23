@@ -45,6 +45,19 @@ func (p *PreemptionOracle) SimulatePreemption(
 	fr resources.FlavorResource,
 	quantity resources.Amount,
 ) (preemptioncommon.PreemptionPossibility, int) {
+	wlReservation := p.snapshot.PreemptionReservations[workload.Key(wl.Obj)]
+	if wlReservation == nil {
+		wlReservation = p.snapshot.GenericReservations[workload.Key(wl.Obj)]
+	}
+	var excludedUsage resources.FlavorResourceQuantities
+	if wlReservation != nil {
+		excludedUsage = wlReservation.Usage
+	}
+
+	if len(excludedUsage) > 0 {
+		revert := cq.SimulateReservationRemoval(excludedUsage)
+		defer revert()
+	}
 	candidates := p.preemptor.getTargets(&preemptionCtx{
 		clock:             p.preemptor.clock,
 		log:               log,

@@ -409,6 +409,7 @@ func (s *Scheduler) processEntry(
 		e.requeueReason = qcache.RequeueReasonNoFit
 		log.V(3).Info("Skipping workload as FlavorAssigner assigned NoFit mode")
 		e.quotaReservedReason = e.assignment.NoFitReason
+		s.cache.RemoveReservation(workload.Key(e.Obj))
 		return
 	}
 
@@ -498,8 +499,12 @@ func (s *Scheduler) handleFailedTASReplacement(ctx context.Context, log logr.Log
 // workloads in another Cohort cannot admit before us.
 func (s *Scheduler) reserveCapacityForUnreclaimablePreempt(log logr.Logger, e *entry, cq *schdcache.ClusterQueueSnapshot) {
 	log.V(2).Info("Workload requires preemption, but there are no candidate workloads allowed for preemption", "preemption", cq.Preemption)
+	usage := resourcesToReserve(log, e, cq)
 	if !preemption.CanAlwaysReclaim(cq) {
-		cq.AddUsage(resourcesToReserve(log, e, cq))
+		cq.AddUsage(usage)
+	}
+	if cq.QueueingStrategy == kueue.StrictFIFO {
+		s.cache.AddGenericReservation(&e.Info, usage.Quota, cq.Name, int64(priority.Priority(e.Obj)))
 	}
 }
 
@@ -525,6 +530,13 @@ func (s *Scheduler) issuePreemptions(ctx context.Context, log logr.Logger, e *en
 	preempted, errors, err := s.preemptor.IssuePreemptions(ctx, s.cache, &e.Info, preemptionTargets, e.clusterQueueSnapshot)
 	if err != nil {
 		log.Error(err, "Failed to preempt workloads")
+	}
+	if preempted != 0 {
+		var victimKeys []workload.Reference
+		for _, target := range preemptionTargets {
+			victimKeys = append(victimKeys, workload.Key(target.WorkloadInfo.Obj))
+		}
+		s.cache.AddPreemptionReservation(&e.Info, e.assignmentUsage(log).Quota, victimKeys, e.clusterQueueSnapshot.Name, int64(priority.Priority(e.Obj)))
 	}
 	e.markPreemptionOutcome(preempted, errors)
 }
@@ -659,7 +671,15 @@ func (s *Scheduler) updateAssignmentIfNeeded(log logr.Logger,
 	cq *schdcache.ClusterQueueSnapshot,
 	preemptedWorkloads preemption.PreemptedWorkloads) (workload.Usage, bool) {
 	usage := e.assignmentUsage(log)
-	fitsCheck := fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets)
+	wlReservation := snapshot.PreemptionReservations[workload.Key(e.Obj)]
+	if wlReservation == nil {
+		wlReservation = snapshot.GenericReservations[workload.Key(e.Obj)]
+	}
+	var excludedUsage resources.FlavorResourceQuantities
+	if wlReservation != nil {
+		excludedUsage = wlReservation.Usage
+	}
+	fitsCheck := fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets, excludedUsage)
 	if fitsCheck == schdcache.FitsCheckNoTAS && features.Enabled(features.TASRecomputeAssignmentWithinSchedulingCycle) {
 		log.V(2).Info("Re-computing the assignment as it doesn't fit for TAS")
 		// Clear the last assignment so that we can start from the first flavor again and
@@ -669,7 +689,7 @@ func (s *Scheduler) updateAssignmentIfNeeded(log logr.Logger,
 		newAssignment, newTargets := s.getAssignments(log, &e.Info, snapshot)
 		e.recordAssignment(newAssignment, newTargets)
 		usage = e.assignmentUsage(log)
-		fitsCheck = fits(snapshot, cq, &usage, preemptedWorkloads, newTargets)
+		fitsCheck = fits(snapshot, cq, &usage, preemptedWorkloads, newTargets, excludedUsage)
 		log.V(2).Info("Re-computed assignment", "newMode", newAssignment.RepresentativeMode())
 		// clear the assignment flavors as they are only used within a single scheduling cycle
 		e.NominationMapping = nil
@@ -678,14 +698,14 @@ func (s *Scheduler) updateAssignmentIfNeeded(log logr.Logger,
 }
 
 func fits(snapshot *schdcache.Snapshot, cq *schdcache.ClusterQueueSnapshot, usage *workload.Usage, preemptedWorkloads preemption.PreemptedWorkloads,
-	newTargets []*preemption.Target) schdcache.FitsCheck {
+	newTargets []*preemption.Target, excludedUsage resources.FlavorResourceQuantities) schdcache.FitsCheck {
 	workloads := slices.Collect(maps.Values(preemptedWorkloads))
 	for _, target := range newTargets {
 		workloads = append(workloads, target.WorkloadInfo)
 	}
 	revertUsage := snapshot.SimulateWorkloadRemoval(workloads)
 	defer revertUsage()
-	return cq.Fits(*usage)
+	return cq.Fits(*usage, excludedUsage)
 }
 
 // resourcesToReserve calculates how much of the available resources in cq/cohort assignment should be reserved.
@@ -763,7 +783,11 @@ func (s *Scheduler) getInitialAssignments(log logr.Logger, wl *workload.Info, sn
 	cq := snap.ClusterQueue(wl.ClusterQueue)
 
 	preemptionTargets, replaceableWorkloadSlice := workloadslicing.ReplacedWorkloadSlice(wl, snap)
-	flvAssigner := flavorassigner.New(wl, cq, snap.ResourceFlavors, fairsharing.Enabled(s.fairSharing), preemption.NewOracle(s.preemptor, snap), replaceableWorkloadSlice, s.quotaCheckStrategy)
+	wlReservation := snap.PreemptionReservations[workload.Key(wl.Obj)]
+	if wlReservation == nil {
+		wlReservation = snap.GenericReservations[workload.Key(wl.Obj)]
+	}
+	flvAssigner := flavorassigner.New(wl, cq, snap.ResourceFlavors, fairsharing.Enabled(s.fairSharing), preemption.NewOracle(s.preemptor, snap), replaceableWorkloadSlice, wlReservation, snap.AppliedReservations, s.quotaCheckStrategy)
 	fullAssignment := flvAssigner.Assign(log, nil)
 
 	arm := fullAssignment.RepresentativeMode()
@@ -858,6 +882,7 @@ func (s *Scheduler) admit(ctx context.Context, e *entry, cq *schdcache.ClusterQu
 	if err != nil {
 		return err
 	}
+	s.cache.RemoveReservation(workload.Key(e.Obj))
 
 	newWorkload := e.Obj.DeepCopy()
 	s.admissionRoutineWrapper.Run(func() {

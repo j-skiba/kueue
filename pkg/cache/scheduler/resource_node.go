@@ -41,6 +41,10 @@ type resourceNode struct {
 	// usage. For Cohorts, this is the sum of childrens'
 	// usages past childrens' localQuota.
 	Usage resources.FlavorResourceQuantities
+	// Reservations is the quantity which is reserved for specific workloads
+	// (e.g., preempting workloads or nominated workloads).
+	// While initiated at the ClusterQueue level, it accumulates up the cohort tree.
+	Reservations resources.FlavorResourceQuantities
 }
 
 func NewResourceNode() resourceNode {
@@ -58,6 +62,7 @@ func (r resourceNode) Clone() resourceNode {
 		Quotas:       r.Quotas,
 		SubtreeQuota: r.SubtreeQuota,
 		Usage:        maps.Clone(r.Usage),
+		Reservations: maps.Clone(r.Reservations),
 	}
 }
 
@@ -103,22 +108,27 @@ func LocalAvailable(node flatResourceNode, fr resources.FlavorResource) resource
 // This function may return a negative number in the case of
 // overadmission - e.g. capacity was removed or the node moved to
 // another Cohort.
-func available(node hierarchicalResourceNode, fr resources.FlavorResource) resources.Amount {
+func available(node hierarchicalResourceNode, fr resources.FlavorResource, includeReservations bool) resources.Amount {
 	r := node.getResourceNode()
-	if !node.HasParent() {
-		return r.SubtreeQuota[fr].Sub(r.Usage[fr])
+	usage := r.Usage[fr]
+	if includeReservations {
+		usage = usage.Add(r.Reservations[fr])
 	}
-	parentAvailable := available(node.parentHRN(), fr)
+	if !node.HasParent() {
+		return r.SubtreeQuota[fr].Sub(usage)
+	}
+	parentAvailable := available(node.parentHRN(), fr, includeReservations)
 
 	if borrowingLimit := r.Quotas[fr].BorrowingLimit; borrowingLimit != nil {
 		// All of these can be Unlimited; Amount methods propagate that.
 		lq := r.localQuota(fr)
 		storedInParent := r.SubtreeQuota[fr].Sub(lq)
-		usedInParent := resources.MaxAmount(resources.NewAmount(0), r.Usage[fr].Sub(lq))
+		usedInParent := resources.MaxAmount(resources.NewAmount(0), usage.Sub(lq))
 		withMaxFromParent := storedInParent.Sub(usedInParent).Add(*borrowingLimit)
 		parentAvailable = resources.MinAmount(withMaxFromParent, parentAvailable)
 	}
-	return LocalAvailable(node, fr).Add(parentAvailable)
+	localAvailable := resources.MaxAmount(resources.NewAmount(0), r.localQuota(fr).Sub(usage))
+	return localAvailable.Add(parentAvailable)
 }
 
 // potentialAvailable returns the maximum capacity available to this node,
@@ -162,6 +172,27 @@ func removeUsage(node hierarchicalResourceNode, fr resources.FlavorResource, val
 	}
 	deltaParentUsage := resources.MinAmount(val, usageStoredInParent)
 	removeUsage(node.parentHRN(), fr, deltaParentUsage)
+}
+
+func addReservation(node hierarchicalResourceNode, fr resources.FlavorResource, val resources.Amount) {
+	r := node.getResourceNode()
+	if r.Reservations == nil {
+		r.Reservations = make(resources.FlavorResourceQuantities)
+	}
+	r.Reservations[fr] = r.Reservations[fr].Add(val)
+	if node.HasParent() {
+		addReservation(node.parentHRN(), fr, val)
+	}
+}
+
+func removeReservation(node hierarchicalResourceNode, fr resources.FlavorResource, val resources.Amount) {
+	r := node.getResourceNode()
+	if r.Reservations != nil {
+		r.Reservations[fr] = r.Reservations[fr].Sub(val)
+	}
+	if node.HasParent() {
+		removeReservation(node.parentHRN(), fr, val)
+	}
 }
 
 func updateClusterQueueResourceNode(cq *clusterQueue) {
