@@ -383,6 +383,9 @@ func (s *Scheduler) processEntry(
 	ctx = ctrl.LoggerInto(ctx, log)
 	log.V(2).Info("Attempting to schedule workload")
 
+	revertReservations := snapshot.SimulateLowerPriorityReservationsRemoval(int64(priority.Priority(e.Obj)))
+	defer revertReservations()
+
 	if features.Enabled(features.ConcurrentAdmission) && concurrentadmission.IsVariant(e.Obj) {
 		if moreFavorableSibling := s.findAdmittedMoreFavorableSibling(&e.Info, snapshot); moreFavorableSibling != nil {
 			log.V(3).Info("Skipping workload as a more favorable variant is already admitted", "moreFavorableVariant", klog.KObj(moreFavorableSibling.Obj))
@@ -655,7 +658,9 @@ func (s *Scheduler) nominate(ctx context.Context, workloads []workload.Info, sna
 				}
 			}
 		} else {
+			revertReservations := snap.SimulateLowerPriorityReservationsRemoval(int64(priority.Priority(w.Obj)))
 			assignment, targets := s.getAssignments(log, &e.Info, snap)
+			revertReservations()
 			e.recordAssignment(assignment, targets)
 			entries = append(entries, e)
 			continue
@@ -686,7 +691,9 @@ func (s *Scheduler) updateAssignmentIfNeeded(log logr.Logger,
 		// reach all flavors from the nomination.
 		e.LastAssignment = nil
 		e.NominationMapping = e.readResourceToFlavorMapping()
+		revertReservations := snapshot.SimulateLowerPriorityReservationsRemoval(int64(priority.Priority(e.Obj)))
 		newAssignment, newTargets := s.getAssignments(log, &e.Info, snapshot)
+		revertReservations()
 		e.recordAssignment(newAssignment, newTargets)
 		usage = e.assignmentUsage(log)
 		fitsCheck = fits(snapshot, cq, &usage, preemptedWorkloads, newTargets, excludedUsage)
@@ -883,6 +890,7 @@ func (s *Scheduler) admit(ctx context.Context, e *entry, cq *schdcache.ClusterQu
 		return err
 	}
 	s.cache.RemoveReservation(workload.Key(e.Obj))
+	s.cache.RemoveLowerPriorityReservations(int64(priority.Priority(e.Obj)), e.ClusterQueue)
 
 	newWorkload := e.Obj.DeepCopy()
 	s.admissionRoutineWrapper.Run(func() {
