@@ -112,6 +112,7 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 		for _, wl := range wls {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, wl, true)
 		}
+		wls = nil
 		for _, lq := range lqs {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, lq, true)
 		}
@@ -122,6 +123,9 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 		for _, cohort := range cohorts {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, cohort, true)
 		}
+		lqs = nil
+		cqs = nil
+		cohorts = nil
 		util.ExpectObjectToBeDeleted(ctx, k8sClient, defaultFlavor, true)
 		util.ExpectObjectToBeDeleted(ctx, k8sClient, flavor1, true)
 		util.ExpectObjectToBeDeleted(ctx, k8sClient, flavor2, true)
@@ -864,7 +868,7 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 			util.ExpectClusterQueueWeightedShareMetric(cq2, 0.0)
 		})
 
-		ginkgo.It("sticky workload becomes inadmissible. next workload admits", func() {
+		ginkgo.It("head workload becomes inadmissible. next workload admits", func() {
 			ginkgo.By("Creating borrowing workloads in queue2")
 			createWorkload("cq2", "1")
 			createWorkload("cq2", "1")
@@ -916,14 +920,14 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 			util.ExpectClusterQueueWeightedShareMetric(cq2, 0.0)
 		})
 
-		ginkgo.It("sticky workload deleted, next workload can admit", func() {
+		ginkgo.It("head workload deleted, next workload can admit", func() {
 			ginkgo.By("Creating borrowing workloads in queue2")
 			createWorkloadWithPriority("cq2", "1", 0)
 			createWorkloadWithPriority("cq2", "1", 0)
 			util.ExpectAdmittedWorkloadsTotalMetric(cq2, "", 2)
 
 			ginkgo.By("Create admissible workloads in queue1")
-			stickyWorkload := createWorkloadWithPriority("cq1", "3", 99)
+			headWorkload := createWorkloadWithPriority("cq1", "3", 99)
 
 			ginkgo.By("Verify the workload is counted as pending active")
 			util.ExpectPendingWorkloadsMetric(cq1, 1, 0)
@@ -934,8 +938,8 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 			ginkgo.By("Validate pending workloads")
 			util.ExpectPendingWorkloadsMetric(cq1, 2, 0)
 
-			ginkgo.By("Delete sticky workload")
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, stickyWorkload, true)
+			ginkgo.By("Delete head workload")
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, headWorkload, true)
 
 			ginkgo.By("Validate pending workloads")
 			util.ExpectPendingWorkloadsMetric(cq1, 1, 0)
@@ -1319,6 +1323,7 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing", "featur
 		for _, wl := range wls {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, wl, true)
 		}
+		wls = nil
 		for _, lq := range lqs {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, lq, true)
 		}
@@ -1463,6 +1468,7 @@ var _ = ginkgo.Describe("Scheduler with AdmissionFairSharing = nil", ginkgo.Labe
 		for _, wl := range wls {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, wl, true)
 		}
+		wls = nil
 		for _, lq := range lqs {
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, lq, true)
 		}

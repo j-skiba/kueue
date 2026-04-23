@@ -66,9 +66,6 @@ var (
 )
 
 // stickyWorkload is the workload at the ClusterQueue head which is
-// currently preempting workloads. It is only enabled for
-// BestEffortFIFO policy, and prevents skipped over ineligible
-// workloads from going back to the head of the queue.  A workload is
 // considered sticky until it is admitted, unschedulable, or deleted.
 // See Kueue#6929 and Kueue#7101 for motivation.
 type stickyWorkload struct {
@@ -99,6 +96,7 @@ type ClusterQueue struct {
 	heap              heap.Heap[workload.Info, workload.Reference]
 	namespaceSelector labels.Selector
 	active            bool
+	sw                *stickyWorkload
 
 	// inadmissibleWorkloads are workloads that have been tried at least once and couldn't be admitted.
 	inadmissibleWorkloads inadmissibleWorkloads
@@ -134,8 +132,6 @@ type ClusterQueue struct {
 
 	afsEntryPenalties         *queueafs.AfsEntryPenalties
 	localQueuesInClusterQueue map[utilqueue.LocalQueueReference]bool
-
-	sw *stickyWorkload
 }
 
 func (c *ClusterQueue) GetName() kueue.ClusterQueueReference {
@@ -372,12 +368,6 @@ func (c *ClusterQueue) delete(log logr.Logger, key workload.Reference) {
 	c.inadmissibleWorkloads.delete(key)
 	c.heap.Delete(key)
 	c.forgetInflightByKey(key)
-	if c.sw.matches(key) {
-		if logV := log.V(5); logV.Enabled() {
-			logV.Info("Clearing sticky workload due to deletion", "clusterQueue", c.name, "workload", key)
-		}
-		c.sw.clear()
-	}
 }
 
 // DeleteFromLocalQueue removes all workloads belonging to this queue from
@@ -727,17 +717,6 @@ func (c *ClusterQueue) Active() bool {
 // The workload should not be reinserted if it's already in the ClusterQueue.
 // Returns true if the workload was inserted.
 func (c *ClusterQueue) RequeueIfNotPresent(ctx context.Context, wInfo *workload.Info, reason RequeueReason) bool {
-	// when preemptions are in-progress, we keep attempting to
-	// schedule the same workload for BestEffortFIFO queues. See
-	// documentation of stickyWorkload for more details
-	log := ctrl.LoggerFrom(ctx)
-	if reason == RequeueReasonPendingPreemption && c.queueingStrategy == kueue.BestEffortFIFO {
-		if logV := log.V(5); logV.Enabled() {
-			logV.Info("Setting sticky workload", "clusterQueue", wInfo.ClusterQueue, "workload", workload.Key(wInfo.Obj))
-		}
-		c.sw.set(workload.Key(wInfo.Obj))
-	}
-
 	var immediate bool
 	if c.queueingStrategy == kueue.StrictFIFO {
 		immediate = reason != RequeueReasonNamespaceMismatch
@@ -746,10 +725,10 @@ func (c *ClusterQueue) RequeueIfNotPresent(ctx context.Context, wInfo *workload.
 			reason == RequeueReasonPendingPreemption ||
 			reason == RequeueReasonPreemptionFailed
 	}
-	return c.requeueIfNotPresent(log, wInfo, immediate)
+	return c.requeueIfNotPresent(ctrl.LoggerFrom(ctx), wInfo, immediate)
 }
 
-// baseCompareFunc orders workloads by sticky status, priority, timestamp, and UID.
+// baseCompareFunc orders workloads by priority, timestamp, and UID.
 func baseCompareFunc(log logr.Logger, wo workload.Ordering, sw *stickyWorkload) func(a, b *workload.Info) int {
 	return func(a, b *workload.Info) int {
 		aSticky := sw.matches(workload.Key(a.Obj))

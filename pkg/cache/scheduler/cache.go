@@ -124,6 +124,13 @@ func WithLocalQueueMetrics(value *metrics.LocalQueueMetricsConfig) Option {
 	}
 }
 
+type ReservationInfo struct {
+	Usage         resources.FlavorResourceQuantities
+	ClusterQueue  kueue.ClusterQueueReference
+	OwnerPriority int64
+	Victims       sets.Set[workload.Reference]
+}
+
 // Cache keeps track of the Workloads that got admitted through ClusterQueues.
 type Cache struct {
 	sync.RWMutex
@@ -139,6 +146,9 @@ type Cache struct {
 	resourceMetricsEnabled bool
 	// Tracks Workload's ClusterQueue assignment throughout its presence in the cache, which is when they reserve quota (`QuotaReserved=True`).
 	workloadAssignedQueues map[workload.Reference]kueue.ClusterQueueReference
+
+	preemptionReservations map[workload.Reference]*ReservationInfo
+	genericReservations    map[workload.Reference]*ReservationInfo
 
 	hm hierarchy.Manager[*clusterQueue, *cohort]
 
@@ -157,6 +167,8 @@ func New(client client.Client, options ...Option) *Cache {
 		workloadAssignedQueues: make(map[workload.Reference]kueue.ClusterQueueReference),
 		hm:                     hierarchy.NewManager(newCohort),
 		tasCache:               NewTASCache(client),
+		preemptionReservations: make(map[workload.Reference]*ReservationInfo),
+		genericReservations:    make(map[workload.Reference]*ReservationInfo),
 	}
 	for _, option := range options {
 		option(cache)
@@ -517,6 +529,13 @@ func (c *Cache) DeleteClusterQueue(cq *kueue.ClusterQueue) {
 	c.hm.DeleteClusterQueue(cqName)
 	metrics.ClearCacheMetrics(cq.Name)
 
+	for wlKey, res := range c.preemptionReservations {
+		if res.ClusterQueue == cqName {
+			delete(c.preemptionReservations, wlKey)
+		}
+	}
+
+	// Update cohort resources after deletion
 	if parent != nil {
 		// Update cohort resources after deletion
 		updateCohortTreeResourcesIfNoCycle(parent)
@@ -710,6 +729,8 @@ func (c *Cache) deleteFromQueueIfPresent(log logr.Logger, wlKey workload.Referen
 func (c *Cache) DeleteWorkload(log logr.Logger, wlKey workload.Reference) error {
 	c.Lock()
 	defer c.Unlock()
+
+	delete(c.preemptionReservations, wlKey)
 
 	cqName, assigned := c.workloadAssignedQueues[wlKey]
 	if !assigned {
@@ -1042,6 +1063,39 @@ func resourceFloat(name corev1.ResourceName, v int64) float64 {
 // Key is the key used to index the queue.
 func queueKey(q *kueue.LocalQueue) queue.LocalQueueReference {
 	return queue.NewLocalQueueReference(q.Namespace, kueue.LocalQueueName(q.Name))
+}
+
+func (c *Cache) AddPreemptionReservation(preemptor *workload.Info, usage resources.FlavorResourceQuantities, victims []workload.Reference, clusterQueue kueue.ClusterQueueReference, priority int64) {
+	c.Lock()
+	defer c.Unlock()
+
+	wlKey := workload.Key(preemptor.Obj)
+	c.preemptionReservations[wlKey] = &ReservationInfo{
+		Usage:         usage,
+		ClusterQueue:  clusterQueue,
+		OwnerPriority: priority,
+		Victims:       sets.New(victims...),
+	}
+}
+
+func (c *Cache) AddGenericReservation(wl *workload.Info, usage resources.FlavorResourceQuantities, clusterQueue kueue.ClusterQueueReference, priority int64) {
+	c.Lock()
+	defer c.Unlock()
+
+	wlKey := workload.Key(wl.Obj)
+	c.genericReservations[wlKey] = &ReservationInfo{
+		Usage:         usage,
+		ClusterQueue:  clusterQueue,
+		OwnerPriority: priority,
+		Victims:       sets.New[workload.Reference](),
+	}
+}
+
+func (c *Cache) RemoveReservation(wlKey workload.Reference) {
+	c.Lock()
+	defer c.Unlock()
+	delete(c.preemptionReservations, wlKey)
+	delete(c.genericReservations, wlKey)
 }
 
 // ShouldExposeLocalQueueMetricsForWorkload determines if LocalQueue metric reporting should be made for the associated LocalQueue.

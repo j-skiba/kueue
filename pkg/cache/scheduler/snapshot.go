@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -42,6 +43,14 @@ type Snapshot struct {
 	hierarchy.Manager[*ClusterQueueSnapshot, *CohortSnapshot]
 	ResourceFlavors          map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor
 	InactiveClusterQueueSets sets.Set[kueue.ClusterQueueReference]
+
+	PreemptionReservations map[workload.Reference]*ReservationInfo
+	// Reservations for workloads at the head of a StrictFIFO queue to block
+	// capacity across cycles without needing preemption targets.
+	GenericReservations map[workload.Reference]*ReservationInfo
+	// Workloads with active reservations accounted for in the snapshot's usage
+	// to avoid double-counting or conflicts.
+	AppliedReservations sets.Set[workload.Reference]
 }
 
 // RemoveWorkload removes a workload from its corresponding ClusterQueue and
@@ -161,6 +170,9 @@ func (c *Cache) Snapshot(ctx context.Context, options ...SnapshotOption) (*Snaps
 		Manager:                  hierarchy.NewManager(newCohortSnapshot),
 		ResourceFlavors:          make(map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor, len(c.resourceFlavors)),
 		InactiveClusterQueueSets: sets.New[kueue.ClusterQueueReference](),
+		PreemptionReservations:   make(map[workload.Reference]*ReservationInfo, len(c.preemptionReservations)),
+		GenericReservations:      make(map[workload.Reference]*ReservationInfo, len(c.genericReservations)),
+		AppliedReservations:   sets.New[workload.Reference](),
 	}
 	for _, cohort := range c.hm.Cohorts() {
 		if hierarchy.HasCycle(cohort) {
@@ -211,6 +223,54 @@ func (c *Cache) Snapshot(ctx context.Context, options ...SnapshotOption) (*Snaps
 	}
 	// Shallow copy is enough
 	maps.Copy(snap.ResourceFlavors, c.resourceFlavors)
+
+	// Gather and sort reservations by priority descending
+	var sortedReservations []struct {
+		wlKey workload.Reference
+		res   *ReservationInfo
+	}
+	for wlKey, res := range c.preemptionReservations {
+		snap.PreemptionReservations[wlKey] = res
+		sortedReservations = append(sortedReservations, struct {
+			wlKey workload.Reference
+			res   *ReservationInfo
+		}{wlKey, res})
+	}
+	slices.SortFunc(sortedReservations, func(a, b struct {
+		wlKey workload.Reference
+		res   *ReservationInfo
+	}) int {
+		return cmp.Compare(b.res.OwnerPriority, a.res.OwnerPriority)
+	})
+
+	for _, cqSnap := range snap.ClusterQueues() {
+		cqSnap.RemoveAllReservations()
+	}
+
+	coveredVictims := sets.New[workload.Reference]()
+	for _, entry := range sortedReservations {
+		res := entry.res
+		if res.Victims.Intersection(coveredVictims).Len() > 0 {
+			continue
+		}
+		cqSnap := snap.ClusterQueue(res.ClusterQueue)
+		if cqSnap == nil {
+			continue
+		}
+		cqSnap.AddReservation(res.Usage)
+		coveredVictims = coveredVictims.Union(res.Victims)
+		snap.AppliedReservations.Insert(entry.wlKey)
+	}
+
+	for wlKey, res := range c.genericReservations {
+		snap.GenericReservations[wlKey] = res
+		cqSnap := snap.ClusterQueue(res.ClusterQueue)
+		if cqSnap == nil {
+			continue
+		}
+		cqSnap.AddReservation(res.Usage)
+	}
+
 	return &snap, nil
 }
 
@@ -231,6 +291,7 @@ func (c *Cache) snapshotClusterQueue(
 		AllocatableResourceGeneration: cq.AllocatableResourceGeneration,
 		Workloads:                     maps.Clone(cq.Workloads),
 		Preemption:                    cq.Preemption,
+		QueueingStrategy:              cq.QueueingStrategy,
 		NamespaceSelector:             cq.NamespaceSelector,
 		Status:                        cq.Status,
 		AdmissionChecks:               utilmaps.DeepCopySets(cq.AdmissionChecks),

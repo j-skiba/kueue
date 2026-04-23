@@ -59,8 +59,11 @@ var snapCmpOpts = cmp.Options{
 	cmp.AllowUnexported(hierarchy.Manager[*schdcache.ClusterQueueSnapshot, *schdcache.CohortSnapshot]{}),
 	cmpopts.IgnoreFields(hierarchy.Manager[*schdcache.ClusterQueueSnapshot, *schdcache.CohortSnapshot]{}, "cohortFactory"),
 	cmpopts.IgnoreFields(schdcache.CohortSnapshot{}, "Cohort"),
-	cmp.AllowUnexported(schdcache.ClusterQueueSnapshot{}),
+	cmp.AllowUnexported(schdcache.ClusterQueueSnapshot{}, schdcache.CohortSnapshot{}),
 	cmpopts.IgnoreFields(schdcache.ClusterQueueSnapshot{}, "ClusterQueue"),
+	cmpopts.IgnoreFields(schdcache.Snapshot{}, "PreemptionReservations", "GenericReservations"),
+	// Ignore Reservations in resourceNode
+	cmpopts.IgnoreFields(schdcache.NewResourceNode(), "Reservations"),
 }
 
 func TestPreemption(t *testing.T) {

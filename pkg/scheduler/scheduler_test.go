@@ -6962,6 +6962,9 @@ func TestLastSchedulingContext(t *testing.T) {
 				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
 				ctx, log := utiltesting.ContextWithLog(t)
 				scheme := runtime.NewScheme()
+				if err := kueue.AddToScheme(scheme); err != nil {
+					t.Fatal(err)
+				}
 
 				testWls := make([]kueue.Workload, 0, len(tc.workloads))
 				for _, wl := range tc.workloads {
@@ -7196,6 +7199,9 @@ func TestRequeueAndUpdate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, _ := utiltesting.ContextWithLog(t)
 			scheme := runtime.NewScheme()
+			if err := kueue.AddToScheme(scheme); err != nil {
+				t.Fatal(err)
+			}
 
 			updates := 0
 			objs := []client.Object{w1, q1, utiltesting.MakeNamespace("ns1")}
@@ -7354,9 +7360,13 @@ func TestEntryComparerLess(t *testing.T) {
 					}},
 				},
 			},
+			requestedFRs: map[workload.Reference]resources.FlavorResourceQuantities{
+				"default/lower-drs":  {cpuDefault: 1},
+				"default/higher-drs": {cpuDefault: 1},
+			},
 			drsValues: map[drsKey]schdcache.DRS{
 				{parentCohort: cohort, workloadKey: "default/lower-drs"}:  schdcache.NegativeDRS(),
-				{parentCohort: cohort, workloadKey: "default/higher-drs"}: {},
+				{parentCohort: cohort, workloadKey: "default/higher-drs"}: schdcache.BorrowingDRS(cpuDefault),
 			},
 			wantLess: true,
 		},

@@ -1394,7 +1394,7 @@ var _ = ginkgo.Describe("Scheduler", func() {
 				).Obj()
 			util.MustCreate(ctx, k8sClient, fallbackClusterQueue)
 			defer func() {
-				gomega.Expect(util.DeleteObject(ctx, k8sClient, fallbackClusterQueue)).ToNot(gomega.HaveOccurred())
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, fallbackClusterQueue, true)
 			}()
 
 			expectAdmission := utiltestingapi.MakeAdmission(prodCQ.Name).
@@ -1449,7 +1449,7 @@ var _ = ginkgo.Describe("Scheduler", func() {
 				Obj()
 			util.MustCreate(ctx, k8sClient, testCQ)
 			defer func() {
-				gomega.Expect(util.DeleteObject(ctx, k8sClient, testCQ)).Should(gomega.Succeed())
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, testCQ, true)
 			}()
 
 			util.ExpectWorkloadsToHaveQuotaReservation(ctx, k8sClient, prodCQ.Name, wl1)

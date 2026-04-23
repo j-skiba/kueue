@@ -612,6 +612,16 @@ func cqIsBorrowing(cq *schdcache.ClusterQueueSnapshot, frsNeedPreemption sets.Se
 // requestable resources and simulated usage of the ClusterQueue and its cohort,
 // if it belongs to one.
 func workloadFits(preemptionCtx *preemptionCtx, allowBorrowing bool) bool {
+	wlKey := workload.Key(preemptionCtx.preemptor.Obj)
+	res, ok := preemptionCtx.snapshot.PreemptionReservations[wlKey]
+	if !ok {
+		res, ok = preemptionCtx.snapshot.GenericReservations[wlKey]
+	}
+	if ok && len(res.Usage) > 0 {
+		revert := preemptionCtx.preemptorCQ.SimulateReservationRemoval(res.Usage)
+		defer revert()
+	}
+
 	for fr, v := range preemptionCtx.workloadUsage.Quota {
 		if !allowBorrowing && preemptionCtx.preemptorCQ.BorrowingWith(fr, v) {
 			return false

@@ -60,6 +60,7 @@ type clusterQueue struct {
 	Preemption        kueue.ClusterQueuePreemption
 	FairWeight        float64
 	FlavorFungibility kueue.FlavorFungibility
+	QueueingStrategy  kueue.QueueingStrategy
 	// Aggregates AdmissionChecks from both .spec.AdmissionChecks and .spec.AdmissionCheckStrategy
 	// Sets hold ResourceFlavors to which an AdmissionCheck should apply.
 	AdmissionChecks workload.AdmissionChecks
@@ -185,6 +186,7 @@ func (c *clusterQueue) updateClusterQueue(
 
 	c.FairWeight = parseFairWeight(in.Spec.FairSharing)
 	c.AdmissionScope = in.Spec.AdmissionScope
+	c.QueueingStrategy = in.Spec.QueueingStrategy
 	return nil
 }
 
