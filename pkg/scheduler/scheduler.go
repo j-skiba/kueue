@@ -296,21 +296,26 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 		ctx := ctrl.LoggerInto(ctx, log)
 		log.V(2).Info("Attempting to schedule workload")
 
+		revertReservations := snapshot.SimulateLowerPriorityReservationsRemoval(int64(priority.Priority(e.Obj)))
+
 		mode := e.assignment.RepresentativeMode()
 
 		if features.Enabled(features.TASFailedNodeReplacementFailFast) && workload.HasTopologyAssignmentWithUnhealthyNode(e.Obj) && mode != flavorassigner.Fit {
 			// evict workload we couldn't find the replacement for
 			if err := s.evictWorkloadAfterFailedTASReplacement(ctx, log, e.Obj.DeepCopy()); client.IgnoreNotFound(err) != nil {
 				log.V(2).Error(err, "Failed to evict workload")
+				revertReservations()
 				continue
 			}
 			e.status = evicted
+			revertReservations()
 			continue
 		}
 
 		if mode == flavorassigner.NoFit {
 			log.V(3).Info("Skipping workload as FlavorAssigner assigned NoFit mode")
 			s.cache.RemoveReservation(workload.Key(e.Obj))
+			revertReservations()
 			continue
 		}
 
@@ -337,6 +342,7 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 					// borrowing this capacity while this workload is waiting.
 					s.cache.AddGenericReservation(&e.Info, usage.Quota, cq.Name, int64(priority.Priority(e.Obj)))
 				}
+				revertReservations()
 				continue
 			}
 
@@ -344,6 +350,7 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 				gatedMsg := "Workload requires preemption, but it's gated"
 				log.V(3).Info(gatedMsg)
 				setPreemptionGated(e, gatedMsg)
+				revertReservations()
 				continue
 			}
 		}
@@ -352,6 +359,7 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 		if preemptedWorkloads.HasAny(e.preemptionTargets) {
 			setSkipped(e, "Workload has overlapping preemption targets with another workload")
 			skippedPreemptions[cq.Name]++
+			revertReservations()
 			continue
 		}
 
@@ -370,8 +378,10 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 			if mode == flavorassigner.Preempt {
 				skippedPreemptions[cq.Name]++
 			}
+			revertReservations()
 			continue
 		}
+
 		preemptedWorkloads.Insert(e.preemptionTargets)
 		cq.AddUsage(usage)
 
@@ -397,12 +407,15 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 					victimKeys = append(victimKeys, workload.Key(target.WorkloadInfo.Obj))
 				}
 				s.cache.AddPreemptionReservation(&e.Info, usage.Quota, victimKeys, e.clusterQueueSnapshot.Name, int64(priority.Priority(e.Obj)))
+				s.cache.RemoveLowerPriorityReservations(int64(priority.Priority(e.Obj)), e.clusterQueueSnapshot.Name)
 			} else if errors > 0 {
 				e.inadmissibleMsg += fmt.Sprintf(". Preempting %d workload(s) failed, will retry.", errors)
 				e.requeueReason = qcache.RequeueReasonPreemptionFailed
 			}
+			revertReservations()
 			continue
 		}
+
 
 		if !s.cache.PodsReadyForAllAdmittedWorkloads(log) {
 			log.V(5).Info("Waiting for all admitted workloads to be in the PodsReady condition")
@@ -436,6 +449,7 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 			e.Obj.Status.ClusterName = oldWorkloadSlice.WorkloadInfo.Obj.Status.ClusterName
 			if err := s.replaceWorkloadSlice(ctx, oldWorkloadSlice.WorkloadInfo.ClusterQueue, e.Obj, oldWorkloadSlice.WorkloadInfo.Obj.DeepCopy()); err != nil {
 				log.Error(err, "Failed to replace workload slice")
+				revertReservations()
 				continue
 			}
 		}
@@ -444,7 +458,9 @@ func (s *Scheduler) schedule(ctx context.Context) wait.SpeedSignal {
 		if err := s.admit(ctx, e, cq); err != nil {
 			e.inadmissibleMsg = fmt.Sprintf("Failed to admit workload: %v", err)
 		}
+		revertReservations()
 	}
+
 
 	// 6. Requeue the heads that were not scheduled.
 	result := metrics.AdmissionResultInadmissible
@@ -537,7 +553,9 @@ func (s *Scheduler) nominate(ctx context.Context, workloads []workload.Info, sna
 		} else if err := workload.ValidateLimitRange(ctx, s.client, &w); err != nil {
 			e.inadmissibleMsg = fmt.Sprintf("%s: %v", errLimitRangeConstraintsUnsatisfiedResources, err.ToAggregate())
 		} else {
+			revertReservations := snap.SimulateLowerPriorityReservationsRemoval(int64(priority.Priority(w.Obj)))
 			e.assignment, e.preemptionTargets = s.getAssignments(log, &e.Info, snap)
+			revertReservations()
 			e.inadmissibleMsg = e.assignment.Message()
 			e.LastAssignment = &e.assignment.LastState
 			entries = append(entries, e)
@@ -733,6 +751,8 @@ func (s *Scheduler) admit(ctx context.Context, e *entry, cq *schdcache.ClusterQu
 		return err
 	}
 	s.cache.RemoveReservation(workload.Key(e.Obj))
+	s.cache.RemoveLowerPriorityReservations(int64(priority.Priority(e.Obj)), e.ClusterQueue)
+
 
 	newWorkload := e.Obj.DeepCopy()
 	s.admissionRoutineWrapper.Run(func() {

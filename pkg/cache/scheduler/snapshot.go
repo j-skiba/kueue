@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/features"
 	afs "sigs.k8s.io/kueue/pkg/util/admissionfairsharing"
 	utilmaps "sigs.k8s.io/kueue/pkg/util/maps"
+	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
@@ -91,6 +92,43 @@ func (s *Snapshot) SimulateWorkloadRemoval(workloads []*workload.Info) func() {
 		}
 	}
 }
+
+// SimulateLowerPriorityReservationsRemoval modifies the snapshot by removing reservations
+// held by workloads with priority strictly lower than the given priority.
+// Returns a function to restore the snapshot state.
+func (s *Snapshot) SimulateLowerPriorityReservationsRemoval(priority int64) func() {
+	type cqResUsage struct {
+		cq    kueue.ClusterQueueReference
+		usage resources.FlavorResourceQuantities
+	}
+	var cqUsages []cqResUsage
+	for wlKey, res := range s.PreemptionReservations {
+		if res.OwnerPriority < priority && s.AppliedReservations.Has(wlKey) {
+			cqUsages = append(cqUsages, cqResUsage{cq: res.ClusterQueue, usage: res.Usage})
+		}
+	}
+	for _, res := range s.GenericReservations {
+		if res.OwnerPriority < priority {
+			cqUsages = append(cqUsages, cqResUsage{cq: res.ClusterQueue, usage: res.Usage})
+		}
+	}
+
+	for _, cqUsage := range cqUsages {
+		cq := s.ClusterQueue(cqUsage.cq)
+		if cq != nil {
+			cq.RemoveReservation(cqUsage.usage)
+		}
+	}
+	return func() {
+		for _, cqUsage := range cqUsages {
+			cq := s.ClusterQueue(cqUsage.cq)
+			if cq != nil {
+				cq.AddReservation(cqUsage.usage)
+			}
+		}
+	}
+}
+
 
 func (s *Snapshot) Log(log logr.Logger) {
 	for name, cq := range s.ClusterQueues() {

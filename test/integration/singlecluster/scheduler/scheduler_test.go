@@ -2591,6 +2591,73 @@ var _ = ginkgo.Describe("Scheduler", func() {
 		})
 	})
 
+	ginkgo.When("Reservation Transfers", func() {
+		var (
+			clusterQueue *kueue.ClusterQueue
+			localQueue   *kueue.LocalQueue
+		)
+
+		ginkgo.BeforeEach(func() {
+			clusterQueue = utiltestingapi.MakeClusterQueue("cq").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("on-demand").Resource(corev1.ResourceCPU, "2").Obj()).
+				Preemption(kueue.ClusterQueuePreemption{
+					WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
+				}).
+				Obj()
+			util.MustCreate(ctx, k8sClient, clusterQueue)
+
+			localQueue = utiltestingapi.MakeLocalQueue("local-queue", ns.Name).ClusterQueue(clusterQueue.Name).Obj()
+			util.MustCreate(ctx, k8sClient, localQueue)
+		})
+
+		ginkgo.AfterEach(func() {
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue, true)
+		})
+
+		ginkgo.It("Should transfer reservation from lower to higher priority workload with multiple victims", framework.SlowSpec, func() {
+			ginkgo.By("Create victim workloads")
+			wlVictim1 := utiltestingapi.MakeWorkload("wl-victim1", ns.Name).
+				Queue(kueue.LocalQueueName(localQueue.Name)).Request(corev1.ResourceCPU, "1").Priority(0).Obj()
+			wlVictim2 := utiltestingapi.MakeWorkload("wl-victim2", ns.Name).
+				Queue(kueue.LocalQueueName(localQueue.Name)).Request(corev1.ResourceCPU, "1").Priority(0).Obj()
+			util.MustCreate(ctx, k8sClient, wlVictim1)
+			util.MustCreate(ctx, k8sClient, wlVictim2)
+			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wlVictim1, wlVictim2)
+
+			ginkgo.By("Create low priority preemptor")
+			wlLow := utiltestingapi.MakeWorkload("wl-low", ns.Name).
+				Queue(kueue.LocalQueueName(localQueue.Name)).Request(corev1.ResourceCPU, "2").Priority(10).Obj()
+			util.MustCreate(ctx, k8sClient, wlLow)
+
+			ginkgo.By("Verify victims are preempted")
+			util.ExpectWorkloadsToBePreempted(ctx, k8sClient, wlVictim1, wlVictim2)
+
+			ginkgo.By("Finish eviction of first victim")
+			util.FinishEvictionForWorkloads(ctx, k8sClient, wlVictim1)
+
+			ginkgo.By("Create high priority preemptor")
+			wlHigh := utiltestingapi.MakeWorkload("wl-high", ns.Name).
+				Queue(kueue.LocalQueueName(localQueue.Name)).Request(corev1.ResourceCPU, "2").Priority(100).Obj()
+			util.MustCreate(ctx, k8sClient, wlHigh)
+
+			ginkgo.By("Finish eviction of second victim")
+			util.FinishEvictionForWorkloads(ctx, k8sClient, wlVictim2)
+
+			ginkgo.By("Verify high priority workload is admitted, and low priority remains pending")
+			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wlHigh)
+
+			createdWlLow := &kueue.Workload{}
+			gomega.Eventually(func(g gomega.Gomega) {
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wlLow), createdWlLow)).Should(gomega.Succeed())
+				g.Expect(workload.IsAdmitted(createdWlLow)).Should(gomega.BeFalse())
+				g.Expect(meta.FindStatusCondition(createdWlLow.Status.Conditions, kueue.WorkloadEvicted)).To(gomega.BeNil())
+			}, util.Timeout, util.Interval).Should(gomega.Succeed())
+
+			ginkgo.By("Verify preemption metrics")
+			util.ExpectEvictedWorkloadsTotalMetric(clusterQueue.Name, kueue.WorkloadEvictedByPreemption, "", "", 2)
+		})
+	})
+
 	ginkgo.When("Deleting resources from borrowing clusterQueue", func() {
 		var (
 			cq1 *kueue.ClusterQueue

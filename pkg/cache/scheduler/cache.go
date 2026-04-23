@@ -1098,6 +1098,22 @@ func (c *Cache) RemoveReservation(wlKey workload.Reference) {
 	delete(c.genericReservations, wlKey)
 }
 
+func (c *Cache) RemoveLowerPriorityReservations(priority int64, cqName kueue.ClusterQueueReference) {
+	c.Lock()
+	defer c.Unlock()
+	for wlKey, res := range c.preemptionReservations {
+		if res.ClusterQueue == cqName && res.OwnerPriority < priority {
+			delete(c.preemptionReservations, wlKey)
+		}
+	}
+	for wlKey, res := range c.genericReservations {
+		if res.ClusterQueue == cqName && res.OwnerPriority < priority {
+			delete(c.genericReservations, wlKey)
+		}
+	}
+}
+
+
 // ShouldExposeLocalQueueMetricsForWorkload determines if LocalQueue metric reporting should be made for the associated LocalQueue.
 func (c *Cache) ShouldExposeLocalQueueMetricsForWorkload(log logr.Logger, wl *kueue.Workload) bool {
 	if !c.lqMetrics.IsEnabled() {

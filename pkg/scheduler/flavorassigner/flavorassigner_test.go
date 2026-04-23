@@ -3362,15 +3362,7 @@ func TestAssignFlavors(t *testing.T) {
 				secondaryClusterQueue.AddUsage(workload.Usage{Quota: tc.secondaryClusterQueueUsage})
 			}
 
-<<<<<<< HEAD
-			if tc.elasticJobsViaWorkloadSlicesEnabled {
-				features.SetFeatureGateDuringTest(t, features.ElasticJobsViaWorkloadSlices, true)
-			}
-
 			flvAssigner := New(wlInfo, clusterQueue, resourceFlavors, tc.enableFairSharing, &testOracle{simulationResult: tc.simulationResult}, tc.preemptWorkloadSlice, nil, nil)
-=======
-			flvAssigner := New(wlInfo, clusterQueue, resourceFlavors, tc.enableFairSharing, &testOracle{simulationResult: tc.simulationResult}, tc.preemptWorkloadSlice)
->>>>>>> main
 			assignment := flvAssigner.Assign(log, nil)
 			if repMode := assignment.RepresentativeMode(); repMode != tc.wantRepMode {
 				t.Errorf("e.assignFlavors(_).RepresentativeMode()=%s, want %s", repMode, tc.wantRepMode)
@@ -4453,8 +4445,6 @@ func TestAssignment_RequiresBorrowing(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
-=======
 // TestWorkloadsTopologyRequests_ZeroCountPodSetSkipped verifies that count=0
 // podSets (completed/reclaimable after preemption) are skipped in TAS request
 // generation, preventing empty TopologyAssignment slices that cause CRD
@@ -4548,4 +4538,3 @@ func TestWorkloadsTopologyRequests_ZeroCountPodSetSkipped(t *testing.T) {
 		})
 	}
 }
->>>>>>> main
