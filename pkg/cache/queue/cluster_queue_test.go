@@ -91,7 +91,7 @@ func Test_PushOrUpdate(t *testing.T) {
 					Status: metav1.ConditionFalse,
 				}),
 			wantInAdmissibleWorkloads: inadmissibleWorkloads{
-				"default/workload-1": workload.NewInfo(wlBase.Clone().
+				"default/workload-1": {Info: workload.NewInfo(wlBase.Clone().
 					ResourceVersion("1").
 					RequeueState(ptr.To[int32](10), new(metav1.NewTime(minuteLater))).
 					Condition(metav1.Condition{
@@ -103,7 +103,7 @@ func Test_PushOrUpdate(t *testing.T) {
 						Type:   kueue.WorkloadRequeued,
 						Status: metav1.ConditionFalse,
 					}).
-					Obj()),
+					Obj()), Reason: RequeueReasonGeneric},
 			},
 		},
 		"should wait for Requeued=true after backoff waiting time before push to heap": {
@@ -118,7 +118,7 @@ func Test_PushOrUpdate(t *testing.T) {
 					Status: metav1.ConditionFalse,
 				}),
 			wantInAdmissibleWorkloads: inadmissibleWorkloads{
-				"default/workload-1": workload.NewInfo(wlBase.Clone().
+				"default/workload-1": {Info: workload.NewInfo(wlBase.Clone().
 					ResourceVersion("1").
 					Condition(metav1.Condition{
 						Type:   kueue.WorkloadEvicted,
@@ -129,7 +129,7 @@ func Test_PushOrUpdate(t *testing.T) {
 						Type:   kueue.WorkloadRequeued,
 						Status: metav1.ConditionFalse,
 					}).
-					Obj()),
+					Obj()), Reason: RequeueReasonGeneric},
 			},
 		},
 		"should push workload to heap after Requeued=true": {
@@ -287,7 +287,7 @@ func TestPushOrUpdateGenerationChanged(t *testing.T) {
 			// Simulate RequeueWorkload with info.Update: inadmissible entry gets new generation.
 			updatedInfo := workload.NewInfo(tc.updatedWorkload)
 			updatedInfo.LastEvaluatedGeneration = head.LastEvaluatedGeneration
-			cq.requeueIfNotPresent(log, updatedInfo, false)
+			cq.requeueIfNotPresent(log, updatedInfo, RequeueReasonGeneric, false)
 
 			// PushOrUpdate from informer event with the updated workload.
 			cq.PushOrUpdate(workload.NewInfo(tc.updatedWorkload))
@@ -399,7 +399,7 @@ func TestSnapshotDeterministicOrder(t *testing.T) {
 				cq.PushOrUpdate(workload.NewInfo(w))
 			}
 			for _, w := range tc.inadmissibleWorkloads {
-				cq.requeueIfNotPresent(log, workload.NewInfo(w), false)
+				cq.requeueIfNotPresent(log, workload.NewInfo(w), RequeueReasonGeneric, false)
 			}
 
 			firstSnap := cq.Snapshot()
@@ -497,7 +497,7 @@ func Test_DeleteFromLocalQueue(t *testing.T) {
 
 	for _, w := range inadmissibleWorkloads {
 		wInfo := workload.NewInfo(w)
-		cq.requeueIfNotPresent(log, wInfo, false)
+		cq.requeueIfNotPresent(log, wInfo, RequeueReasonGeneric, false)
 		qImpl.AddOrUpdate(wInfo)
 	}
 
@@ -684,10 +684,10 @@ func TestClusterQueueImpl(t *testing.T) {
 			}
 
 			for _, w := range test.inadmissibleWorkloadsToRequeue {
-				cq.requeueIfNotPresent(log, w, false)
+				cq.requeueIfNotPresent(log, w, RequeueReasonGeneric, false)
 			}
 			for _, w := range test.admissibleWorkloadsToRequeue {
-				cq.requeueIfNotPresent(log, w, true)
+				cq.requeueIfNotPresent(log, w, RequeueReasonGeneric, true)
 			}
 
 			for _, w := range test.workloadsToUpdate {
@@ -700,7 +700,7 @@ func TestClusterQueueImpl(t *testing.T) {
 
 			if test.queueInadmissibleWorkloads {
 				if diff := cmp.Diff(test.wantInadmissibleWorkloadsRequeued,
-					queueInadmissibleWorkloads(ctx, cq, cl)); diff != "" {
+					queueInadmissibleWorkloads(ctx, cq, cl, CapacityChangeEventType)); diff != "" {
 					t.Errorf("Unexpected requeuing of inadmissible workloads (-want,+got):\n%s", diff)
 				}
 			}
@@ -733,8 +733,8 @@ func TestQueueInadmissibleWorkloadsDuringScheduling(t *testing.T) {
 
 	// Simulate requeuing during scheduling attempt.
 	head := cq.Pop()
-	queueInadmissibleWorkloads(ctx, cq, cl)
-	cq.requeueIfNotPresent(log, head, false)
+	queueInadmissibleWorkloads(ctx, cq, cl, CapacityChangeEventType)
+	cq.requeueIfNotPresent(log, head, RequeueReasonGeneric, false)
 
 	activeWorkloads, _ = cq.Dump()
 	wantActiveWorkloads = []workload.Reference{workload.Key(wl)}
@@ -744,7 +744,7 @@ func TestQueueInadmissibleWorkloadsDuringScheduling(t *testing.T) {
 
 	// Simulating scheduling again without requeuing.
 	head = cq.Pop()
-	cq.requeueIfNotPresent(log, head, false)
+	cq.requeueIfNotPresent(log, head, RequeueReasonGeneric, false)
 	activeWorkloads, _ = cq.Dump()
 	wantActiveWorkloads = nil
 	if diff := cmp.Diff(wantActiveWorkloads, activeWorkloads, cmpDump...); diff != "" {
@@ -1429,7 +1429,7 @@ func TestQueueInadmissibleWorkloadsClearsHashes(t *testing.T) {
 
 	queueInadmissibleWorkloads(ctx, cq, utiltesting.NewFakeClient(
 		wl, utiltesting.MakeNamespace(defaultNamespace),
-	))
+	), CapacityChangeEventType)
 
 	if cq.noFitSchedulingHashes.Has("test-hash") {
 		t.Error("noFitSchedulingHashes should be cleared after queueInadmissibleWorkloads")

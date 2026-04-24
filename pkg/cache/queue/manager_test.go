@@ -342,7 +342,7 @@ func TestRequeueWorkloadsCohortCycle(t *testing.T) {
 
 	// This method is where we do a cycle check. We call it to ensure
 	// it behaves properly when a cycle exists
-	NotifyRetryInadmissible(manager, sets.New[kueue.ClusterQueueReference]("cq1"))
+	NotifyRetryInadmissible(manager, sets.New[kueue.ClusterQueueReference]("cq1"), CapacityChangeEventType)
 	requeuer.ProcessRequeues(ctx)
 
 	if diff := cmp.Diff(expectedAssigned, manager.workloadAssignedQueues); diff != "" {

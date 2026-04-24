@@ -239,7 +239,7 @@ func (r *ClusterQueueReconciler) NotifyTopologyUpdate(oldTopology, newTopology *
 	// On topology creation, CQs may transition from pending to active.
 	// Broadcast to ensure the scheduler re-evaluates pending workloads.
 	if oldTopology == nil {
-		qcache.NotifyRetryInadmissible(r.qManager, sets.New(cqNames...))
+		qcache.NotifyRetryInadmissible(r.qManager, sets.New(cqNames...), qcache.CapacityChangeEventType)
 		r.qManager.Broadcast()
 	}
 }
@@ -554,7 +554,7 @@ func (h *cqNamespaceHandler) Update(ctx context.Context, e event.UpdateEvent, _ 
 			cqs.Insert(cq)
 		}
 	}
-	qcache.NotifyRetryInadmissible(h.qManager, cqs)
+	qcache.NotifyRetryInadmissible(h.qManager, cqs, qcache.CapacityChangeEventType)
 }
 
 func (h *cqNamespaceHandler) Delete(context.Context, event.DeleteEvent, workqueue.TypedRateLimitingInterface[reconcile.Request]) {

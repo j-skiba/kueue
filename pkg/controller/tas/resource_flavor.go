@@ -158,7 +158,7 @@ func (r *rfReconciler) Reconcile(ctx context.Context, req reconcile.Request) (re
 		// or the set of nodes can allow admitting a workload which was
 		// previously inadmissible.
 		if cqNames := r.cache.ActiveClusterQueues(); len(cqNames) > 0 {
-			qcache.NotifyRetryInadmissible(r.queues, cqNames)
+			qcache.NotifyRetryInadmissible(r.queues, cqNames, qcache.CapacityChangeEventType)
 		}
 	}
 	return reconcile.Result{}, nil

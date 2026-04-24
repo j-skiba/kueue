@@ -137,7 +137,7 @@ func (r *AdmissionCheckReconciler) Create(e event.TypedCreateEvent[*kueue.Admiss
 	log := r.logger()
 	log.WithValues("admissionCheck", klog.KObj(e.Object)).V(5).Info("Create event")
 	if cqNames := r.cache.AddOrUpdateAdmissionCheck(log, e.Object); len(cqNames) > 0 {
-		qcache.NotifyRetryInadmissible(r.qManager, cqNames)
+		qcache.NotifyRetryInadmissible(r.qManager, cqNames, qcache.CapacityChangeEventType)
 	}
 	return true
 }
@@ -150,7 +150,7 @@ func (r *AdmissionCheckReconciler) Update(e event.TypedUpdateEvent[*kueue.Admiss
 		return true
 	}
 	if cqNames := r.cache.AddOrUpdateAdmissionCheck(log, e.ObjectNew); len(cqNames) > 0 {
-		qcache.NotifyRetryInadmissible(r.qManager, cqNames)
+		qcache.NotifyRetryInadmissible(r.qManager, cqNames, qcache.CapacityChangeEventType)
 	}
 	return false
 }
@@ -161,7 +161,7 @@ func (r *AdmissionCheckReconciler) Delete(e event.TypedDeleteEvent[*kueue.Admiss
 	log.WithValues("admissionCheck", klog.KObj(e.Object)).V(5).Info("Delete event")
 
 	if cqNames := r.cache.DeleteAdmissionCheck(log, e.Object); len(cqNames) > 0 {
-		qcache.NotifyRetryInadmissible(r.qManager, cqNames)
+		qcache.NotifyRetryInadmissible(r.qManager, cqNames, qcache.CapacityChangeEventType)
 	}
 	return true
 }
