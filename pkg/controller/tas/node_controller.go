@@ -163,17 +163,7 @@ func (r *nodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
-	if !nodeExists {
-		log.V(3).Info("Node not found. Marking as failed immediately")
-		_, err := r.handleUnhealthyNode(ctx, req.Name, affectedWorkloads)
-		return ctrl.Result{}, err
-	}
 
-	if readyCondition == nil {
-		log.V(3).Info("NodeReady condition is missing. Marking as failed immediately")
-		_, err := r.handleUnhealthyNode(ctx, req.Name, affectedWorkloads)
-		return ctrl.Result{}, err
-	}
 
 	if timerExpired {
 		log.V(3).Info("Node is not ready and NodeFailureDelay timer expired, marking as failed")
