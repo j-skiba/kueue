@@ -17,6 +17,7 @@ limitations under the License.
 package tas
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -178,6 +179,8 @@ func TestNodeFailureReconciler(t *testing.T) {
 		// Patching the status in tests (via fake client and strategic merge interceptor)
 		// doesn't correctly handle clearing the list.
 		ignoreUnhealthyNodes bool
+		injectPatchError     bool
+		expectReconcileError bool
 	}{
 		"Node Found and Healthy - not marked as unavailable": {
 			initObjs: []client.Object{
@@ -203,6 +206,40 @@ func TestNodeFailureReconciler(t *testing.T) {
 			reconcileRequests:    []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes:   nil,
 			ignoreUnhealthyNodes: true,
+		},
+		"Late pod workload is not populated into UnhealthyNodes": {
+			initObjs: []client.Object{
+				baseNode.Clone().StatusConditions(corev1.NodeCondition{
+					Type:               corev1.NodeReady,
+					Status:             corev1.ConditionFalse,
+					LastTransitionTime: earlierTime}).Obj(),
+				func() *kueue.Workload {
+					wl := utiltestingapi.MakeWorkload(wlName, nsName).
+						Finalizers(kueue.ResourceInUseFinalizerName).
+						PodSets(*utiltestingapi.MakePodSet(kueue.DefaultPodSetName, 1).Request(corev1.ResourceCPU, "1").Obj()).
+						ReserveQuotaAt(
+							utiltestingapi.MakeAdmission("cq").
+								PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+									Assignment(corev1.ResourceCPU, "unit-test-flavor", "1").
+									TopologyAssignment(utiltestingapi.MakeTopologyAssignment([]string{corev1.LabelHostname}).
+										Domains(utiltestingapi.MakeTopologyDomainAssignment([]string{nodeName2}, 1).Obj()).
+										Obj()).
+									Obj()).
+								Obj(), testStartTime,
+						).
+						AdmittedAt(true, testStartTime).
+						Obj()
+					return wl
+				}(),
+				func() *corev1.Pod {
+					p := strayPod.DeepCopy()
+					p.Spec.NodeSelector[corev1.LabelHostname] = nodeName
+					return p
+				}(), // Late pod on nodeName
+			},
+			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
+			wantUnhealthyNodes: nil, // Should not be populated!
+			wantPatchedPods:    []string{"stray-pod"},
 		},
 		"Node Found and Unhealthy (NotReady), delay not passed - not marked as unavailable": {
 			featureGates: map[featuregate.Feature]bool{features.TASReplaceNodeOnPodTermination: false},
@@ -917,10 +954,22 @@ func TestNodeFailureReconciler(t *testing.T) {
 			features.SetFeatureGatesDuringTest(t, tc.featureGates)
 			fakeClock.SetTime(testStartTime)
 
+			var subResourcePatchInterceptor func(ctx context.Context, cl client.Client, subResource string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error
+			if tc.injectPatchError {
+				subResourcePatchInterceptor = func(ctx context.Context, cl client.Client, subResource string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					if obj.GetName() == wlName && subResource == "status" {
+						return fmt.Errorf("injected patch failure")
+					}
+					return utiltesting.TreatSSAAsStrategicMerge(ctx, cl, subResource, obj, patch, opts...)
+				}
+			} else {
+				subResourcePatchInterceptor = utiltesting.TreatSSAAsStrategicMerge
+			}
+
 			clientBuilder := utiltesting.NewClientBuilder().
 				WithObjects(tc.initObjs...).
 				WithStatusSubresource(tc.initObjs...).
-				WithInterceptorFuncs(interceptor.Funcs{SubResourcePatch: utiltesting.TreatSSAAsStrategicMerge})
+				WithInterceptorFuncs(interceptor.Funcs{SubResourcePatch: subResourcePatchInterceptor})
 			ctx, _ := utiltesting.ContextWithLog(t)
 			err := indexer.SetupIndexes(ctx, utiltesting.AsIndexer(clientBuilder))
 			if err != nil {
@@ -938,7 +987,11 @@ func TestNodeFailureReconciler(t *testing.T) {
 			var result reconcile.Result
 			for _, req := range tc.reconcileRequests {
 				result, err = r.Reconcile(ctx, req)
-				if err != nil {
+				if tc.expectReconcileError {
+					if err == nil {
+						t.Errorf("Expected Reconcile() to error, but got nil")
+					}
+				} else if err != nil {
 					t.Errorf("Reconcile() error = %v for request %v", err, req)
 				}
 			}
