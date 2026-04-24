@@ -163,7 +163,36 @@ func (r *nodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
+	if !nodeExists || readyCondition == nil {
+		log.V(3).Info("Node not found or NodeReady condition missing. Marking as failed immediately")
+		unhealthyWorkloads := sets.New[types.NamespacedName]()
+		healthyWorkloads := sets.New[types.NamespacedName]()
+		for wlKey := range affectedWorkloads {
+			var wl kueue.Workload
+			if err := r.client.Get(ctx, wlKey, &wl); err != nil {
+				continue
+			}
+			if utiltas.HasTASAssignmentOnNode(wl.Status.Admission, req.Name) {
+				unhealthyWorkloads.Insert(wlKey)
+			} else {
+				healthyWorkloads.Insert(wlKey)
+			}
+		}
 
+		if len(unhealthyWorkloads) > 0 {
+			_, err := r.handleUnhealthyNode(ctx, req.Name, unhealthyWorkloads)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		if len(healthyWorkloads) > 0 {
+			err := r.handleHealthyNode(ctx, req.Name, healthyWorkloads)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
 
 	if timerExpired {
 		log.V(3).Info("Node is not ready and NodeFailureDelay timer expired, marking as failed")
