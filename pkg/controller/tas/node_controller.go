@@ -154,11 +154,7 @@ func (r *nodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
-	nodeSelectorPodsByWorkload, err := r.listPodsAssignedByNodeSelector(ctx, req.Name)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	affectedWorkloads, err := r.getWorkloadsOnNode(ctx, req.Name, nodeSelectorPodsByWorkload)
+	affectedWorkloads, err := r.getWorkloadsOnNode(ctx, req.Name)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -183,6 +179,28 @@ func (r *nodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 		// Only reconcile workloads that were not evicted.
 		affectedWorkloads = affectedWorkloads.Difference(evictedWorkloads)
+	}
+
+	nodeSelectorPodsByWorkload, err := r.listPodsAssignedByNodeSelector(ctx, req.Name)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Also find workloads from any pods that are assigned to this node by TopologyAssignment
+	// but not yet bound. These might be stale "late" pods for a workload that has already
+	// been reassigned to another node.
+	for wlKey := range nodeSelectorPodsByWorkload {
+		if affectedWorkloads.Has(wlKey) {
+			continue
+		}
+		var wl kueue.Workload
+		if err := r.client.Get(ctx, wlKey, &wl); err != nil {
+			log.V(4).WithValues("node", node.Name).Info("Failed to get workload", "workload", wlKey, "error", err)
+			continue
+		}
+		if !workload.IsFinished(&wl) && !workload.IsEvicted(&wl) {
+			affectedWorkloads.Insert(wlKey)
+		}
 	}
 
 	return r.reconcileWorkloadsOnNode(ctx, req.Name, &node, affectedWorkloads, nodeSelectorPodsByWorkload)
@@ -306,7 +324,7 @@ func groupPodsByWorkload(pods []corev1.Pod) map[types.NamespacedName][]*corev1.P
 
 // getWorkloadsOnNode gets all workloads that have the given node assigned in TAS topology assignment
 // or have "late" pods assigned to this node via nodeSelector.
-func (r *nodeReconciler) getWorkloadsOnNode(ctx context.Context, nodeName string, nodeSelectorPodsByWorkload map[types.NamespacedName][]*corev1.Pod) (sets.Set[types.NamespacedName], error) {
+func (r *nodeReconciler) getWorkloadsOnNode(ctx context.Context, nodeName string) (sets.Set[types.NamespacedName], error) {
 	var workloadsOnNode kueue.WorkloadList
 	if err := r.client.List(ctx, &workloadsOnNode, client.MatchingFields{indexer.AdmittedWorkloadNodesKey: nodeName}); err != nil {
 		return nil, fmt.Errorf("failed to list workloads: %w", err)
@@ -315,24 +333,6 @@ func (r *nodeReconciler) getWorkloadsOnNode(ctx context.Context, nodeName string
 	for i := range workloadsOnNode.Items {
 		wl := &workloadsOnNode.Items[i]
 		tasWorkloadsOnNode.Insert(types.NamespacedName{Name: wl.Name, Namespace: wl.Namespace})
-	}
-
-	logger := r.logger().V(4).WithValues("node", nodeName)
-	// Also find workloads from any pods that are assigned to this node by TopologyAssignment
-	// but not yet bound. These might be stale "late" pods for a workload that has already
-	// been reassigned to another node.
-	for wlKey := range nodeSelectorPodsByWorkload {
-		if tasWorkloadsOnNode.Has(wlKey) {
-			continue
-		}
-		var wl kueue.Workload
-		if err := r.client.Get(ctx, wlKey, &wl); err != nil {
-			logger.V(4).Info("Failed to get workload", "workload", wlKey, "error", err)
-			continue
-		}
-		if !workload.IsFinished(&wl) && !workload.IsEvicted(&wl) {
-			tasWorkloadsOnNode.Insert(wlKey)
-		}
 	}
 
 	return tasWorkloadsOnNode, nil
