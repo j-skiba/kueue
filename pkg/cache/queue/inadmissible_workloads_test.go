@@ -17,7 +17,6 @@ limitations under the License.
 package queue
 
 import (
-	"maps"
 	"testing"
 	"time"
 
@@ -93,7 +92,7 @@ func TestInadmissibleWorkloads_Get(t *testing.T) {
 
 	testcases := []struct {
 		name         string
-		initial      map[workload.Reference]*workload.Info
+		initial      map[workload.Reference]inadmissibleWorkloadEntry
 		key          workload.Reference
 		wantWorkload *workload.Info
 	}{
@@ -105,16 +104,16 @@ func TestInadmissibleWorkloads_Get(t *testing.T) {
 		},
 		{
 			name: "returns workload when exists",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
 			},
 			key:          key1,
 			wantWorkload: wl1,
 		},
 		{
 			name: "returns nil for different key",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
 			},
 			key:          key2,
 			wantWorkload: nil,
@@ -124,7 +123,9 @@ func TestInadmissibleWorkloads_Get(t *testing.T) {
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			iw := make(inadmissibleWorkloads)
-			maps.Copy(iw, tc.initial)
+			for k, v := range tc.initial {
+				iw[k] = v
+			}
 
 			got := iw.get(tc.key)
 			if got != tc.wantWorkload {
@@ -142,7 +143,7 @@ func TestInadmissibleWorkloads_Insert(t *testing.T) {
 
 	testcases := []struct {
 		name    string
-		initial map[workload.Reference]*workload.Info
+		initial map[workload.Reference]inadmissibleWorkloadEntry
 		key     workload.Reference
 		value   *workload.Info
 		wantLen int
@@ -156,8 +157,8 @@ func TestInadmissibleWorkloads_Insert(t *testing.T) {
 		},
 		{
 			name: "insert new workload",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
 			},
 			key:     key2,
 			value:   wl2,
@@ -165,8 +166,8 @@ func TestInadmissibleWorkloads_Insert(t *testing.T) {
 		},
 		{
 			name: "overwrite existing workload",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
 			},
 			key:     key1,
 			value:   wl2,
@@ -177,9 +178,11 @@ func TestInadmissibleWorkloads_Insert(t *testing.T) {
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			iw := make(inadmissibleWorkloads)
-			maps.Copy(iw, tc.initial)
+			for k, v := range tc.initial {
+				iw[k] = v
+			}
 
-			iw.insert(tc.key, tc.value)
+			iw.insert(tc.key, tc.value, RequeueReasonGeneric)
 
 			if got := iw.len(); got != tc.wantLen {
 				t.Errorf("after insert, len() = %d, want %d", got, tc.wantLen)
@@ -199,7 +202,7 @@ func TestInadmissibleWorkloads_Delete(t *testing.T) {
 
 	testcases := []struct {
 		name    string
-		initial map[workload.Reference]*workload.Info
+		initial map[workload.Reference]inadmissibleWorkloadEntry
 		key     workload.Reference
 		wantLen int
 	}{
@@ -211,25 +214,25 @@ func TestInadmissibleWorkloads_Delete(t *testing.T) {
 		},
 		{
 			name: "delete existing workload",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
 			},
 			key:     key1,
 			wantLen: 0,
 		},
 		{
 			name: "delete non-existent workload",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
 			},
 			key:     key2,
 			wantLen: 1,
 		},
 		{
 			name: "delete one of multiple workloads",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
-				key2: wl2,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
+				key2: {Info: wl2, Reason: RequeueReasonGeneric},
 			},
 			key:     key1,
 			wantLen: 1,
@@ -239,7 +242,9 @@ func TestInadmissibleWorkloads_Delete(t *testing.T) {
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			iw := make(inadmissibleWorkloads)
-			maps.Copy(iw, tc.initial)
+			for k, v := range tc.initial {
+				iw[k] = v
+			}
 
 			iw.delete(tc.key)
 
@@ -261,7 +266,7 @@ func TestInadmissibleWorkloads_Len(t *testing.T) {
 
 	testcases := []struct {
 		name    string
-		initial map[workload.Reference]*workload.Info
+		initial map[workload.Reference]inadmissibleWorkloadEntry
 		wantLen int
 	}{
 		{
@@ -271,16 +276,16 @@ func TestInadmissibleWorkloads_Len(t *testing.T) {
 		},
 		{
 			name: "single workload",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
 			},
 			wantLen: 1,
 		},
 		{
 			name: "multiple workloads",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
-				key2: wl2,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
+				key2: {Info: wl2, Reason: RequeueReasonGeneric},
 			},
 			wantLen: 2,
 		},
@@ -289,7 +294,9 @@ func TestInadmissibleWorkloads_Len(t *testing.T) {
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			iw := make(inadmissibleWorkloads)
-			maps.Copy(iw, tc.initial)
+			for k, v := range tc.initial {
+				iw[k] = v
+			}
 
 			if got := iw.len(); got != tc.wantLen {
 				t.Errorf("len() = %d, want %d", got, tc.wantLen)
@@ -304,7 +311,7 @@ func TestInadmissibleWorkloads_Empty(t *testing.T) {
 
 	testcases := []struct {
 		name      string
-		initial   map[workload.Reference]*workload.Info
+		initial   map[workload.Reference]inadmissibleWorkloadEntry
 		wantEmpty bool
 	}{
 		{
@@ -314,8 +321,8 @@ func TestInadmissibleWorkloads_Empty(t *testing.T) {
 		},
 		{
 			name: "non-empty map",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
 			},
 			wantEmpty: false,
 		},
@@ -324,7 +331,9 @@ func TestInadmissibleWorkloads_Empty(t *testing.T) {
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			iw := make(inadmissibleWorkloads)
-			maps.Copy(iw, tc.initial)
+			for k, v := range tc.initial {
+				iw[k] = v
+			}
 
 			if got := iw.empty(); got != tc.wantEmpty {
 				t.Errorf("empty() = %v, want %v", got, tc.wantEmpty)
@@ -343,29 +352,29 @@ func TestInadmissibleWorkloads_ReplaceAll(t *testing.T) {
 
 	testcases := []struct {
 		name       string
-		initial    map[workload.Reference]*workload.Info
-		newMap     map[workload.Reference]*workload.Info
+		initial    map[workload.Reference]inadmissibleWorkloadEntry
+		newMap     inadmissibleWorkloads
 		wantLen    int
 		checkKeys  []workload.Reference
 		wantExists []bool
 	}{
 		{
 			name: "replace with empty map",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
 			},
-			newMap:     map[workload.Reference]*workload.Info{},
+			newMap:     make(inadmissibleWorkloads),
 			wantLen:    0,
 			checkKeys:  []workload.Reference{key1},
 			wantExists: []bool{false},
 		},
 		{
 			name: "replace with different workloads",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
 			},
-			newMap: map[workload.Reference]*workload.Info{
-				key2: wl2,
+			newMap: inadmissibleWorkloads{
+				key2: {Info: wl2, Reason: RequeueReasonGeneric},
 			},
 			wantLen:    1,
 			checkKeys:  []workload.Reference{key1, key2},
@@ -373,12 +382,12 @@ func TestInadmissibleWorkloads_ReplaceAll(t *testing.T) {
 		},
 		{
 			name: "replace with multiple workloads",
-			initial: map[workload.Reference]*workload.Info{
-				key1: wl1,
+			initial: map[workload.Reference]inadmissibleWorkloadEntry{
+				key1: {Info: wl1, Reason: RequeueReasonGeneric},
 			},
-			newMap: map[workload.Reference]*workload.Info{
-				key2: wl2,
-				key3: wl3,
+			newMap: inadmissibleWorkloads{
+				key2: {Info: wl2, Reason: RequeueReasonGeneric},
+				key3: {Info: wl3, Reason: RequeueReasonGeneric},
 			},
 			wantLen:    2,
 			checkKeys:  []workload.Reference{key1, key2, key3},
@@ -389,7 +398,9 @@ func TestInadmissibleWorkloads_ReplaceAll(t *testing.T) {
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
 			iw := make(inadmissibleWorkloads)
-			maps.Copy(iw, tc.initial)
+			for k, v := range tc.initial {
+				iw[k] = v
+			}
 
 			iw.replaceAll(tc.newMap)
 

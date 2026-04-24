@@ -349,7 +349,7 @@ var _ = ginkgo.Describe("Topology Aware Scheduling", ginkgo.Ordered, func() {
 			// https://github.com/kubernetes-sigs/kueue/issues/8653
 			ginkgo.By("hack to requeue workload", func() {
 				cqs := sets.New[kueue.ClusterQueueReference]("cluster-queue")
-				qcache.NotifyRetryInadmissible(qManager, cqs)
+				qcache.NotifyRetryInadmissible(qManager, cqs, qcache.CapacityChangeEventType)
 			})
 
 			ginkgo.By("expect TAS pod to admit", func() {
@@ -394,7 +394,7 @@ var _ = ginkgo.Describe("Topology Aware Scheduling", ginkgo.Ordered, func() {
 			// https://github.com/kubernetes-sigs/kueue/issues/8653
 			ginkgo.By("hack to requeue workload", func() {
 				cqs := sets.New[kueue.ClusterQueueReference]("cluster-queue")
-				qcache.NotifyRetryInadmissible(qManager, cqs)
+				qcache.NotifyRetryInadmissible(qManager, cqs, qcache.CapacityChangeEventType)
 			})
 
 			ginkgo.By("expect TAS pod to admit", func() {

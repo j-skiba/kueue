@@ -277,7 +277,7 @@ func (m *Manager) AddOrUpdateCohort(ctx context.Context, cohort *kueue.Cohort) {
 	m.hm.UpdateCohortEdge(cohortName, cohort.Spec.ParentName)
 	c := m.hm.Cohort(cohortName)
 	if !hierarchy.HasCycle(c) {
-		m.requeuer.notifyCohort(c.getRootUnsafe().GetName())
+		m.requeuer.notifyCohort(c.getRootUnsafe().GetName(), CapacityChangeEventType)
 	}
 }
 
@@ -324,7 +324,7 @@ func (m *Manager) AddClusterQueue(ctx context.Context, cq *kueue.ClusterQueue) e
 		}
 	}
 
-	notifyRetryInadmissibleWithoutLock(m, sets.New(cqImpl.name))
+	notifyRetryInadmissibleWithoutLock(m, sets.New(cqImpl.name), CapacityChangeEventType)
 	reportPendingWorkloads(m, cqImpl.name)
 
 	if addedWorkloads {
@@ -356,7 +356,7 @@ func (m *Manager) UpdateClusterQueue(ctx context.Context, cq *kueue.ClusterQueue
 		// Broadcast occurs after inadmissible workloads are requeued.
 		// Immediate broadcast is no-op, as there are no workloads
 		// to process.
-		notifyRetryInadmissibleWithoutLock(m, sets.New(cqName))
+		notifyRetryInadmissibleWithoutLock(m, sets.New(cqName), CapacityChangeEventType)
 	}
 	becameActive := !oldActive && cqImpl.Active()
 	if becameActive || labelsUpdated {
@@ -680,7 +680,7 @@ func (m *Manager) deleteWorkloadWithoutLock(log logr.Logger, wlKey workload.Refe
 // An optional action can be executed at the beginning of the function,
 // while holding the lock, to provide atomicity with the operations in the
 // queues.
-func (m *Manager) QueueAssociatedInadmissibleWorkloadsAfter(ctx context.Context, wlKey workload.Reference, action func()) {
+func (m *Manager) QueueAssociatedInadmissibleWorkloadsAfter(ctx context.Context, wlKey workload.Reference, eventType EventType, action func()) {
 	m.Lock()
 	defer m.Unlock()
 	if action != nil {
@@ -700,7 +700,7 @@ func (m *Manager) QueueAssociatedInadmissibleWorkloadsAfter(ctx context.Context,
 		return
 	}
 
-	notifyRetryInadmissibleWithoutLock(m, sets.New(cq.name))
+	notifyRetryInadmissibleWithoutLock(m, sets.New(cq.name), eventType)
 }
 
 // UpdateWorkload updates the workload to the corresponding queue or adds it if

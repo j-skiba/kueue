@@ -1094,11 +1094,10 @@ func (r *WorkloadReconciler) Delete(e event.TypedDeleteEvent[*kueue.Workload]) b
 	// Delete from cache unconditionally. Pending workloads may have been "assumed"
 	// by the scheduler, and leaving them blocks ClusterQueue finalizer removal.
 	// The operation is idempotent if the workload was never in the cache.
-	r.queues.QueueAssociatedInadmissibleWorkloadsAfter(ctx, wlKey, func() {
-		if err := r.cache.DeleteWorkload(log, wlKey); err != nil {
-			log.Error(err, "Failed to delete workload from cache")
-		}
-	})
+	if err := r.cache.DeleteWorkload(log, wlKey); err != nil {
+		log.Error(err, "Failed to delete workload from cache")
+	}
+	r.queues.QueueAssociatedInadmissibleWorkloadsAfter(ctx, wlKey, qcache.QuotaReleasedEventType, nil)
 
 	// Even if the state is unknown, the last cached state tells us whether the
 	// workload was in the queues and should be cleared from them.
@@ -1150,14 +1149,10 @@ func (r *WorkloadReconciler) Update(e event.TypedUpdateEvent[*kueue.Workload]) b
 		r.queues.AddFinishedWorkload(wlCopy)
 
 		// trigger the move of associated inadmissibleWorkloads, if there are any.
-		r.queues.QueueAssociatedInadmissibleWorkloadsAfter(ctx, wlKey, func() {
-			// Delete the workload from cache while holding the queues lock
-			// to guarantee that requeued workloads are taken into account before
-			// the next scheduling cycle.
-			if err := r.cache.DeleteWorkload(log, wlKey); err != nil && prevStatus == workload.StatusAdmitted {
-				log.Error(err, "Failed to delete workload from cache")
-			}
-		})
+		if err := r.cache.DeleteWorkload(log, wlKey); err != nil && prevStatus == workload.StatusAdmitted {
+			log.Error(err, "Failed to delete workload from cache")
+		}
+		r.queues.QueueAssociatedInadmissibleWorkloadsAfter(ctx, wlKey, qcache.QuotaReleasedEventType, nil)
 	case prevStatus == workload.StatusPending && status == workload.StatusPending:
 		if dra.NeedsDRAReconcile(e.ObjectNew) {
 			log.V(2).Info("Skipping queue update for DRA workload - handled in Reconcile")
@@ -1182,39 +1177,32 @@ func (r *WorkloadReconciler) Update(e event.TypedUpdateEvent[*kueue.Workload]) b
 		immediate := backoff <= 0
 		log.V(3).Info("Workload transitioned back to pending", "backoff", backoff, "immediate", immediate)
 		// trigger the move of associated inadmissibleWorkloads, if there are any.
-		r.queues.QueueAssociatedInadmissibleWorkloadsAfter(ctx, wlKey, func() {
-			// Delete the workload from cache while holding the queues lock
-			// to guarantee that requeued workloads are taken into account before
-			// the next scheduling cycle.
-			if err := r.cache.DeleteWorkload(log, wlKey); err != nil {
-				log.Error(err, "Failed to delete workload from cache")
-			}
-			// Here we don't take the lock as it is already taken by the wrapping function.
-			// The delayed requeue is done in the Reconcile function, but we need to
-			// keep the immediate retry here because it will ensure that
-			// AddOrUpdateWorkload is only called once. When moving it to the main
-			// reconciler, we would execute it on every run, which might mess up the state.
-			if immediate {
-				if dra.NeedsDRAReconcile(e.ObjectNew) {
-					log.V(2).Info("Skipping immediate requeue for DRA workload - handled in Reconcile")
-				} else {
-					if err := r.queues.AddOrUpdateWorkloadWithoutLock(log, wlCopy); err != nil {
-						log.V(2).Info("ignored an error for now", "error", err)
-					}
-					r.queues.DeleteSecondPassWithoutLock(wlKey)
+		if err := r.cache.DeleteWorkload(log, wlKey); err != nil {
+			log.Error(err, "Failed to delete workload from cache")
+		}
+		evictedCond := apimeta.FindStatusCondition(e.ObjectNew.Status.Conditions, kueue.WorkloadEvicted)
+		if evictedCond != nil && evictedCond.Reason == "EvictedDueToPreempted" {
+			r.queues.QueueAssociatedInadmissibleWorkloadsAfter(ctx, wlKey, qcache.PreemptedWorkloadEventType, nil)
+		} else {
+			r.queues.QueueAssociatedInadmissibleWorkloadsAfter(ctx, wlKey, qcache.QuotaReleasedEventType, nil)
+		}
+		
+		if immediate {
+			if dra.NeedsDRAReconcile(e.ObjectNew) {
+				log.V(2).Info("Skipping immediate requeue for DRA workload - handled in Reconcile")
+			} else {
+				if err := r.queues.AddOrUpdateWorkload(log, wlCopy); err != nil {
+					log.V(2).Info("ignored an error for now", "error", err)
 				}
+				r.queues.DeleteSecondPassWithoutLock(wlKey)
 			}
-		})
+		}
 	case prevStatus == workload.StatusAdmitted && status == workload.StatusAdmitted && !equality.Semantic.DeepEqual(e.ObjectOld.Status.ReclaimablePods, e.ObjectNew.Status.ReclaimablePods),
 		features.Enabled(features.ElasticJobsViaWorkloadSlices) && workloadslicing.ScaledDown(workload.ExtractPodSetCountsFromWorkload(e.ObjectOld), workload.ExtractPodSetCountsFromWorkload(e.ObjectNew)),
 		workload.PriorityChanged(log, e.ObjectOld, e.ObjectNew):
 		// trigger the move of associated inadmissibleWorkloads, if there are any.
-		r.queues.QueueAssociatedInadmissibleWorkloadsAfter(ctx, wlKey, func() {
-			// Update the workload from cache while holding the queues lock
-			// to guarantee that requeued workloads are taken into account before
-			// the next scheduling cycle.
-			r.cache.AddOrUpdateWorkload(log, wlCopy)
-		})
+		r.cache.AddOrUpdateWorkload(log, wlCopy)
+		r.queues.QueueAssociatedInadmissibleWorkloadsAfter(ctx, wlKey, qcache.QuotaReleasedEventType, nil)
 
 	default:
 		// Workload update in the cache is handled here; however, some fields are immutable

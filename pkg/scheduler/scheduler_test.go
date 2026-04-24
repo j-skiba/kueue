@@ -7047,7 +7047,7 @@ func TestLastSchedulingContext(t *testing.T) {
 					if err != nil {
 						t.Errorf("Delete workload failed: %v", err)
 					}
-					qManager.QueueAssociatedInadmissibleWorkloadsAfter(ctx, workload.Key(&wl), nil)
+					qManager.QueueAssociatedInadmissibleWorkloadsAfter(ctx, workload.Key(&wl), qcache.QuotaReleasedEventType, nil)
 				}
 				watcher.ProcessRequeues(ctx)
 

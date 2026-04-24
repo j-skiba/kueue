@@ -39,6 +39,14 @@ const (
 	requeueLongBatchPeriod = 10 * time.Second
 )
 
+type EventType int
+
+const (
+	QuotaReleasedEventType EventType = iota
+	PreemptedWorkloadEventType
+	CapacityChangeEventType
+)
+
 func getRequeueBatchPeriod() time.Duration {
 	if features.Enabled(features.SchedulerLongRequeueInterval) {
 		return requeueLongBatchPeriod
@@ -58,14 +66,29 @@ func WithBatchPeriod(period time.Duration) RequeuerOption {
 	}
 }
 
+type inadmissibleWorkloadEntry struct {
+	Info   *workload.Info
+	Reason RequeueReason
+}
+
 // inadmissibleWorkloads is a thin wrapper around a map to encapsulate
 // operations on inadmissible workloads and prevent direct map access.
-type inadmissibleWorkloads map[workload.Reference]*workload.Info
+type inadmissibleWorkloads map[workload.Reference]inadmissibleWorkloadEntry
 
 // get retrieves a workload from the inadmissible workloads map.
 // Returns the workload if it exists, otherwise returns nil.
 func (iw inadmissibleWorkloads) get(key workload.Reference) *workload.Info {
-	return iw[key]
+	if entry, ok := iw[key]; ok {
+		return entry.Info
+	}
+	return nil
+}
+
+func (iw inadmissibleWorkloads) getReason(key workload.Reference) RequeueReason {
+	if entry, ok := iw[key]; ok {
+		return entry.Reason
+	}
+	return RequeueReasonGeneric
 }
 
 // delete removes a workload from the inadmissible workloads map.
@@ -74,8 +97,8 @@ func (iw inadmissibleWorkloads) delete(key workload.Reference) {
 }
 
 // insert adds a workload to the inadmissible workloads map.
-func (iw inadmissibleWorkloads) insert(key workload.Reference, wInfo *workload.Info) {
-	iw[key] = wInfo
+func (iw inadmissibleWorkloads) insert(key workload.Reference, wInfo *workload.Info, reason RequeueReason) {
+	iw[key] = inadmissibleWorkloadEntry{Info: wInfo, Reason: reason}
 }
 
 // len returns the number of inadmissible workloads.
@@ -103,14 +126,14 @@ func (iw *inadmissibleWorkloads) replaceAll(newMap inadmissibleWorkloads) {
 // from inadmissibleWorkloads to heap.
 // It expects to be passed a ClusterQueue without any Cohort.
 // WARNING: must only be called by the InadmissibleWorkloadRequeuer
-func requeueWorkloadsCQ(ctx context.Context, m *Manager, clusterQueueName kueue.ClusterQueueReference) int {
+func requeueWorkloadsCQ(ctx context.Context, m *Manager, clusterQueueName kueue.ClusterQueueReference, eventType EventType) int {
 	m.Lock()
 	defer m.Unlock()
 	cq := m.hm.ClusterQueue(clusterQueueName)
 	if cq == nil {
 		return 0
 	}
-	moved := queueInadmissibleWorkloads(ctx, cq, m.client)
+	moved := queueInadmissibleWorkloads(ctx, cq, m.client, eventType)
 	if moved > 0 {
 		log := ctrl.LoggerFrom(ctx)
 		log.V(2).Info("Moved workloads", "clusterqueue", cq.name, "count", moved)
@@ -125,7 +148,7 @@ func requeueWorkloadsCQ(ctx context.Context, m *Manager, clusterQueueName kueue.
 // passed a root Cohort. If at least one workload queued,
 // we will broadcast the event.
 // WARNING: must only be called by the InadmissibleWorkloadRequeuer
-func requeueWorkloadsCohort(ctx context.Context, m *Manager, rootCohortName kueue.CohortReference) int {
+func requeueWorkloadsCohort(ctx context.Context, m *Manager, rootCohortName kueue.CohortReference, eventType EventType) int {
 	m.Lock()
 	defer m.Unlock()
 	cohort := m.hm.Cohort(rootCohortName)
@@ -139,7 +162,7 @@ func requeueWorkloadsCohort(ctx context.Context, m *Manager, rootCohortName kueu
 		return 0
 	}
 	log.V(2).Info("Attempting to move workloads", "rootCohort", cohort.Name)
-	moved := requeueWorkloadsCohortSubtree(ctx, m, cohort)
+	moved := requeueWorkloadsCohortSubtree(ctx, m, cohort, eventType)
 	if moved > 0 {
 		log.V(2).Info("Moved inadmissible workloads in tree", "rootCohort", cohort.Name, "count", moved)
 		m.Broadcast()
@@ -148,16 +171,16 @@ func requeueWorkloadsCohort(ctx context.Context, m *Manager, rootCohortName kueu
 }
 
 // WARNING: must only be called (indirectly) by InadmissibleWorkloadRequeuer.
-func requeueWorkloadsCohortSubtree(ctx context.Context, m *Manager, cohort *cohort) int {
+func requeueWorkloadsCohortSubtree(ctx context.Context, m *Manager, cohort *cohort, eventType EventType) int {
 	total := 0
 	for _, clusterQueue := range cohort.ChildCQs() {
-		if moved := queueInadmissibleWorkloads(ctx, clusterQueue, m.client); moved > 0 {
+		if moved := queueInadmissibleWorkloads(ctx, clusterQueue, m.client, eventType); moved > 0 {
 			reportPendingWorkloads(m, clusterQueue.name)
 			total += moved
 		}
 	}
 	for _, childCohort := range cohort.ChildCohorts() {
-		total += requeueWorkloadsCohortSubtree(ctx, m, childCohort)
+		total += requeueWorkloadsCohortSubtree(ctx, m, childCohort, eventType)
 	}
 	return total
 }
@@ -165,7 +188,7 @@ func requeueWorkloadsCohortSubtree(ctx context.Context, m *Manager, cohort *coho
 // queueInadmissibleWorkloads moves all (eligible) workloads from inadmissibleWorkloads to heap.
 // Returns the number of workloads moved.
 // WARNING: must only be called (indirectly) by InadmissibleWorkloadRequeuer.
-func queueInadmissibleWorkloads(ctx context.Context, c *ClusterQueue, client client.Client) int {
+func queueInadmissibleWorkloads(ctx context.Context, c *ClusterQueue, client client.Client, eventType EventType) int {
 	c.rwm.Lock()
 	defer c.rwm.Unlock()
 	log := ctrl.LoggerFrom(ctx)
@@ -178,13 +201,41 @@ func queueInadmissibleWorkloads(ctx context.Context, c *ClusterQueue, client cli
 	log.V(2).Info("Resetting the head of the ClusterQueue", "clusterQueue", c.name)
 	newInadmissibleWorkloads := make(inadmissibleWorkloads)
 	moved := 0
-	for key, wInfo := range c.inadmissibleWorkloads {
+	for key, wInfoEntry := range c.inadmissibleWorkloads {
+		select {
+		case <-ctx.Done():
+			return moved
+		default:
+		}
+		wInfo := wInfoEntry.Info
+		reason := wInfoEntry.Reason
+
+		shouldMove := false
+		switch eventType {
+		case CapacityChangeEventType:
+			shouldMove = true
+		case PreemptedWorkloadEventType:
+			shouldMove = reason == RequeueReasonPendingPreemption || reason == RequeueReasonPreemptionFailed
+		case QuotaReleasedEventType:
+			shouldMove = reason == RequeueReasonFailedAfterNomination || reason == RequeueReasonGeneric || reason == RequeueReasonPendingPreemption
+		}
+
+		if !shouldMove {
+			newInadmissibleWorkloads.insert(key, wInfo, reason)
+			continue
+		}
+
 		ns := corev1.Namespace{}
 		err := client.Get(ctx, types.NamespacedName{Name: wInfo.Obj.Namespace}, &ns)
 		if err != nil || !c.namespaceSelector.Matches(labels.Set(ns.Labels)) || !c.backoffWaitingTimeExpired(wInfo) {
-			newInadmissibleWorkloads.insert(key, wInfo)
-		} else if c.heap.PushIfNotPresent(wInfo) {
+			newInadmissibleWorkloads.insert(key, wInfo, reason)
+			continue
+		}
+
+		if c.heap.PushIfNotPresent(wInfo) {
 			moved++
+		} else {
+			newInadmissibleWorkloads.insert(key, wInfo, reason)
 		}
 	}
 
@@ -197,13 +248,13 @@ func queueInadmissibleWorkloads(ctx context.Context, c *ClusterQueue, client cli
 // from given ClusterQueues, and from all ClusterQueues in these
 // ClusterQueues' Cohort Trees, are moved from
 // inadmissibleQueue to the active workload heap.
-func NotifyRetryInadmissible(m *Manager, cqNames sets.Set[kueue.ClusterQueueReference]) {
+func NotifyRetryInadmissible(m *Manager, cqNames sets.Set[kueue.ClusterQueueReference], eventType EventType) {
 	m.RLock()
 	defer m.RUnlock()
-	notifyRetryInadmissibleWithoutLock(m, cqNames)
+	notifyRetryInadmissibleWithoutLock(m, cqNames, eventType)
 }
 
-func notifyRetryInadmissibleWithoutLock(m *Manager, cqNames sets.Set[kueue.ClusterQueueReference]) {
+func notifyRetryInadmissibleWithoutLock(m *Manager, cqNames sets.Set[kueue.ClusterQueueReference], eventType EventType) {
 	for name := range cqNames {
 		cq := m.hm.ClusterQueue(name)
 		if cq == nil {
@@ -211,10 +262,10 @@ func notifyRetryInadmissibleWithoutLock(m *Manager, cqNames sets.Set[kueue.Clust
 		}
 		switch {
 		case !cq.HasParent():
-			m.requeuer.notifyClusterQueue(cq.name)
+			m.requeuer.notifyClusterQueue(cq.name, eventType)
 		case !hierarchy.HasCycle(cq.Parent()):
 			rootName := cq.Parent().getRootUnsafe().GetName()
-			m.requeuer.notifyCohort(rootName)
+			m.requeuer.notifyCohort(rootName, eventType)
 		}
 		// We silently ignore Cohort trees with cycles.
 		// Once the cycle is removed, we will reconcile
@@ -227,15 +278,16 @@ func notifyRetryInadmissibleWithoutLock(m *Manager, cqNames sets.Set[kueue.Clust
 // Root Cohort should have its Inadmissible Workloads requeued.
 type inadmissibleRequeuer interface {
 	// notifyClusterQueue should only be called for ClusterQueues without a Cohort.
-	notifyClusterQueue(cqName kueue.ClusterQueueReference)
+	notifyClusterQueue(cqName kueue.ClusterQueueReference, eventType EventType)
 	// notifyCohort should only be called for Root Cohorts.
-	notifyCohort(cohortName kueue.CohortReference)
+	notifyCohort(cohortName kueue.CohortReference, eventType EventType)
 	setManager(manager *Manager)
 }
 
 type requeueRequest struct {
 	ClusterQueue kueue.ClusterQueueReference
 	Cohort       kueue.CohortReference
+	EventType    EventType
 }
 
 // workqueueRequeuer satisfies the inadmissibleRequeuer
@@ -259,12 +311,12 @@ func NewRequeuer(opts ...RequeuerOption) *workqueueRequeuer {
 	}
 }
 
-func (r *workqueueRequeuer) notifyClusterQueue(cqName kueue.ClusterQueueReference) {
-	r.queue.AddAfter(requeueRequest{ClusterQueue: cqName}, r.batchPeriod)
+func (r *workqueueRequeuer) notifyClusterQueue(cqName kueue.ClusterQueueReference, eventType EventType) {
+	r.queue.AddAfter(requeueRequest{ClusterQueue: cqName, EventType: eventType}, r.batchPeriod)
 }
 
-func (r *workqueueRequeuer) notifyCohort(cohortName kueue.CohortReference) {
-	r.queue.AddAfter(requeueRequest{Cohort: cohortName}, r.batchPeriod)
+func (r *workqueueRequeuer) notifyCohort(cohortName kueue.CohortReference, eventType EventType) {
+	r.queue.AddAfter(requeueRequest{Cohort: cohortName, EventType: eventType}, r.batchPeriod)
 }
 
 func (r *workqueueRequeuer) setManager(manager *Manager) {
@@ -290,9 +342,9 @@ func (r *workqueueRequeuer) Start(ctx context.Context) error {
 
 func (r *workqueueRequeuer) reconcile(ctx context.Context, req requeueRequest) {
 	if req.ClusterQueue != "" {
-		requeueWorkloadsCQ(ctx, r.manager, req.ClusterQueue)
+		requeueWorkloadsCQ(ctx, r.manager, req.ClusterQueue, req.EventType)
 	}
 	if req.Cohort != "" {
-		requeueWorkloadsCohort(ctx, r.manager, req.Cohort)
+		requeueWorkloadsCohort(ctx, r.manager, req.Cohort, req.EventType)
 	}
 }

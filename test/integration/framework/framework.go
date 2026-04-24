@@ -236,15 +236,18 @@ func (f *Framework) StartManager(ctx context.Context, cfg *rest.Config, managerS
 func (f *Framework) StopManager(ctx context.Context) {
 	ginkgo.By("stopping the manager", func() {
 		if f.managerCancel == nil {
+			ginkgo.GinkgoLogr.Info("managerCancel is nil, skipping stop")
 			return
 		}
 
+		ginkgo.GinkgoLogr.Info("Calling managerCancel")
 		f.managerCancel()
+		ginkgo.GinkgoLogr.Info("Waiting for manager to stop (managerDone) or timeout (ctx.Done)")
 		select {
 		case <-f.managerDone:
-			ginkgo.GinkgoLogr.Info("manager stopped")
+			ginkgo.GinkgoLogr.Info("manager stopped successfully")
 		case <-ctx.Done():
-			ginkgo.GinkgoLogr.Info("manager stop canceled")
+			ginkgo.GinkgoLogr.Info("manager stop timed out or canceled", "err", ctx.Err())
 		}
 	})
 }

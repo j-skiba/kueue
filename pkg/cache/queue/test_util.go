@@ -19,7 +19,6 @@ package queue
 import (
 	"context"
 
-	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
@@ -29,16 +28,16 @@ import (
 // to be processed synchronously, for use in unit tests.
 type testInadmissibleWorkloadRequeuer struct {
 	manager *Manager
-	cqs     sets.Set[kueue.ClusterQueueReference]
-	cohorts sets.Set[kueue.CohortReference]
+	cqs     map[kueue.ClusterQueueReference]EventType
+	cohorts map[kueue.CohortReference]EventType
 }
 
-func (r *testInadmissibleWorkloadRequeuer) notifyClusterQueue(cqName kueue.ClusterQueueReference) {
-	r.cqs.Insert(cqName)
+func (r *testInadmissibleWorkloadRequeuer) notifyClusterQueue(cqName kueue.ClusterQueueReference, eventType EventType) {
+	r.cqs[cqName] = eventType
 }
 
-func (r *testInadmissibleWorkloadRequeuer) notifyCohort(cohortName kueue.CohortReference) {
-	r.cohorts.Insert(cohortName)
+func (r *testInadmissibleWorkloadRequeuer) notifyCohort(cohortName kueue.CohortReference, eventType EventType) {
+	r.cohorts[cohortName] = eventType
 }
 
 func (r *testInadmissibleWorkloadRequeuer) setManager(manager *Manager) {
@@ -50,14 +49,14 @@ func (r *testInadmissibleWorkloadRequeuer) setManager(manager *Manager) {
 // Returns the total number of workloads moved.
 func (w *testInadmissibleWorkloadRequeuer) ProcessRequeues(ctx context.Context) int {
 	total := 0
-	for cqName := range w.cqs {
-		total += requeueWorkloadsCQ(ctx, w.manager, cqName)
+	for cqName, eventType := range w.cqs {
+		total += requeueWorkloadsCQ(ctx, w.manager, cqName, eventType)
 	}
-	for cohortName := range w.cohorts {
-		total += requeueWorkloadsCohort(ctx, w.manager, cohortName)
+	for cohortName, eventType := range w.cohorts {
+		total += requeueWorkloadsCohort(ctx, w.manager, cohortName, eventType)
 	}
-	w.cqs.Clear()
-	w.cohorts.Clear()
+	w.cqs = make(map[kueue.ClusterQueueReference]EventType)
+	w.cohorts = make(map[kueue.CohortReference]EventType)
 	return total
 }
 
@@ -73,8 +72,8 @@ func NewManagerForUnitTests(client client.Client, checker StatusChecker, options
 // NewManagerForUnitTestsWithRequeuer creates a new Manager for testing purposes, pre-configured with a testInadmissibleWorkloadRequeuer.
 func NewManagerForUnitTestsWithRequeuer(client client.Client, checker StatusChecker, options ...Option) (*Manager, *testInadmissibleWorkloadRequeuer) {
 	requeuer := &testInadmissibleWorkloadRequeuer{
-		cqs:     sets.New[kueue.ClusterQueueReference](),
-		cohorts: sets.New[kueue.CohortReference](),
+		cqs:     make(map[kueue.ClusterQueueReference]EventType),
+		cohorts: make(map[kueue.CohortReference]EventType),
 	}
 
 	manager := NewManager(client, checker, requeuer, options...)
