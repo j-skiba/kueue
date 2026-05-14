@@ -2806,6 +2806,88 @@ var _ = ginkgo.Describe("Topology Aware Scheduling", ginkgo.Ordered, func() {
 				})
 			})
 
+			ginkgo.It("should not evict workload when node has NoExecute taint tolerated by ResourceFlavor", framework.SlowSpec, func() {
+				features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.TASReplaceNodeOnNodeTaints, true)
+
+				var wl *kueue.Workload
+				var flavorWithTol *kueue.ResourceFlavor
+				var cq *kueue.ClusterQueue
+				var lq *kueue.LocalQueue
+				nodeName := nodes[0].Name
+				taint := corev1.Taint{Key: "example.com/flavor-tolerable", Value: "true", Effect: corev1.TaintEffectNoExecute}
+
+				ginkgo.By("creating a new ResourceFlavor with tolerations", func() {
+					flavorWithTol = utiltestingapi.MakeResourceFlavor("flavor-with-tol-" + ns.Name).
+						NodeLabel("node-group", "tas").
+						TopologyName("default").
+						Toleration(corev1.Toleration{
+							Key:      taint.Key,
+							Operator: corev1.TolerationOpEqual,
+							Value:    taint.Value,
+							Effect:   taint.Effect,
+						}).Obj()
+					util.MustCreate(ctx, k8sClient, flavorWithTol)
+				})
+
+				ginkgo.By("creating a new ClusterQueue referencing the flavor", func() {
+					cq = utiltestingapi.MakeClusterQueue("cq-" + ns.Name).
+						ResourceGroup(*utiltestingapi.MakeFlavorQuotas(flavorWithTol.Name).Resource(corev1.ResourceCPU, "5").Obj()).
+						Obj()
+					util.CreateClusterQueuesAndWaitForActive(ctx, k8sClient, cq)
+				})
+
+				ginkgo.By("creating a new LocalQueue", func() {
+					lq = utiltestingapi.MakeLocalQueue("lq-" + ns.Name, ns.Name).ClusterQueue(cq.Name).Obj()
+					util.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, lq)
+				})
+
+				defer func() {
+					gomega.Expect(util.DeleteObject(ctx, k8sClient, lq)).Should(gomega.Succeed())
+					util.ExpectObjectToBeDeleted(ctx, k8sClient, cq, true)
+					util.ExpectObjectToBeDeleted(ctx, k8sClient, flavorWithTol, true)
+				}()
+
+				ginkgo.By("creating a workload matching the flavor", func() {
+					wl = utiltestingapi.MakeWorkload("wl1", ns.Name).
+						PodSets(*utiltestingapi.MakePodSet("worker", 1).
+							PreferredTopologyRequest(utiltesting.DefaultBlockTopologyLevel).
+							Obj()).
+						Queue(kueue.LocalQueueName(lq.Name)).Request(corev1.ResourceCPU, "1").Obj()
+					util.MustCreate(ctx, k8sClient, wl)
+				})
+
+				ginkgo.By("verify the workload is admitted", func() {
+					util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wl)
+				})
+
+				ginkgo.By("creating pending pods for the workload to inherit injected tolerations", func() {
+					createPodsForWorkload(wl, ns.Name, true, false)
+				})
+
+				ginkgo.By("applying the tolerated NoExecute taint to the node", func() {
+					nodeToUpdate := &corev1.Node{}
+					gomega.Expect(k8sClient.Get(ctx, apitypes.NamespacedName{Name: nodeName}, nodeToUpdate)).Should(gomega.Succeed())
+					nodeToUpdate.Spec.Taints = append(nodeToUpdate.Spec.Taints, taint)
+					gomega.Expect(k8sClient.Update(ctx, nodeToUpdate)).Should(gomega.Succeed())
+				})
+
+				defer func() {
+					nodeToUpdate := &corev1.Node{}
+					gomega.Expect(k8sClient.Get(ctx, apitypes.NamespacedName{Name: nodeName}, nodeToUpdate)).Should(gomega.Succeed())
+					nodeToUpdate.Spec.Taints = slices.DeleteFunc(nodeToUpdate.Spec.Taints, func(t corev1.Taint) bool {
+						return t.Key == taint.Key
+					})
+					gomega.Expect(k8sClient.Update(ctx, nodeToUpdate)).Should(gomega.Succeed())
+				}()
+
+				ginkgo.By("verify workload stays healthy and UnhealthyNodes remains empty", func() {
+					gomega.Consistently(func(g gomega.Gomega) {
+						g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wl), wl)).To(gomega.Succeed())
+						g.Expect(wl.Status.UnhealthyNodes).To(gomega.BeEmpty())
+					}, util.ConsistentDuration, util.ShortInterval).Should(gomega.Succeed())
+				})
+			})
+
 			ginkgo.It("should evict workload when node has NoSchedule taint and no pods are present", framework.SlowSpec, func() {
 				features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.TASReplaceNodeOnNodeTaints, true)
 				features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.TASReplaceNodeOnPodTermination, false)

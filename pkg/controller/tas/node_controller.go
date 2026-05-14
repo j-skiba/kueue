@@ -384,7 +384,7 @@ func (r *nodeReconciler) getWorkloadStatus(
 	case !features.Enabled(features.TASReplaceNodeOnNodeTaints):
 		return workloadHealthCheck{status: workloadHealthy}, nil
 	default:
-		untolerated, temporarilyTolerated := classifyTaints(ctx, node.Spec.Taints, workload.PodSetsOnNode(wl, nodeName))
+		untolerated, temporarilyTolerated := classifyTaints(ctx, node.Spec.Taints, nodeSelectorAssignedPods)
 
 		if len(untolerated) > 0 {
 			if !features.Enabled(features.TASReplaceNodeOnPodTermination) {
@@ -661,20 +661,28 @@ func (r *nodeReconciler) hasProgressingPods(ctx context.Context, wl *kueue.Workl
 	return hasProgressingPods, nil
 }
 
-func checkTaintTolerations(logger logr.Logger, taint *corev1.Taint, podSets []kueue.PodSet) taintToleration {
-	isUntolerated := true
+func checkTaintTolerations(logger logr.Logger, taint *corev1.Taint, pods []*corev1.Pod) taintToleration {
+	allTolerate := true
 	isPermanentlyTolerated := true
 
-	for _, ps := range podSets {
-		if !corev1helpers.TolerationsTolerateTaint(logger, ps.Template.Spec.Tolerations, taint, false) {
-			isUntolerated = false
+	// If no physical pods exist yet (e.g. during the short window after admission
+	// but before pod creation, or when pods are gated and lack nodeSelector),
+	// we assume healthy status until pods are created and visible to avoid false positives.
+	if len(pods) == 0 {
+		return toleratedPermanently
+	}
+
+	for _, pod := range pods {
+		tolerations := pod.Spec.Tolerations
+		if !corev1helpers.TolerationsTolerateTaint(logger, tolerations, taint, false) {
+			allTolerate = false
 			break
 		}
 
 		// check if the taint is permanently tolerated,
 		// if the taint is not permanently tolerated, the node will be watched
-		permanentTolerations := make([]corev1.Toleration, 0, len(ps.Template.Spec.Tolerations))
-		for _, t := range ps.Template.Spec.Tolerations {
+		permanentTolerations := make([]corev1.Toleration, 0, len(tolerations))
+		for _, t := range tolerations {
 			if t.TolerationSeconds == nil {
 				permanentTolerations = append(permanentTolerations, t)
 			}
@@ -684,7 +692,7 @@ func checkTaintTolerations(logger logr.Logger, taint *corev1.Taint, podSets []ku
 		}
 	}
 
-	if !isUntolerated {
+	if !allTolerate {
 		return untoleratedTaint
 	}
 	if !isPermanentlyTolerated {
@@ -693,14 +701,14 @@ func checkTaintTolerations(logger logr.Logger, taint *corev1.Taint, podSets []ku
 	return toleratedPermanently
 }
 
-func classifyTaints(ctx context.Context, taints []corev1.Taint, podSets []kueue.PodSet) (untolerated, temporarilyTolerated []corev1.Taint) {
+func classifyTaints(ctx context.Context, taints []corev1.Taint, pods []*corev1.Pod) (untolerated, temporarilyTolerated []corev1.Taint) {
 	logger := ctrl.LoggerFrom(ctx)
 	for _, taint := range taints {
 		if taint.Effect != corev1.TaintEffectNoExecute && taint.Effect != corev1.TaintEffectNoSchedule {
 			continue
 		}
 
-		switch checkTaintTolerations(logger, &taint, podSets) {
+		switch checkTaintTolerations(logger, &taint, pods) {
 		case untoleratedTaint:
 			untolerated = append(untolerated, taint)
 		case toleratedTemporarily:

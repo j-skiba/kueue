@@ -326,3 +326,9 @@ func (p *PodWrapper) TerminationGracePeriod(seconds int64) *PodWrapper {
 	p.Spec.TerminationGracePeriodSeconds = &seconds
 	return p
 }
+
+// Toleration adds a toleration to the pod object
+func (p *PodWrapper) Toleration(t corev1.Toleration) *PodWrapper {
+	p.Spec.Tolerations = append(p.Spec.Tolerations, t)
+	return p
+}

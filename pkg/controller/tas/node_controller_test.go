@@ -138,8 +138,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 		Annotation(kueue.WorkloadAnnotation, wlName).
 		Annotation(kueue.PodSetUnconstrainedTopologyAnnotation, "true").
 		StatusPhase(corev1.PodRunning).
-		NodeName(nodeName).
-		Obj()
+		NodeName(nodeName)
 
 	pendingPodWithSelector := testingpod.MakePod("pending-pod-selector", nsName).
 		Annotation(kueue.WorkloadAnnotation, wlName).
@@ -162,9 +161,22 @@ func TestNodeFailureReconciler(t *testing.T) {
 		StatusPhase(corev1.PodPending).
 		Obj()
 
-	terminatingPod := basePod.DeepCopy()
+	terminatingPod := basePod.Obj().DeepCopy()
 	terminatingPod.DeletionTimestamp = &now
 	terminatingPod.Finalizers = []string{podconstants.PodFinalizer}
+
+	toleratedPod := basePod.Clone().
+		NodeSelector(corev1.LabelHostname, nodeName).
+		Toleration(corev1.Toleration{
+			Key:               "foo",
+			Effect:            corev1.TaintEffectNoExecute,
+			Operator:          corev1.TolerationOpExists,
+			TolerationSeconds: ptr.To[int64](300),
+		}).Obj()
+
+	toleratedTerminatingPod := toleratedPod.DeepCopy()
+	toleratedTerminatingPod.DeletionTimestamp = &now
+	toleratedTerminatingPod.Finalizers = []string{podconstants.PodFinalizer}
 
 	finishedWorkload := baseWorkload.DeepCopy()
 	apimeta.SetStatusCondition(&finishedWorkload.Status.Conditions, metav1.Condition{Type: kueue.WorkloadFinished, Status: metav1.ConditionTrue, Reason: "Finished"})
@@ -172,7 +184,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 	evictedWorkload := baseWorkload.DeepCopy()
 	apimeta.SetStatusCondition(&evictedWorkload.Status.Conditions, metav1.Condition{Type: kueue.WorkloadEvicted, Status: metav1.ConditionTrue, Reason: "Evicted"})
 
-	failedPod := basePod.DeepCopy()
+	failedPod := basePod.Obj().DeepCopy()
 	failedPod.Status.Phase = corev1.PodFailed
 	failedPod.Status.ContainerStatuses = []corev1.ContainerStatus{
 		{
@@ -207,7 +219,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					Status:             corev1.ConditionTrue,
 					LastTransitionTime: now}).Obj(),
 				baseWorkload.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Obj().DeepCopy(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: nil,
@@ -219,7 +231,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					Status:             corev1.ConditionTrue,
 					LastTransitionTime: now}).Obj(),
 				workloadWithUnhealthyNode.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Obj().DeepCopy(),
 			},
 			reconcileRequests:    []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes:   nil,
@@ -233,7 +245,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					Status:             corev1.ConditionFalse,
 					LastTransitionTime: now}).Obj(),
 				baseWorkload.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Obj().DeepCopy(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: nil,
@@ -247,7 +259,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					Status:             corev1.ConditionFalse,
 					LastTransitionTime: earlierTime}).Obj(),
 				baseWorkload.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Obj().DeepCopy(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
@@ -297,7 +309,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					Status:             corev1.ConditionFalse,
 					LastTransitionTime: now}).Obj(),
 				baseWorkload.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Obj().DeepCopy(),
 			},
 			reconcileRequests: []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 		},
@@ -333,7 +345,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 		"Node Deleted - marked as unavailable": {
 			initObjs: []client.Object{
 				baseWorkload.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Obj().DeepCopy(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
@@ -423,7 +435,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					LastTransitionTime: now}).
 					Taints(corev1.Taint{Key: "foo", Effect: corev1.TaintEffectNoExecute}).Obj(),
 				baseWorkload.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Clone().NodeSelector(corev1.LabelHostname, nodeName).Obj(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
@@ -462,7 +474,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					).
 					AdmittedAt(true, testStartTime).
 					Obj(),
-				basePod.DeepCopy(),
+				toleratedPod.DeepCopy(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: nil,
@@ -498,7 +510,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					).
 					AdmittedAt(true, testStartTime).
 					Obj(),
-				terminatingPod,
+				toleratedTerminatingPod.DeepCopy(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
@@ -512,7 +524,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					LastTransitionTime: now}).
 					Taints(corev1.Taint{Key: "foo", Effect: corev1.TaintEffectNoExecute}).Obj(),
 				baseWorkload.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Clone().NodeSelector(corev1.LabelHostname, nodeName).Obj(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: nil,
@@ -529,7 +541,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					LastTransitionTime: now}).
 					Taints(corev1.Taint{Key: "foo", Effect: corev1.TaintEffectNoExecute}).Obj(),
 				baseWorkload.DeepCopy(),
-				terminatingPod,
+				basePod.Clone().NodeSelector(corev1.LabelHostname, nodeName).DeletionTimestamp(now.Time).Finalizer(podconstants.PodFinalizer).Obj(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
@@ -548,7 +560,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 				baseWorkload.DeepCopy(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
-			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			wantUnhealthyNodes: nil,
 			featureGates: map[featuregate.Feature]bool{
 				features.TASReplaceNodeOnNodeTaints:     true,
 				features.TASReplaceNodeOnPodTermination: true,
@@ -562,7 +574,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					LastTransitionTime: now}).
 					Taints(corev1.Taint{Key: "foo", Effect: corev1.TaintEffectNoExecute}).Obj(),
 				baseWorkload.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Clone().NodeSelector(corev1.LabelHostname, nodeName).Obj(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
@@ -601,7 +613,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					).
 					AdmittedAt(true, testStartTime).
 					Obj(),
-				basePod.DeepCopy(),
+				toleratedPod.DeepCopy(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: nil,
@@ -640,7 +652,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					).
 					AdmittedAt(true, testStartTime).
 					Obj(),
-				terminatingPod,
+				toleratedTerminatingPod.DeepCopy(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
@@ -666,7 +678,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 				baseWorkload.DeepCopy(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
-			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			wantUnhealthyNodes: nil,
 			featureGates: map[featuregate.Feature]bool{
 				features.TASReplaceNodeOnNodeTaints: true,
 			},
@@ -679,7 +691,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					LastTransitionTime: now}).
 					Taints(corev1.Taint{Key: "foo", Effect: corev1.TaintEffectNoSchedule}).Obj(),
 				baseWorkload.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Clone().NodeSelector(corev1.LabelHostname, nodeName).Obj(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: nil,
@@ -695,7 +707,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					LastTransitionTime: now}).
 					Taints(corev1.Taint{Key: "foo", Effect: corev1.TaintEffectNoSchedule}).Obj(),
 				baseWorkload.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Clone().NodeSelector(corev1.LabelHostname, nodeName).Obj(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
@@ -733,7 +745,11 @@ func TestNodeFailureReconciler(t *testing.T) {
 					).
 					AdmittedAt(true, testStartTime).
 					Obj(),
-				basePod.DeepCopy(),
+				basePod.Clone().NodeSelector(corev1.LabelHostname, nodeName).Toleration(corev1.Toleration{
+					Key:      "foo",
+					Effect:   corev1.TaintEffectNoSchedule,
+					Operator: corev1.TolerationOpExists,
+				}).Obj(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: nil,
@@ -789,7 +805,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 				gatedPod,
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
-			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			wantUnhealthyNodes: nil,
 			featureGates: map[featuregate.Feature]bool{
 				features.TASReplaceNodeOnNodeTaints: true,
 			},
@@ -894,7 +910,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 				gatedPod,
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
-			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			wantUnhealthyNodes: nil,
 			featureGates: map[featuregate.Feature]bool{
 				features.TASReplaceNodeOnNodeTaints:     true,
 				features.TASReplaceNodeOnPodTermination: true,
@@ -911,7 +927,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 				baseWorkload.DeepCopy(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
-			wantUnhealthyNodes: []kueue.UnhealthyNode{{Name: nodeName}},
+			wantUnhealthyNodes: nil,
 			featureGates: map[featuregate.Feature]bool{
 				features.TASReplaceNodeOnNodeTaints:     true,
 				features.TASReplaceNodeOnPodTermination: true,
@@ -958,7 +974,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					Status:             corev1.ConditionFalse,
 					LastTransitionTime: earlierTime}).Obj(),
 				finishedWorkload.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Clone().NodeSelector(corev1.LabelHostname, nodeName).Obj(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: nil,
@@ -970,7 +986,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 					Status:             corev1.ConditionFalse,
 					LastTransitionTime: earlierTime}).Obj(),
 				evictedWorkload.DeepCopy(),
-				basePod.DeepCopy(),
+				basePod.Clone().NodeSelector(corev1.LabelHostname, nodeName).Obj(),
 			},
 			reconcileRequests:  []reconcile.Request{{NamespacedName: types.NamespacedName{Name: nodeName}}},
 			wantUnhealthyNodes: nil,
@@ -989,6 +1005,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 
 			clientBuilder := utiltesting.NewClientBuilder().
 				WithObjects(tc.initObjs...).
+				WithObjects(utiltestingapi.MakeResourceFlavor("unit-test-flavor").Obj()).
 				WithStatusSubresource(tc.initObjs...).
 				WithInterceptorFuncs(interceptor.Funcs{
 					SubResourcePatch: func(ctx context.Context, client client.Client, subResource string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
@@ -1129,7 +1146,7 @@ func TestGetWorkloadStatus(t *testing.T) {
 		"Healthy pod on assigned node": {
 			node:       baseNode,
 			nodeName:   nodeName,
-			initObjs:   []client.Object{baseWorkload, basePod},
+			initObjs:   []client.Object{baseWorkload, basePod, utiltestingapi.MakeResourceFlavor("unit-test-flavor").Obj()},
 			wantStatus: workloadHealthy,
 		},
 		"Workload not found returns workloadHealthy": {
@@ -1180,6 +1197,84 @@ func TestGetWorkloadStatus(t *testing.T) {
 			},
 			wantStatus:  workloadHealthy, // Node gets healthy status (doesn't trigger workload eviction)
 			wantDeleted: []string{"stray-pod"},
+		},
+		"Node has taint, Workload has two PodSets on node, only one tolerates -> Unhealthy": {
+			node: testingnode.MakeNode(nodeName).
+				StatusConditions(corev1.NodeCondition{Type: corev1.NodeReady, Status: corev1.ConditionTrue, LastTransitionTime: metav1.NewTime(testStartTime)}).
+				Taints(corev1.Taint{Key: "gpu-type", Value: "nvidia-a100", Effect: corev1.TaintEffectNoSchedule}).
+				Obj(),
+			nodeName: nodeName,
+			initObjs: []client.Object{
+				utiltestingapi.MakeResourceFlavor("unit-test-flavor").Obj(),
+				utiltestingapi.MakeWorkload(wlName, nsName).
+					Finalizers(kueue.ResourceInUseFinalizerName).
+					PodSets(
+						*utiltestingapi.MakePodSet("ps1", 1).
+							Request(corev1.ResourceCPU, "1").
+							Toleration(corev1.Toleration{Key: "gpu-type", Operator: corev1.TolerationOpEqual, Value: "nvidia-a100", Effect: corev1.TaintEffectNoSchedule}).
+							Obj(),
+						*utiltestingapi.MakePodSet("ps2", 1).
+							Request(corev1.ResourceCPU, "1").
+							Obj(),
+					).
+					ReserveQuotaAt(
+						utiltestingapi.MakeAdmission("cq").
+							PodSets(
+								utiltestingapi.MakePodSetAssignment("ps1").
+									Assignment(corev1.ResourceCPU, "unit-test-flavor", "1").
+									TopologyAssignment(utiltestingapi.MakeTopologyAssignment([]string{corev1.LabelHostname}).
+										Domains(utiltestingapi.MakeTopologyDomainAssignment([]string{nodeName}, 1).Obj()).
+										Obj()).
+									Obj(),
+								utiltestingapi.MakePodSetAssignment("ps2").
+									Assignment(corev1.ResourceCPU, "unit-test-flavor", "1").
+									TopologyAssignment(utiltestingapi.MakeTopologyAssignment([]string{corev1.LabelHostname}).
+										Domains(utiltestingapi.MakeTopologyDomainAssignment([]string{nodeName}, 1).Obj()).
+										Obj()).
+									Obj(),
+							).
+							Obj(), testStartTime,
+					).
+					AdmittedAt(true, testStartTime).
+					Obj(),
+				testingpod.MakePod("pod-ps1", nsName).
+					Annotation(kueue.WorkloadAnnotation, wlName).
+					Annotation(kueue.PodSetUnconstrainedTopologyAnnotation, "true").
+					Label(constants.PodSetLabel, "ps1").
+					NodeSelector(corev1.LabelHostname, nodeName).
+					Toleration(corev1.Toleration{Key: "gpu-type", Operator: corev1.TolerationOpEqual, Value: "nvidia-a100", Effect: corev1.TaintEffectNoSchedule}).
+					Obj(),
+				testingpod.MakePod("pod-ps2", nsName).
+					Annotation(kueue.WorkloadAnnotation, wlName).
+					Annotation(kueue.PodSetUnconstrainedTopologyAnnotation, "true").
+					Label(constants.PodSetLabel, "ps2").
+					NodeSelector(corev1.LabelHostname, nodeName).
+					Obj(),
+			},
+			wantStatus: workloadUnhealthy,
+			featureGates: map[featuregate.Feature]bool{
+				features.TASReplaceNodeOnNodeTaints: true,
+			},
+		},
+		"Node has taint, Workload has no pods created yet, but tolerates via ResourceFlavor -> Healthy": {
+			node: testingnode.MakeNode(nodeName).
+				StatusConditions(corev1.NodeCondition{Type: corev1.NodeReady, Status: corev1.ConditionTrue, LastTransitionTime: metav1.NewTime(testStartTime)}).
+				Taints(corev1.Taint{Key: "gpu-type", Value: "nvidia-a100", Effect: corev1.TaintEffectNoSchedule}).
+				Obj(),
+			nodeName: nodeName,
+			initObjs: []client.Object{
+				baseWorkload.DeepCopy(),
+				utiltestingapi.MakeResourceFlavor("unit-test-flavor").Toleration(corev1.Toleration{
+					Key:      "gpu-type",
+					Operator: corev1.TolerationOpEqual,
+					Value:    "nvidia-a100",
+					Effect:   corev1.TaintEffectNoSchedule,
+				}).Obj(),
+			},
+			wantStatus: workloadHealthy,
+			featureGates: map[featuregate.Feature]bool{
+				features.TASReplaceNodeOnNodeTaints: true,
+			},
 		},
 	}
 
