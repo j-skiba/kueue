@@ -1,0 +1,35 @@
+title: Workload Ready Condition and Queued Workload Metrics
+kep-number: 10852
+authors:
+  - "@j-skiba"
+status: provisional
+creation-date: 2026-05-15
+reviewers:
+  - "@mimowo"
+approvers:
+  - "@mimowo"
+
+see-also:
+  - "/keps/168-pending-workloads-visibility"
+  - "/keps/1833-metrics-for-local-queue"
+
+# The target maturity stage in the current dev cycle for this KEP.
+stage: alpha
+
+# The most recent milestone for which work toward delivery of this KEP has been done.
+latest-milestone: "v0.18"
+
+# The milestone at which this feature was, or is targeted to be, at each stage.
+milestone:
+  alpha: "v0.18"
+  beta: "v0.19"
+  stable: "v0.20"
+
+# List the feature gate name and the components for which it must be enabled
+feature-gates:
+  - name: WorkloadReadyCondition
+disable-supported: true
+
+metrics:
+  - kueue_queued_workloads
+  - kueue_local_queue_queued_workloads
