@@ -167,7 +167,7 @@ func onlyTASFlavor(
 	return nil, fmt.Errorf("more than one TAS flavor assigned: %s", strings.Join(names, ", "))
 }
 
-func checkPodSetAndFlavorMatchForTAS(cq *schdcache.ClusterQueueSnapshot, ps *kueue.PodSet, flavor *kueue.ResourceFlavor, rg *schdcache.ResourceGroup) *Status {
+func checkPodSetAndFlavorMatchForTAS(cq *schdcache.ClusterQueueSnapshot, ps *kueue.PodSet, flavor *kueue.ResourceFlavor, rg *schdcache.ResourceGroup) *string {
 	if isTASRequested(ps, cq) {
 		if isTASImplied(ps, cq) {
 			// If this is a TAS-only CQ, then we don't need to check the flavor because
@@ -183,25 +183,25 @@ func checkPodSetAndFlavorMatchForTAS(cq *schdcache.ClusterQueueSnapshot, ps *kue
 				// This flavor may still provide quota-only resources using ResourceTransformations.
 				return nil
 			}
-			return NewStatus(fmt.Sprintf("Flavor %q does not support TopologyAwareScheduling", flavor.Name)).WithCode(CodeTopologyMismatch)
+			return new(fmt.Sprintf("Flavor %q does not support TopologyAwareScheduling", flavor.Name))
 		}
 		s := cq.TASFlavors[kueue.ResourceFlavorReference(flavor.Name)]
 		if s == nil {
 			// Skip Flavors if they don't have TAS information. This should generally
 			// not happen, but possible in race-situation when the ResourceFlavor
 			// API object was recently added but is not cached yet.
-			return NewStatus(fmt.Sprintf("Flavor %q information missing in TAS cache", flavor.Name)).WithCode(CodeInsufficientQuota)
+			return new(fmt.Sprintf("Flavor %q information missing in TAS cache", flavor.Name))
 		}
 		if !s.HasLevel(ps.TopologyRequest) {
 			// Skip flavors which don't have the requested level
-			return NewStatus(fmt.Sprintf("Flavor %q does not contain the requested level", flavor.Name)).WithCode(CodeTopologyMismatch)
+			return new(fmt.Sprintf("Flavor %q does not contain the requested level", flavor.Name))
 		}
 		// PodSet requires TAS and the flavor supports it, so it's a match.
 		return nil
 	}
 	// PodSet doesn't require TAS, but the flavor supports it.
 	if flavor.Spec.TopologyName != nil {
-		return NewStatus(fmt.Sprintf("Flavor %q supports only TopologyAwareScheduling", flavor.Name)).WithCode(CodeTopologyMismatch)
+		return new(fmt.Sprintf("Flavor %q supports only TopologyAwareScheduling", flavor.Name))
 	}
 	// PodSet doesn't require TAS and the flavor doesn't support it, so it's a match.
 	return nil

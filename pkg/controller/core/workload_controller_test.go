@@ -422,6 +422,37 @@ func TestReconcile(t *testing.T) {
 		wantResult                reconcile.Result
 		reconcilerOpts            []Option
 	}{
+		"initialize unadmitted workload status on first reconcile cycle": {
+			featureGates: map[featuregate.Feature]bool{
+				features.WorkloadUnadmittedObservability: true,
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Request(corev1.ResourceCPU, "1").
+				Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").
+				Active(metav1.ConditionTrue).
+				ResourceGroup(
+					*utiltestingapi.MakeFlavorQuotas("flavor1").Resource("cpu", "5").Obj(),
+				).Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").Active(metav1.ConditionTrue).ClusterQueue("cq").Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Request(corev1.ResourceCPU, "1").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+					Message: "The workload is pending capacity evaluation",
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				}).
+				Obj(),
+		},
 		"reconcile DRA ResourceClaim should be rejected as inadmissible": {
 			featureGates: map[featuregate.Feature]bool{
 				features.KueueDRAIntegration:              true,
@@ -3332,6 +3363,12 @@ func TestReconcile(t *testing.T) {
 					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
 					Message: "LocalQueue non-existent-lq doesn't exist",
 				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				}).
 				Obj(),
 		},
 		"WorkloadUnadmittedObservability: stopped local queue": {
@@ -3351,6 +3388,12 @@ func TestReconcile(t *testing.T) {
 					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
 					Message: "LocalQueue lq is inactive",
 				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				}).
 				Obj(),
 		},
 		"WorkloadUnadmittedObservability: missing cluster queue": {
@@ -3368,6 +3411,12 @@ func TestReconcile(t *testing.T) {
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
 					Message: "ClusterQueue non-existent-cq doesn't exist",
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
 				}).
 				Obj(),
 		},
@@ -3387,6 +3436,12 @@ func TestReconcile(t *testing.T) {
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
 					Message: "ClusterQueue cq is inactive",
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
 				}).
 				Obj(),
 		},
@@ -3409,6 +3464,12 @@ func TestReconcile(t *testing.T) {
 					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
 					Message: "ClusterQueue is inactive",
 				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				}).
 				Obj(),
 		},
 		"WorkloadUnadmittedObservability: admission-gated workload": {
@@ -3429,6 +3490,12 @@ func TestReconcile(t *testing.T) {
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadQuotaReservedReasonAdmissionGated,
 					Message: "Admission is gated by: example.com/controller1",
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
 				}).
 				Obj(),
 			wantEvents: []utiltesting.EventRecord{

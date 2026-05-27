@@ -30,8 +30,6 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -402,26 +400,27 @@ func (s *Scheduler) processEntry(
 
 	if mode == flavorassigner.NoFit {
 		e.requeueReason = qcache.RequeueReasonNoFit
-		e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonMisconfigured
-		if isNoFitDueToCapacity(&e.assignment) {
-			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonPendingCapacity
-		}
 		log.V(3).Info("Skipping workload as FlavorAssigner assigned NoFit mode")
+		if e.assignment.IsNoFitDueToCapacity {
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonPendingCapacity)
+		} else {
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonMisconfigured)
+		}
 		return
 	}
 
 	if mode == flavorassigner.Preempt {
 		if len(e.preemptionTargets) == 0 {
 			e.requeueReason = qcache.RequeueReasonPreemptionNoCandidates
-			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonPendingCapacity
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonPendingCapacity)
 			s.reserveCapacityForUnreclaimablePreempt(log, e, cq)
 			return
 		}
 		if features.Enabled(features.MultiKueueOrchestratedPreemption) && workload.HasClosedPreemptionGate(e.Obj) {
 			gatedMsg := "Workload requires preemption, but it's gated"
 			log.V(3).Info(gatedMsg)
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonAdmissionGated)
 			e.markPreemptionGated(gatedMsg)
-			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonPendingCapacity
 			return
 		}
 	}
@@ -429,7 +428,7 @@ func (s *Scheduler) processEntry(
 	// We skip multiple-preemptions per cohort if any of the targets are overlapping
 	if preemptedWorkloads.HasAny(e.preemptionTargets) {
 		e.markSkipped("Workload has overlapping preemption targets with another workload")
-		e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonPendingCapacity
+		e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonPendingCapacity)
 		skippedPreemptions[cq.Name]++
 		return
 	}
@@ -437,7 +436,7 @@ func (s *Scheduler) processEntry(
 	usage := e.assignmentUsage()
 	if !fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets) {
 		e.markSkipped("Workload no longer fits after processing another workload")
-		e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonPendingCapacity
+		e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonPendingCapacity)
 		if mode == flavorassigner.Preempt {
 			skippedPreemptions[cq.Name]++
 		}
@@ -537,7 +536,7 @@ func (s *Scheduler) waitForPodsReadyIfBlocked(ctx context.Context, log logr.Logg
 	if err := workload.PatchAdmissionStatus(ctx, s.client, wl, s.clock, func(wl *kueue.Workload) (bool, error) {
 		reason := "Waiting"
 		if features.Enabled(features.WorkloadUnadmittedObservability) {
-			reason = kueue.WorkloadQuotaReservedReasonWaitingForPodsReady
+			reason = string(kueue.WorkloadQuotaReservedReasonWaitingForPodsReady)
 		}
 		return workload.UnsetQuotaReservationWithCondition(wl, reason, "waiting for all admitted workloads to be in PodsReady condition", s.clock.Now()), nil
 	}, workload.WithLooseOnApply(), workload.WithRetryOnConflictForPatch()); err != nil {
@@ -583,9 +582,9 @@ type entry struct {
 	status               entryStatus
 	inadmissibleMsg      string
 	requeueReason        qcache.RequeueReason
-	quotaReservedReason  string
 	preemptionTargets    []*preemption.Target
 	clusterQueueSnapshot *schdcache.ClusterQueueSnapshot
+	quotaReservedReason  string
 }
 
 func (e *entry) assignmentUsage() workload.Usage {
@@ -609,26 +608,26 @@ func (s *Scheduler) nominate(ctx context.Context, workloads []workload.Info, sna
 			continue
 		} else if workload.HasRetryChecks(w.Obj) || workload.HasRejectedChecks(w.Obj) {
 			e.inadmissibleMsg = "The workload has failed admission checks"
-			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonPendingEvaluation
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
 		} else if snap.InactiveClusterQueueSets.Has(w.ClusterQueue) {
 			e.inadmissibleMsg = fmt.Sprintf("ClusterQueue %s is inactive", w.ClusterQueue)
-			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonSuspended
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonSuspended)
 		} else if e.clusterQueueSnapshot == nil {
 			e.inadmissibleMsg = fmt.Sprintf("ClusterQueue %s not found", w.ClusterQueue)
-			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonMisconfigured
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonMisconfigured)
 		} else if err := s.client.Get(ctx, types.NamespacedName{Name: w.Obj.Namespace}, &ns); err != nil {
 			e.inadmissibleMsg = fmt.Sprintf("Could not obtain workload namespace: %v", err)
-			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonMisconfigured
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonMisconfigured)
 		} else if !e.clusterQueueSnapshot.NamespaceSelector.Matches(labels.Set(ns.Labels)) {
 			e.inadmissibleMsg = "Workload namespace doesn't match ClusterQueue selector"
 			e.requeueReason = qcache.RequeueReasonNamespaceMismatch
-			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonMisconfigured
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonMisconfigured)
 		} else if err := workload.ValidateResources(&w); err != nil {
 			e.inadmissibleMsg = fmt.Sprintf("%s: %v", errInvalidWLResources, err.ToAggregate())
-			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonMisconfigured
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonMisconfigured)
 		} else if err := workload.ValidateLimitRange(ctx, s.client, &w); err != nil {
 			e.inadmissibleMsg = fmt.Sprintf("%s: %v", errLimitRangeConstraintsUnsatisfiedResources, err.ToAggregate())
-			e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonMisconfigured
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonMisconfigured)
 		} else {
 			assignment, targets := s.getAssignments(log, &e.Info, snap)
 			e.recordAssignment(assignment, targets)
@@ -984,20 +983,15 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 	if e.status == notNominated || e.status == skipped || e.status == preemptionGated {
 		wl := e.Obj.DeepCopy()
 		reason := "Pending"
-		message := e.inadmissibleMsg
 		if features.Enabled(features.WorkloadUnadmittedObservability) {
-			targetReason := e.quotaReservedReason
-			if targetReason == "" {
-				targetReason = kueue.WorkloadQuotaReservedReasonPendingCapacity
-			}
-			if currentCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved); currentCond != nil && currentCond.Status == metav1.ConditionFalse {
-				reason, message = workload.ResolveQuotaReservedReasonAndMessage(currentCond.Reason, currentCond.Message, targetReason, e.inadmissibleMsg)
+			if e.quotaReservedReason != "" {
+				reason = e.quotaReservedReason
 			} else {
-				reason, message = targetReason, e.inadmissibleMsg
+				reason = string(kueue.WorkloadQuotaReservedReasonPendingCapacity)
 			}
 		}
 		if err := workload.PatchAdmissionStatus(ctx, s.client, wl, s.clock, func(wl *kueue.Workload) (bool, error) {
-			updated := workload.UnsetQuotaReservationWithCondition(wl, reason, message, s.clock.Now())
+			updated := workload.UnsetQuotaReservationWithCondition(wl, reason, e.inadmissibleMsg, s.clock.Now())
 			if workload.PropagateResourceRequests(wl, &e.Info) {
 				updated = true
 			}
@@ -1008,7 +1002,7 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 		}, workload.WithLooseOnApply(), workload.WithRetryOnConflictForPatch()); err != nil {
 			log.Error(err, "Could not update Workload status")
 		}
-		s.recorder.Eventf(e.Obj, nil, corev1.EventTypeWarning, reason, reason, api.TruncateEventMessage(message))
+		s.recorder.Eventf(e.Obj, nil, corev1.EventTypeWarning, reason, reason, api.TruncateEventMessage(e.inadmissibleMsg))
 	}
 }
 
@@ -1246,23 +1240,4 @@ func resolveFlavorIndex(wl *workload.Info, flavors []kueue.ResourceFlavorReferen
 		return -1, fmt.Errorf("flavor %s not found in ClusterQueue flavors", flavor)
 	}
 	return idx, nil
-}
-
-func isNoFitDueToCapacity(assignment *flavorassigner.Assignment) bool {
-	if len(assignment.PodSets) == 0 {
-		return false
-	}
-	for _, ps := range assignment.PodSets {
-		hasCapacityCandidate := false
-		for _, att := range ps.FlavorAssignmentAttempts {
-			if att.Code == flavorassigner.CodeInsufficientQuota {
-				hasCapacityCandidate = true
-				break
-			}
-		}
-		if !hasCapacityCandidate {
-			return false
-		}
-	}
-	return true
 }

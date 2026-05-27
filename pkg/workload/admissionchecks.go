@@ -27,6 +27,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/util/admissioncheck"
 	"sigs.k8s.io/kueue/pkg/util/wait"
 )
@@ -42,8 +43,12 @@ func SyncAdmittedCondition(w *kueue.Workload, now time.Time) bool {
 	isAdmitted := IsAdmitted(w)
 	hasAllTopologyAssignmentsReady := !HasTopologyAssignmentsPending(w)
 
-	if isAdmitted == (hasReservation && hasAllChecksReady && hasAllTopologyAssignmentsReady) {
-		return false
+	currentCond := apimeta.FindStatusCondition(w.Status.Conditions, kueue.WorkloadAdmitted)
+	hasTargetState := hasReservation && hasAllChecksReady && hasAllTopologyAssignmentsReady
+	if isAdmitted == hasTargetState {
+		if currentCond != nil || !features.Enabled(features.WorkloadUnadmittedObservability) {
+			return false
+		}
 	}
 	newCondition := metav1.Condition{
 		Type:               kueue.WorkloadAdmitted,

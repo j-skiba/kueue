@@ -443,6 +443,13 @@ func TestSchedule(t *testing.T) {
 						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor on-demand, 5 more needed, untolerated taint {key val NoSchedule <nil>} in flavor spot-tainted",
 						LastTransitionTime: metav1.NewTime(now),
 					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionFalse,
+						Reason:             "NoReservation",
+						Message:            "The workload has no reservation",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
 					ResourceRequests(kueue.PodSetRequest{
 						Name: "main",
 						Resources: corev1.ResourceList{
@@ -496,6 +503,13 @@ func TestSchedule(t *testing.T) {
 						Status:             metav1.ConditionFalse,
 						Reason:             kueue.WorkloadQuotaReservedReasonMisconfigured,
 						Message:            "couldn't assign flavors to pod set main: insufficient quota for cpu in flavor on-demand, previously considered podsets requests (0) + current podset request (10) > maximum capacity (5), untolerated taint {key val NoSchedule <nil>} in flavor spot-tainted",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionFalse,
+						Reason:             "NoReservation",
+						Message:            "The workload has no reservation",
 						LastTransitionTime: metav1.NewTime(now),
 					}).
 					ResourceRequests(kueue.PodSetRequest{

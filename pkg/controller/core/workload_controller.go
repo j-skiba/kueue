@@ -587,19 +587,27 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	cqName, cqOk := r.queues.ClusterQueueForWorkload(&wl)
+	if !cqOk && lqExists {
+		cqName = lq.Spec.ClusterQueue
+	}
 	var cq kueue.ClusterQueue
-	if cqOk {
-		// because we need to react to API cluster cq events, the list of checks from a cache can lead to race conditions
-		if err := r.client.Get(ctx, types.NamespacedName{Name: string(cqName)}, &cq); err != nil {
-			return ctrl.Result{}, client.IgnoreNotFound(err)
+	var cqExists bool
+	if cqName != "" {
+		err := r.client.Get(ctx, types.NamespacedName{Name: string(cqName)}, &cq)
+		if client.IgnoreNotFound(err) != nil {
+			return ctrl.Result{}, err
 		}
+		cqExists = err == nil
+	}
+
+	if cqExists {
 		// If stopped cluster queue is started we need to set the WorkloadRequeued condition to true.
 		if isDisabledRequeuedByClusterQueueStopped(&wl) && ptr.Deref(cq.Spec.StopPolicy, kueue.None) == kueue.None {
 			return ctrl.Result{}, client.IgnoreNotFound(workload.PatchAdmissionStatus(ctx, r.client, &wl, r.clock, func(wl *kueue.Workload) (bool, error) {
 				return workload.SetRequeuedCondition(wl, kueue.WorkloadClusterQueueRestarted, "The ClusterQueue was restarted after being stopped", true), nil
 			}))
 		}
-		if !features.Enabled(features.WorkloadUnadmittedObservability) {
+		if !features.Enabled(features.WorkloadUnadmittedObservability) && cqOk {
 			if updated, err := r.reconcileSyncAdmissionChecks(ctx, &wl, &cq); updated || err != nil {
 				return ctrl.Result{}, err
 			}
@@ -614,14 +622,14 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 		if features.Enabled(features.WorkloadUnadmittedObservability) {
 			var cqPtr *kueue.ClusterQueue
-			if cqOk {
+			if cqExists {
 				cqPtr = &cq
 			}
 			var lqPtr *kueue.LocalQueue
 			if lqExists {
 				lqPtr = &lq
 			}
-			updated, err = r.reconcileUnadmittedStatus(ctx, &wl, lqExists, lqPtr, cqOk, cqPtr)
+			updated, err = r.reconcileUnadmittedStatus(ctx, &wl, lqExists, lqPtr, cqExists, cqPtr)
 			if err != nil {
 				return ctrl.Result{}, client.IgnoreNotFound(err)
 			}
@@ -1327,6 +1335,9 @@ func (r *WorkloadReconciler) Delete(e event.TypedDeleteEvent[*kueue.Workload]) b
 	// Even if the state is unknown, the last cached state tells us whether the
 	// workload was in the queues and should be cleared from them.
 	r.queues.DeleteAndForgetWorkload(log, wlKey)
+	if features.Enabled(features.WorkloadUnadmittedObservability) {
+		r.queues.RemoveUnadmittedWorkload(ctx, wlKey)
+	}
 	return true
 }
 
