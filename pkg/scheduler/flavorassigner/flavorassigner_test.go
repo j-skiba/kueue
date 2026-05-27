@@ -110,7 +110,7 @@ func assertPodSetConsideredFlexible(t *testing.T, podSetName string, want, got [
 				continue
 			}
 
-			if diff := cmp.Diff(wa, ga); diff != "" {
+			if diff := cmp.Diff(wa, ga, cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "Code")); diff != "" {
 				t.Errorf("podset %q: flavor %q mismatch (fit case) (-want +got):\n%s", podSetName, flavor, diff)
 			}
 		}
@@ -124,7 +124,7 @@ func assertPodSetConsideredFlexible(t *testing.T, podSetName string, want, got [
 			t.Errorf("podset %q: expected flavor %q in FlavorAssignmentAttempts (no-fit case)", podSetName, flavor)
 			continue
 		}
-		if diff := cmp.Diff(wa, ga); diff != "" {
+		if diff := cmp.Diff(wa, ga, cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "Code")); diff != "" {
 			t.Errorf("podset %q: flavor %q mismatch (no-fit case) (-want +got):\n%s", podSetName, flavor, diff)
 		}
 	}
@@ -3709,6 +3709,7 @@ func TestDeletedFlavors(t *testing.T) {
 			if diff := cmp.Diff(tc.wantAssignment, assignment,
 				cmpopts.EquateEmpty(),
 				cmpopts.IgnoreUnexported(Assignment{}, FlavorAssignment{}), statusComparer, cmpopts.IgnoreFields(Assignment{}, "LastState"),
+				cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "Code"),
 			); diff != "" {
 				t.Errorf("Unexpected assignment (-want,+got):\n%s", diff)
 			}
@@ -4637,6 +4638,248 @@ func TestAssignFlavorsWithAllowedFlavors(t *testing.T) {
 				if gotFlavor != tc.wantFlavor {
 					t.Errorf("Assigned flavor = %v, want %v", gotFlavor, tc.wantFlavor)
 				}
+			}
+		})
+	}
+}
+
+func TestFailureCodes(t *testing.T) {
+	resourceFlavors := map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor{
+		"flavor-a": utiltestingapi.MakeResourceFlavor("flavor-a").NodeLabel("type", "a").Obj(),
+		"flavor-b": utiltestingapi.MakeResourceFlavor("flavor-b").
+			Taint(corev1.Taint{Key: "key", Value: "val", Effect: corev1.TaintEffectNoSchedule}).Obj(),
+	}
+
+	cq := *utiltestingapi.MakeClusterQueue("cq").
+		ResourceGroup(
+			*utiltestingapi.MakeFlavorQuotas("flavor-a").
+				Resource(corev1.ResourceCPU, "4", "4"). // nominal = 4, max = 4
+				Resource(corev1.ResourceMemory, "10Gi", "10Gi").
+				Obj(),
+			*utiltestingapi.MakeFlavorQuotas("flavor-b").
+				Resource(corev1.ResourceCPU, "2", "2").
+				Resource(corev1.ResourceMemory, "0", "0").
+				Obj(),
+		).Obj()
+
+	tasFlavors := map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor{
+		"flavor-a": utiltestingapi.MakeResourceFlavor("flavor-a").NodeLabel("type", "a").Obj(),
+		"flavor-b": utiltestingapi.MakeResourceFlavor("flavor-b").
+			Taint(corev1.Taint{Key: "key", Value: "val", Effect: corev1.TaintEffectNoSchedule}).Obj(),
+		"flavor-tas": utiltestingapi.MakeResourceFlavor("flavor-tas").TopologyName("topology-tas").Obj(),
+	}
+
+	tasCQ := utiltestingapi.MakeClusterQueue("cq").
+		ResourceGroup(
+			*utiltestingapi.MakeFlavorQuotas("flavor-a").
+				Resource(corev1.ResourceCPU, "4", "4").
+				Resource(corev1.ResourceMemory, "10Gi", "10Gi").
+				Obj(),
+			*utiltestingapi.MakeFlavorQuotas("flavor-b").
+				Resource(corev1.ResourceCPU, "2", "2").
+				Resource(corev1.ResourceMemory, "0", "0").
+				Obj(),
+			*utiltestingapi.MakeFlavorQuotas("flavor-tas").
+				Resource(corev1.ResourceCPU, "4", "4").
+				Resource(corev1.ResourceMemory, "10Gi", "10Gi").
+				Obj(),
+		).Obj()
+
+	tests := map[string]struct {
+		podSet          kueue.PodSet
+		cq              *kueue.ClusterQueue
+		resourceFlavors map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor
+		cqUsage         resources.FlavorResourceQuantities
+		replaceWl       *workload.Info
+		topologies      []*kueue.Topology
+		featureGates    map[featuregate.Feature]bool
+		wantAttempts    map[kueue.ResourceFlavorReference]FailureCode
+	}{
+		"insufficient quota": {
+			podSet: *utiltestingapi.MakePodSet("main", 1).Request(corev1.ResourceCPU, "3").Obj(),
+			cqUsage: resources.FlavorResourceQuantities{
+				{Flavor: "flavor-a", Resource: corev1.ResourceCPU}: 2_000, // remaining is 2, request is 3
+			},
+			wantAttempts: map[kueue.ResourceFlavorReference]FailureCode{
+				"flavor-a": CodeInsufficientQuota,
+				"flavor-b": CodeTaintsMismatch, // flavor-b lacks toleration
+			},
+		},
+		"exceeds max capacity limits": {
+			podSet: *utiltestingapi.MakePodSet("main", 1).Request(corev1.ResourceCPU, "5").Obj(), // limits are 4 for a, 2 for b
+			wantAttempts: map[kueue.ResourceFlavorReference]FailureCode{
+				"flavor-a": CodeExceedsLimits,
+				"flavor-b": CodeTaintsMismatch,
+			},
+		},
+		"taints mismatch": {
+			podSet: *utiltestingapi.MakePodSet("main", 1).
+				Request(corev1.ResourceCPU, "1").
+				NodeSelector(map[string]string{"type": "wrong"}). // does not match flavor-a (NodeAffinityMismatch)
+				Obj(),
+			wantAttempts: map[kueue.ResourceFlavorReference]FailureCode{
+				"flavor-a": CodeNodeAffinityMismatch, // flavor-a requires node selector/affinity to match "type=a"
+				"flavor-b": CodeTaintsMismatch,       // flavor-b needs toleration
+			},
+		},
+		"node affinity mismatch": {
+			podSet: *utiltestingapi.MakePodSet("main", 1).
+				Request(corev1.ResourceCPU, "1").
+				NodeSelector(map[string]string{"type": "non-existent"}).
+				Toleration(corev1.Toleration{Key: "key", Operator: corev1.TolerationOpEqual, Value: "val", Effect: corev1.TaintEffectNoSchedule}). // tolerates flavor-b
+				Obj(),
+			wantAttempts: map[kueue.ResourceFlavorReference]FailureCode{
+				"flavor-a": CodeNodeAffinityMismatch,
+				"flavor-b": CodeNodeAffinityMismatch, // node selector "type=non-existent" doesn't match flavor-b which has no labels
+			},
+		},
+		"flavor mismatch for workload slices": {
+			podSet: *utiltestingapi.MakePodSet("main", 1).
+				Request(corev1.ResourceCPU, "2").
+				NodeSelector(map[string]string{"type": "a"}). // matches flavor-a
+				Obj(),
+			replaceWl: workload.NewInfo(
+				utiltestingapi.MakeWorkload("wl-old", "ns").
+					PodSets(*utiltestingapi.MakePodSet("main", 1).Request(corev1.ResourceCPU, "1").Obj()).
+					Admission(utiltestingapi.MakeAdmission("cq", "main").
+						PodSets(kueue.PodSetAssignment{
+							Name: "main",
+							Flavors: map[corev1.ResourceName]kueue.ResourceFlavorReference{
+								corev1.ResourceCPU: "flavor-b",
+							},
+						}).Obj()).
+					Obj(),
+			),
+			featureGates: map[featuregate.Feature]bool{
+				features.ElasticJobsViaWorkloadSlices: true,
+			},
+			wantAttempts: map[kueue.ResourceFlavorReference]FailureCode{
+				"flavor-a": CodeFlavorMismatch, // replaceWl is assigned flavor-b, so flavor-a is mismatched
+				"flavor-b": CodeTaintsMismatch,
+			},
+		},
+		"prioritization of structural mismatch over capacity mismatch": {
+			// CPU has capacity limit (request is 3, memory is 20Gi which exceeds memory limit 10Gi) -> CodeExceedsLimits
+			// But NodeSelector has mismatch for flavor-a -> CodeNodeAffinityMismatch (which has higher priority!)
+			podSet: *utiltestingapi.MakePodSet("main", 1).
+				Request(corev1.ResourceCPU, "3").
+				Request(corev1.ResourceMemory, "20Gi").           // exceeds memory limit (10Gi) for flavor-a
+				NodeSelector(map[string]string{"type": "wrong"}). // node affinity mismatch for flavor-a -> CodeNodeAffinityMismatch (higher priority!)
+				Obj(),
+			wantAttempts: map[kueue.ResourceFlavorReference]FailureCode{
+				"flavor-a": CodeNodeAffinityMismatch, // NodeAffinityMismatch (6) overrides ExceedsLimits (4) or InsufficientQuota (1)
+				"flavor-b": CodeTaintsMismatch,
+			},
+		},
+		"TAS not supported": {
+			podSet: *utiltestingapi.MakePodSet("main", 1).
+				Request(corev1.ResourceCPU, "1").
+				RequiredTopologyRequest("rack").
+				Obj(),
+			featureGates: map[featuregate.Feature]bool{
+				features.TopologyAwareScheduling: true,
+			},
+			wantAttempts: map[kueue.ResourceFlavorReference]FailureCode{
+				"flavor-a": CodeTopologyMismatch, // flavor-a has no topology name
+				"flavor-b": CodeTopologyMismatch, // flavor-b has no topology name (fails early on topology support check)
+			},
+		},
+		"TAS level not supported": {
+			podSet: *utiltestingapi.MakePodSet("main", 1).
+				Request(corev1.ResourceCPU, "1").
+				RequiredTopologyRequest("block"). // requested "block" but flavor-tas supports only "rack"
+				Obj(),
+			cq:              tasCQ,
+			resourceFlavors: tasFlavors,
+			topologies: []*kueue.Topology{
+				utiltestingapi.MakeTopology("topology-tas").Levels("rack").Obj(),
+			},
+			featureGates: map[featuregate.Feature]bool{
+				features.TopologyAwareScheduling: true,
+			},
+			wantAttempts: map[kueue.ResourceFlavorReference]FailureCode{
+				"flavor-a":   CodeTopologyMismatch,
+				"flavor-b":   CodeTopologyMismatch,
+				"flavor-tas": CodeTopologyMismatch, // flavor-tas supports only "rack", not "block"
+			},
+		},
+		"TAS only flavor mismatch": {
+			podSet: *utiltestingapi.MakePodSet("main", 1).
+				Request(corev1.ResourceCPU, "1").
+				NodeSelector(map[string]string{"type": "wrong"}).
+				Obj(), // does NOT request TAS
+			cq:              tasCQ,
+			resourceFlavors: tasFlavors,
+			topologies: []*kueue.Topology{
+				utiltestingapi.MakeTopology("topology-tas").Levels("rack").Obj(),
+			},
+			featureGates: map[featuregate.Feature]bool{
+				features.TopologyAwareScheduling: true,
+			},
+			wantAttempts: map[kueue.ResourceFlavorReference]FailureCode{
+				"flavor-a":   CodeNodeAffinityMismatch,
+				"flavor-b":   CodeTaintsMismatch,
+				"flavor-tas": CodeTopologyMismatch, // flavor-tas supports only TAS but workload doesn't request it
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			for gate, val := range tc.featureGates {
+				features.SetFeatureGateDuringTest(t, gate, val)
+			}
+
+			testCQ := cq
+			if tc.cq != nil {
+				testCQ = *tc.cq
+			}
+			testFlavors := resourceFlavors
+			if tc.resourceFlavors != nil {
+				testFlavors = tc.resourceFlavors
+			}
+
+			wl := utiltestingapi.MakeWorkload("wl", "ns").
+				PodSets(tc.podSet).
+				Obj()
+			wlInfo := workload.NewInfo(wl)
+
+			ctx, log := utiltesting.ContextWithLog(t)
+			cache := schdcache.New(utiltesting.NewFakeClient())
+			if err := cache.AddClusterQueue(ctx, &testCQ); err != nil {
+				t.Fatalf("Failed to add CQ to cache: %v", err)
+			}
+			for _, rf := range testFlavors {
+				cache.AddOrUpdateResourceFlavor(log, rf)
+			}
+			for _, topology := range tc.topologies {
+				cache.AddOrUpdateTopology(log, topology)
+			}
+			snapshot, err := cache.Snapshot(ctx)
+			if err != nil {
+				t.Fatalf("unexpected error while building snapshot: %v", err)
+			}
+			cqSnapshot := snapshot.ClusterQueue(kueue.ClusterQueueReference(testCQ.Name))
+			// Set the initial clusterQueue usage if specified:
+			for fr, qty := range tc.cqUsage {
+				cqSnapshot.ResourceNode.Usage[fr] = qty
+			}
+
+			assigner := New(wlInfo, cqSnapshot, testFlavors, false, &testOracle{}, tc.replaceWl, configapi.QuotaCheckBlockUndeclared)
+			gotAssignment := assigner.Assign(log, nil)
+
+			if len(gotAssignment.PodSets) == 0 {
+				t.Fatalf("Expected at least one PodSet in assignment")
+			}
+			psAssignment := gotAssignment.PodSets[0]
+
+			gotAttempts := make(map[kueue.ResourceFlavorReference]FailureCode)
+			for _, att := range psAssignment.FlavorAssignmentAttempts {
+				gotAttempts[att.Flavor] = att.Code
+			}
+
+			if diff := cmp.Diff(tc.wantAttempts, gotAttempts); diff != "" {
+				t.Errorf("Unexpected failure codes (-want +got):\n%s\nAttempts: %#v", diff, psAssignment.FlavorAssignmentAttempts)
 			}
 		})
 	}

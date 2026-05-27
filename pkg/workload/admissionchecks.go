@@ -56,7 +56,7 @@ func SyncAdmittedCondition(w *kueue.Workload, now time.Time) bool {
 	switch {
 	case !hasReservation && !hasAllChecksReady:
 		newCondition.Status = metav1.ConditionFalse
-		newCondition.Reason = "NoReservationUnsatisfiedChecks"
+		newCondition.Reason = kueue.WorkloadAdmittedReasonNoReservationUnsatisfiedChecks
 		newCondition.Message = "The workload has no reservation and not all checks ready"
 	case !hasReservation:
 		newCondition.Status = metav1.ConditionFalse
@@ -64,11 +64,11 @@ func SyncAdmittedCondition(w *kueue.Workload, now time.Time) bool {
 		newCondition.Message = "The workload has no reservation"
 	case !hasAllChecksReady:
 		newCondition.Status = metav1.ConditionFalse
-		newCondition.Reason = "UnsatisfiedChecks"
+		newCondition.Reason = kueue.WorkloadAdmittedReasonUnsatisfiedChecks
 		newCondition.Message = "The workload has not all checks ready"
 	case !hasAllTopologyAssignmentsReady:
 		newCondition.Status = metav1.ConditionFalse
-		newCondition.Reason = "PendingDelayedTopologyRequests"
+		newCondition.Reason = kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests
 		newCondition.Message = "There are pending delayed topology requests"
 	}
 

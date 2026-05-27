@@ -1934,3 +1934,33 @@ func TASAssignedNodeNames(wl *kueue.Workload) []string {
 	}
 	return nodesSet.UnsortedList()
 }
+
+// GetQuotaReservedReasonPriority returns the tier priority weight of the given reason.
+// A higher weight indicates a more severe unadmitted reason.
+func GetQuotaReservedReasonPriority(reason string) int {
+	switch reason {
+	case kueue.WorkloadQuotaReservedReasonDeactivated:
+		return 5
+	case kueue.WorkloadQuotaReservedReasonMisconfigured:
+		return 4
+	case kueue.WorkloadQuotaReservedReasonSuspended,
+		kueue.WorkloadQuotaReservedReasonWaitingForPodsReady,
+		kueue.WorkloadQuotaReservedReasonAdmissionGated:
+		return 3
+	case kueue.WorkloadQuotaReservedReasonPendingCapacity:
+		return 2
+	case kueue.WorkloadQuotaReservedReasonPendingEvaluation:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// ResolveQuotaReservedReasonAndMessage returns the reason and message with the highest tier priority.
+// If both reasons have equal priority, it returns the new reason and message.
+func ResolveQuotaReservedReasonAndMessage(currentReason, currentMessage, newReason, newMessage string) (string, string) {
+	if GetQuotaReservedReasonPriority(currentReason) > GetQuotaReservedReasonPriority(newReason) {
+		return currentReason, currentMessage
+	}
+	return newReason, newMessage
+}

@@ -935,8 +935,24 @@ const (
 	// - "PreemptionGated": the preemptor workload could not preempt the preemption targets to acquire quota due to a preemption gate.
 	WorkloadBlockedOnPreemptionGates = "BlockedOnPreemptionGates"
 
+	// Reasons for the WorkloadAdmitted condition.
+	WorkloadAdmittedReasonUnsatisfiedChecks              = "UnsatisfiedChecks"
+	WorkloadAdmittedReasonNoReservationUnsatisfiedChecks = "NoReservationUnsatisfiedChecks"
+	WorkloadAdmittedReasonPendingDelayedTopologyRequests = "PendingDelayedTopologyRequests"
+
 	// WorkloadQuotaReserved means that the Workload has reserved quota a ClusterQueue.
 	WorkloadQuotaReserved = "QuotaReserved"
+
+	// Reasons for the WorkloadQuotaReserved condition.
+	WorkloadQuotaReservedReasonDeactivated         = "Deactivated"
+	WorkloadQuotaReservedReasonMisconfigured       = "Misconfigured"
+	WorkloadQuotaReservedReasonSuspended           = "Suspended"
+	WorkloadQuotaReservedReasonAdmissionGated      = "AdmissionGated"
+	WorkloadQuotaReservedReasonWaitingForPodsReady = "WaitingForPodsReady"
+	WorkloadQuotaReservedReasonPendingCapacity     = "PendingCapacity"
+	WorkloadQuotaReservedReasonPendingEvaluation   = "PendingEvaluation"
+	WorkloadQuotaReservedReasonChecksNotReady      = "ChecksNotReady"
+	WorkloadQuotaReservedReasonPendingTopology     = "PendingTopology"
 
 	// WorkloadFinished means that the workload associated to the
 	// ResourceClaim finished running (failed or succeeded).

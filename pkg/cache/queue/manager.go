@@ -24,6 +24,8 @@ import (
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -137,6 +139,28 @@ type TopologyUpdateWatcher interface {
 	NotifyTopologyUpdate(oldTopology, newTopology *kueue.Topology)
 }
 
+type unadmittedState struct {
+	LocalQueue      queue.LocalQueueReference
+	ClusterQueue    kueue.ClusterQueueReference
+	Reason          string
+	UnderlyingCause string
+	CQCustomLabels  []string
+	LQCustomLabels  []string
+}
+
+type unadmittedCQKey struct {
+	ClusterQueue    kueue.ClusterQueueReference
+	Reason          string
+	UnderlyingCause string
+}
+
+type unadmittedLQKey struct {
+	LocalQueue      queue.LocalQueueReference
+	ClusterQueue    kueue.ClusterQueueReference
+	Reason          string
+	UnderlyingCause string
+}
+
 type Manager struct {
 	sync.RWMutex
 	cond sync.Cond
@@ -178,6 +202,10 @@ type Manager struct {
 	// Once the Evicted condition is observed by scheduler the expectation
 	// can be removed - the expectation is satisfied.
 	preemptionExpectations *expectations.Store
+
+	unadmittedWorkloads map[workload.Reference]unadmittedState
+	unadmittedCQCounts  map[unadmittedCQKey]int
+	unadmittedLQCounts  map[unadmittedLQKey]int
 }
 
 // NewManager is a factory for cache.queue.Manager. For tests,
@@ -191,6 +219,9 @@ func NewManager(client client.Client, checker StatusChecker, requeuer inadmissib
 		localQueues:            make(map[queue.LocalQueueReference]*LocalQueue),
 		workloadAssignedQueues: make(map[workload.Reference]queue.LocalQueueReference),
 		finishedWorkloads:      make(map[workload.Reference]queue.LocalQueueReference),
+		unadmittedWorkloads:    make(map[workload.Reference]unadmittedState),
+		unadmittedCQCounts:     make(map[unadmittedCQKey]int),
+		unadmittedLQCounts:     make(map[unadmittedLQKey]int),
 		workloadOrdering: workload.Ordering{
 			PodsReadyRequeuingTimestamp: config.EvictionTimestamp,
 		},
@@ -724,6 +755,7 @@ func (m *Manager) deleteAndForgetWorkloadWithoutLock(log logr.Logger, wlKey work
 	m.deleteWorkloadWithoutLock(log, wlKey)
 	delete(m.workloadAssignedQueues, wlKey)
 	m.deleteFinishedWorkloadWithoutLock(wlKey)
+	m.removeUnadmittedWorkloadWithoutLock(log, wlKey)
 }
 
 func (m *Manager) addWorkload(wlInfo *workload.Info, q *LocalQueue) {
@@ -977,4 +1009,161 @@ func (m *Manager) NotifyWorkloadUpdateWatchers(oldWorkload, newWorkload *kueue.W
 
 func (m *Manager) AddWorkloadUpdateWatcher(watcher WorkloadUpdateWatcher) {
 	m.workloadUpdateWatchers = append(m.workloadUpdateWatchers, watcher)
+}
+
+func (m *Manager) UpdateUnadmittedWorkload(ctx context.Context, wl *kueue.Workload) {
+	log := ctrl.LoggerFrom(ctx)
+	m.Lock()
+	defer m.Unlock()
+	m.updateUnadmittedWorkloadWithoutLock(log, wl)
+}
+
+func (m *Manager) updateUnadmittedWorkloadWithoutLock(log logr.Logger, wl *kueue.Workload) {
+	wlKey := workload.Key(wl)
+
+	if workload.IsAdmitted(wl) || workload.IsFinished(wl) {
+		m.removeUnadmittedWorkloadWithoutLock(log, wlKey)
+		return
+	}
+
+	admittedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadAdmitted)
+	if admittedCond == nil || admittedCond.Status != metav1.ConditionFalse {
+		m.removeUnadmittedWorkloadWithoutLock(log, wlKey)
+		return
+	}
+
+	qKey := queue.KeyFromWorkload(wl)
+	var cqName kueue.ClusterQueueReference
+
+	lq, lqExists := m.localQueues[qKey]
+	if lqExists {
+		cqName = lq.ClusterQueue
+	}
+
+	lqCustomLabels := m.customLabels.LQGet(qKey)
+	cqCustomLabels := m.customLabels.CQGet(cqName)
+
+	reason := admittedCond.Reason
+	var underlyingCause string
+	quotaReservedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
+	switch {
+	case reason == kueue.WorkloadAdmittedReasonUnsatisfiedChecks:
+		underlyingCause = kueue.WorkloadQuotaReservedReasonChecksNotReady
+	case reason == kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests:
+		underlyingCause = kueue.WorkloadQuotaReservedReasonPendingTopology
+	case quotaReservedCond != nil && quotaReservedCond.Status == metav1.ConditionFalse:
+		underlyingCause = quotaReservedCond.Reason
+	default:
+		underlyingCause = kueue.WorkloadQuotaReservedReasonPendingEvaluation
+	}
+
+	newState := unadmittedState{
+		LocalQueue:      qKey,
+		ClusterQueue:    cqName,
+		Reason:          reason,
+		UnderlyingCause: underlyingCause,
+		CQCustomLabels:  cqCustomLabels,
+		LQCustomLabels:  lqCustomLabels,
+	}
+
+	oldState, existed := m.unadmittedWorkloads[wlKey]
+	if existed && oldState.ClusterQueue == newState.ClusterQueue &&
+		oldState.Reason == newState.Reason &&
+		oldState.UnderlyingCause == newState.UnderlyingCause {
+		return
+	}
+
+	if existed {
+		m.decrementUnadmittedState(log, oldState)
+	}
+
+	m.unadmittedWorkloads[wlKey] = newState
+	m.incrementUnadmittedState(log, newState)
+}
+
+func (m *Manager) RemoveUnadmittedWorkload(ctx context.Context, wlKey workload.Reference) {
+	log := ctrl.LoggerFrom(ctx)
+	m.Lock()
+	defer m.Unlock()
+	m.removeUnadmittedWorkloadWithoutLock(log, wlKey)
+}
+
+func (m *Manager) removeUnadmittedWorkloadWithoutLock(log logr.Logger, wlKey workload.Reference) {
+	oldState, existed := m.unadmittedWorkloads[wlKey]
+	if !existed {
+		return
+	}
+	delete(m.unadmittedWorkloads, wlKey)
+	m.decrementUnadmittedState(log, oldState)
+}
+
+func (m *Manager) incrementUnadmittedState(log logr.Logger, state unadmittedState) {
+	cqKey := unadmittedCQKey{
+		ClusterQueue:    state.ClusterQueue,
+		Reason:          state.Reason,
+		UnderlyingCause: state.UnderlyingCause,
+	}
+	m.unadmittedCQCounts[cqKey]++
+	count := m.unadmittedCQCounts[cqKey]
+	metrics.UpdateUnadmittedWorkload(state.ClusterQueue, state.Reason, state.UnderlyingCause, float64(count), state.CQCustomLabels, m.roleTracker)
+
+	lqKey := unadmittedLQKey{
+		LocalQueue:      state.LocalQueue,
+		ClusterQueue:    state.ClusterQueue,
+		Reason:          state.Reason,
+		UnderlyingCause: state.UnderlyingCause,
+	}
+	m.unadmittedLQCounts[lqKey]++
+	lqCount := m.unadmittedLQCounts[lqKey]
+
+	namespace, lqName, err := queue.ParseLocalQueueReference(state.LocalQueue)
+	if err != nil {
+		log.Error(err, "Failed to parse LocalQueue reference for unadmitted metrics", "localQueue", state.LocalQueue)
+	} else {
+		lqRef := metrics.LocalQueueReference{Name: lqName, Namespace: namespace}
+		metrics.UpdateLocalQueueUnadmittedWorkload(lqRef, state.ClusterQueue, state.Reason, state.UnderlyingCause, float64(lqCount), state.LQCustomLabels, m.roleTracker)
+	}
+}
+
+func (m *Manager) decrementUnadmittedState(log logr.Logger, state unadmittedState) {
+	cqKey := unadmittedCQKey{
+		ClusterQueue:    state.ClusterQueue,
+		Reason:          state.Reason,
+		UnderlyingCause: state.UnderlyingCause,
+	}
+	if m.unadmittedCQCounts[cqKey] > 0 {
+		m.unadmittedCQCounts[cqKey]--
+		count := m.unadmittedCQCounts[cqKey]
+		if count == 0 {
+			delete(m.unadmittedCQCounts, cqKey)
+			metrics.DeleteUnadmittedWorkload(state.ClusterQueue, state.Reason, state.UnderlyingCause, state.CQCustomLabels, m.roleTracker)
+		} else {
+			metrics.UpdateUnadmittedWorkload(state.ClusterQueue, state.Reason, state.UnderlyingCause, float64(count), state.CQCustomLabels, m.roleTracker)
+		}
+	}
+
+	lqKey := unadmittedLQKey{
+		LocalQueue:      state.LocalQueue,
+		ClusterQueue:    state.ClusterQueue,
+		Reason:          state.Reason,
+		UnderlyingCause: state.UnderlyingCause,
+	}
+	if m.unadmittedLQCounts[lqKey] > 0 {
+		m.unadmittedLQCounts[lqKey]--
+		lqCount := m.unadmittedLQCounts[lqKey]
+		if lqCount == 0 {
+			delete(m.unadmittedLQCounts, lqKey)
+		}
+		namespace, lqName, err := queue.ParseLocalQueueReference(state.LocalQueue)
+		if err != nil {
+			log.Error(err, "Failed to parse LocalQueue reference for unadmitted metrics", "localQueue", state.LocalQueue)
+		} else {
+			lqRef := metrics.LocalQueueReference{Name: lqName, Namespace: namespace}
+			if lqCount == 0 {
+				metrics.DeleteLocalQueueUnadmittedWorkload(lqRef, state.ClusterQueue, state.Reason, state.UnderlyingCause, state.LQCustomLabels, m.roleTracker)
+			} else {
+				metrics.UpdateLocalQueueUnadmittedWorkload(lqRef, state.ClusterQueue, state.Reason, state.UnderlyingCause, float64(lqCount), state.LQCustomLabels, m.roleTracker)
+			}
+		}
+	}
 }

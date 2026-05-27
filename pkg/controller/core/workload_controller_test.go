@@ -3299,6 +3299,147 @@ func TestReconcile(t *testing.T) {
 				}).
 				Obj(),
 		},
+		"WorkloadUnadmittedObservability: deactivated workload": {
+			featureGates: map[featuregate.Feature]bool{
+				features.WorkloadUnadmittedObservability: true,
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Active(false).
+				Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Active(false).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadEvicted,
+					Status:  metav1.ConditionTrue,
+					Reason:  "Deactivated",
+					Message: "The workload is deactivated",
+				}).
+				SchedulingStatsEviction(kueue.WorkloadSchedulingStatsEviction{Reason: "Deactivated", Count: 1}).
+				Obj(),
+		},
+		"WorkloadUnadmittedObservability: missing local queue": {
+			featureGates: map[featuregate.Feature]bool{
+				features.WorkloadUnadmittedObservability: true,
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("non-existent-lq").
+				Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("non-existent-lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "LocalQueue non-existent-lq doesn't exist",
+				}).
+				Obj(),
+		},
+		"WorkloadUnadmittedObservability: stopped local queue": {
+			featureGates: map[featuregate.Feature]bool{
+				features.WorkloadUnadmittedObservability: true,
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").StopPolicy(kueue.Hold).Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
+					Message: "LocalQueue lq is inactive",
+				}).
+				Obj(),
+		},
+		"WorkloadUnadmittedObservability: missing cluster queue": {
+			featureGates: map[featuregate.Feature]bool{
+				features.WorkloadUnadmittedObservability: true,
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("non-existent-cq").Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "ClusterQueue non-existent-cq doesn't exist",
+				}).
+				Obj(),
+		},
+		"WorkloadUnadmittedObservability: stopped cluster queue": {
+			featureGates: map[featuregate.Feature]bool{
+				features.WorkloadUnadmittedObservability: true,
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").StopPolicy(kueue.Hold).Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
+					Message: "ClusterQueue cq is inactive",
+				}).
+				Obj(),
+		},
+		"WorkloadUnadmittedObservability: inactive cluster queue": {
+			featureGates: map[featuregate.Feature]bool{
+				features.WorkloadUnadmittedObservability: true,
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").
+				Condition(kueue.ClusterQueueActive, metav1.ConditionFalse, "Inactive", "ClusterQueue is inactive").
+				Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "ClusterQueue is inactive",
+				}).
+				Obj(),
+		},
+		"WorkloadUnadmittedObservability: admission-gated workload": {
+			featureGates: map[featuregate.Feature]bool{
+				features.WorkloadUnadmittedObservability: true,
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Annotation(constants.AdmissionGatedByAnnotation, "example.com/controller1").
+				Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Annotation(constants.AdmissionGatedByAnnotation, "example.com/controller1").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonAdmissionGated,
+					Message: "Admission is gated by: example.com/controller1",
+				}).
+				Obj(),
+			wantEvents: []utiltesting.EventRecord{
+				{
+					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
+					EventType: corev1.EventTypeNormal,
+					Reason:    "AdmissionGated",
+					Message:   "Workload admission is gated by: example.com/controller1",
+				},
+			},
+		},
 	}
 	for name, tc := range cases {
 		for _, enabled := range []bool{false, true} {

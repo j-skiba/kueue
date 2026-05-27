@@ -75,6 +75,12 @@ func TestSchedule(t *testing.T) {
 		utiltestingapi.MakeResourceFlavor("on-demand").Obj(),
 		utiltestingapi.MakeResourceFlavor("spot").Obj(),
 		utiltestingapi.MakeResourceFlavor("model-a").Obj(),
+		utiltestingapi.MakeResourceFlavor("spot-tainted").
+			Taint(corev1.Taint{
+				Key:    "key",
+				Value:  "val",
+				Effect: corev1.TaintEffectNoSchedule,
+			}).Obj(),
 	}
 	clusterQueues := []kueue.ClusterQueue{
 		*utiltestingapi.MakeClusterQueue("sales").
@@ -384,6 +390,125 @@ func TestSchedule(t *testing.T) {
 			wantLeft:     nil,
 			wantEvents:   nil,
 			eventCmpOpts: ignoreEventMessageCmpOpts,
+		},
+		"OR logic (one flavor is misconfigured, one has insufficient quota) -> PendingCapacity": {
+			featureGates: map[featuregate.Feature]bool{features.WorkloadUnadmittedObservability: true},
+			additionalClusterQueues: []kueue.ClusterQueue{
+				*utiltestingapi.MakeClusterQueue("custom-cq").
+					QueueingStrategy(kueue.StrictFIFO).
+					ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas("spot-tainted").
+							Resource(corev1.ResourceCPU, "20", "20").Obj(),
+						*utiltestingapi.MakeFlavorQuotas("on-demand").
+							Resource(corev1.ResourceCPU, "15", "15").Obj(),
+					).Obj(),
+			},
+			additionalLocalQueues: []kueue.LocalQueue{
+				*utiltestingapi.MakeLocalQueue("custom-q", "sales").ClusterQueue("custom-cq").Obj(),
+			},
+			workloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("existing-on-demand-job", "sales").
+					Queue("custom-q").
+					Request(corev1.ResourceCPU, "10").
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("custom-cq").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "on-demand", "10").
+							Obj()).
+						Obj(), now).
+					AdmittedAt(true, now).
+					Obj(),
+				*utiltestingapi.MakeWorkload("new-job", "sales").
+					Queue("custom-q").
+					Request(corev1.ResourceCPU, "10").
+					Obj(),
+			},
+			wantWorkloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("existing-on-demand-job", "sales").
+					Queue("custom-q").
+					Request(corev1.ResourceCPU, "10").
+					ReserveQuotaAt(utiltestingapi.MakeAdmission("custom-cq").
+						PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).
+							Assignment(corev1.ResourceCPU, "on-demand", "10").
+							Obj()).
+						Obj(), now).
+					AdmittedAt(true, now).
+					Obj(),
+				*utiltestingapi.MakeWorkload("new-job", "sales").
+					Queue("custom-q").
+					Request(corev1.ResourceCPU, "10").
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadQuotaReservedReasonPendingCapacity,
+						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor on-demand, 5 more needed, untolerated taint {key val NoSchedule <nil>} in flavor spot-tainted",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name: "main",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("10"),
+						},
+					}).
+					Obj(),
+			},
+			wantAssignments: map[workload.Reference]kueue.Admission{
+				"sales/existing-on-demand-job": {
+					ClusterQueue: "custom-cq",
+					PodSetAssignments: []kueue.PodSetAssignment{
+						utiltestingapi.MakePodSetAssignment("main").
+							Assignment(corev1.ResourceCPU, "on-demand", "10000m").
+							Count(1).
+							Obj(),
+					},
+				},
+			},
+			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"custom-cq": {"sales/new-job"},
+			},
+		},
+		"OR logic (both flavors are misconfigured) -> Misconfigured": {
+			featureGates: map[featuregate.Feature]bool{features.WorkloadUnadmittedObservability: true},
+			additionalClusterQueues: []kueue.ClusterQueue{
+				*utiltestingapi.MakeClusterQueue("custom-cq2").
+					QueueingStrategy(kueue.StrictFIFO).
+					ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas("spot-tainted").
+							Resource(corev1.ResourceCPU, "20", "20").Obj(),
+						*utiltestingapi.MakeFlavorQuotas("on-demand").
+							Resource(corev1.ResourceCPU, "5", "5").Obj(),
+					).Obj(),
+			},
+			additionalLocalQueues: []kueue.LocalQueue{
+				*utiltestingapi.MakeLocalQueue("custom-q2", "sales").ClusterQueue("custom-cq2").Obj(),
+			},
+			workloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("new-job2", "sales").
+					Queue("custom-q2").
+					Request(corev1.ResourceCPU, "10").
+					Obj(),
+			},
+			wantWorkloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("new-job2", "sales").
+					Queue("custom-q2").
+					Request(corev1.ResourceCPU, "10").
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadQuotaReservedReasonMisconfigured,
+						Message:            "couldn't assign flavors to pod set main: insufficient quota for cpu in flavor on-demand, previously considered podsets requests (0) + current podset request (10) > maximum capacity (5), untolerated taint {key val NoSchedule <nil>} in flavor spot-tainted",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name: "main",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("10"),
+						},
+					}).
+					Obj(),
+			},
+			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"custom-cq2": {"sales/new-job2"},
+			},
 		},
 		"workload fits in single clusterQueue, with check state pending": {
 			featureGates: map[featuregate.Feature]bool{features.PartialAdmission: true},

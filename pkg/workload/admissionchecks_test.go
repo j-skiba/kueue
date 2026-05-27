@@ -184,7 +184,7 @@ func TestSyncAdmittedCondition(t *testing.T) {
 				{
 					Type:               kueue.WorkloadAdmitted,
 					Status:             metav1.ConditionFalse,
-					Reason:             "UnsatisfiedChecks",
+					Reason:             kueue.WorkloadAdmittedReasonUnsatisfiedChecks,
 					ObservedGeneration: 1,
 				},
 			},
@@ -213,7 +213,7 @@ func TestSyncAdmittedCondition(t *testing.T) {
 				{
 					Type:               kueue.WorkloadAdmitted,
 					Status:             metav1.ConditionFalse,
-					Reason:             "NoReservationUnsatisfiedChecks",
+					Reason:             kueue.WorkloadAdmittedReasonNoReservationUnsatisfiedChecks,
 					ObservedGeneration: 1,
 				},
 			},
@@ -289,7 +289,7 @@ func TestSyncAdmittedCondition(t *testing.T) {
 				{
 					Type:               kueue.WorkloadAdmitted,
 					Status:             metav1.ConditionFalse,
-					Reason:             "PendingDelayedTopologyRequests",
+					Reason:             kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests,
 					ObservedGeneration: 1,
 				},
 				{
