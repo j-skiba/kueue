@@ -2163,7 +2163,7 @@ func TestQueueSecondPassIfNeeded(t *testing.T) {
 	}
 }
 
-func TestUnadmittedWorkloadsMetrics_Lifecycle(t *testing.T) {
+func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 	features.SetFeatureGateDuringTest(t, features.WorkloadUnadmittedObservability, true)
 	defer metrics.InitMetricVectors(nil)
 
@@ -2173,15 +2173,35 @@ func TestUnadmittedWorkloadsMetrics_Lifecycle(t *testing.T) {
 	cq := utiltestingapi.MakeClusterQueue("cq1").Label("team", "alpha").Obj()
 	lq := utiltestingapi.MakeLocalQueue("foo", defaultNamespace).ClusterQueue("cq1").Label("team", "alpha").Obj()
 
-	wl1 := utiltestingapi.MakeWorkload("wl1", defaultNamespace).Queue("foo").
+	pendingWl1 := utiltestingapi.MakeWorkload("pending-wl1", defaultNamespace).Queue("foo").
 		Condition(metav1.Condition{
 			Type:    kueue.WorkloadAdmitted,
 			Status:  metav1.ConditionFalse,
-			Reason:  "Pending",
-			Message: "Pending evaluation",
+			Reason:  "NoReservation",
+			Message: "The workload has no reservation",
+		}).
+		Condition(metav1.Condition{
+			Type:    kueue.WorkloadQuotaReserved,
+			Status:  metav1.ConditionFalse,
+			Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+			Message: "The workload is pending capacity evaluation",
 		}).Obj()
 
-	wl2 := utiltestingapi.MakeWorkload("wl2", defaultNamespace).Queue("foo").
+	pendingWl2 := utiltestingapi.MakeWorkload("pending-wl2", defaultNamespace).Queue("foo").
+		Condition(metav1.Condition{
+			Type:    kueue.WorkloadAdmitted,
+			Status:  metav1.ConditionFalse,
+			Reason:  "NoReservation",
+			Message: "The workload has no reservation",
+		}).
+		Condition(metav1.Condition{
+			Type:    kueue.WorkloadQuotaReserved,
+			Status:  metav1.ConditionFalse,
+			Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+			Message: "The workload is pending capacity evaluation",
+		}).Obj()
+
+	misconfiguredWl := utiltestingapi.MakeWorkload("misconfigured-wl", defaultNamespace).Queue("foo").
 		Condition(metav1.Condition{
 			Type:    kueue.WorkloadAdmitted,
 			Status:  metav1.ConditionFalse,
@@ -2195,12 +2215,18 @@ func TestUnadmittedWorkloadsMetrics_Lifecycle(t *testing.T) {
 			Message: "LocalQueue foo doesn't exist",
 		}).Obj()
 
-	wl3 := utiltestingapi.MakeWorkload("wl3", defaultNamespace).Queue("foo").
+	wlWithMissingQueue := utiltestingapi.MakeWorkload("wl-with-missing-queue", defaultNamespace).Queue("non-existent-lq").
 		Condition(metav1.Condition{
 			Type:    kueue.WorkloadAdmitted,
 			Status:  metav1.ConditionFalse,
-			Reason:  "Pending",
-			Message: "Pending evaluation",
+			Reason:  "Inadmissible",
+			Message: "LocalQueue non-existent-lq doesn't exist",
+		}).
+		Condition(metav1.Condition{
+			Type:    kueue.WorkloadQuotaReserved,
+			Status:  metav1.ConditionFalse,
+			Reason:  "Misconfigured",
+			Message: "LocalQueue non-existent-lq doesn't exist",
 		}).Obj()
 
 	fakeClient := utiltesting.NewFakeClient(utiltesting.MakeNamespace(defaultNamespace))
@@ -2255,173 +2281,80 @@ func TestUnadmittedWorkloadsMetrics_Lifecycle(t *testing.T) {
 		}
 	}
 
-	// 1. Add wl1 -> Pending evaluation
-	manager.UpdateUnadmittedWorkload(ctx, wl1)
-	expectUnadmitted("cq1", "Pending", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
-	expectLQUnadmitted("foo", defaultNamespace, "cq1", "Pending", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+	t.Run("lifecycle (add, increment, decrement, prune)", func(t *testing.T) {
+		// 1. Add pendingWl1 -> Pending evaluation (represented as NoReservation/PendingEvaluation)
+		manager.UpdateUnadmittedWorkload(ctx, pendingWl1)
+		expectUnadmitted("cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectLQUnadmitted("foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
 
-	// 2. Add wl2 -> Inadmissible misconfigured
-	manager.UpdateUnadmittedWorkload(ctx, wl2)
-	expectUnadmitted("cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
-	expectLQUnadmitted("foo", defaultNamespace, "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
+		// 2. Add misconfiguredWl -> Inadmissible misconfigured
+		manager.UpdateUnadmittedWorkload(ctx, misconfiguredWl)
+		expectUnadmitted("cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
+		expectLQUnadmitted("foo", defaultNamespace, "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
 
-	// 3. Add wl3 -> Pending evaluation (increments to 2)
-	manager.UpdateUnadmittedWorkload(ctx, wl3)
-	expectUnadmitted("cq1", "Pending", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 2)
+		// 3. Add pendingWl2 -> Pending evaluation (increments to 2)
+		manager.UpdateUnadmittedWorkload(ctx, pendingWl2)
+		expectUnadmitted("cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 2)
 
-	// 4. Remove wl1 (decrements to 1)
-	manager.RemoveUnadmittedWorkload(ctx, workload.Key(wl1))
-	expectUnadmitted("cq1", "Pending", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		// 4. Remove pendingWl1 (decrements to 1)
+		manager.RemoveUnadmittedWorkload(ctx, workload.Key(pendingWl1))
+		expectUnadmitted("cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
 
-	// 5. Remove wl3 (decrements to 0 -> series is deleted/pruned)
-	manager.RemoveUnadmittedWorkload(ctx, workload.Key(wl3))
-	expectUnadmitted("cq1", "Pending", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
-	expectLQUnadmitted("foo", defaultNamespace, "cq1", "Pending", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
-}
+		// 5. Remove pendingWl2 (decrements to 0 -> series is deleted/pruned)
+		manager.RemoveUnadmittedWorkload(ctx, workload.Key(pendingWl2))
+		expectUnadmitted("cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
+		expectLQUnadmitted("foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
 
-func TestUnadmittedWorkloadsMetrics_AdmissionTransition(t *testing.T) {
-	features.SetFeatureGateDuringTest(t, features.WorkloadUnadmittedObservability, true)
-	defer metrics.InitMetricVectors(nil)
-
-	ctx, _ := utiltesting.ContextWithLog(t)
-	customLabels := metrics.NewCustomLabels([]configapi.ControllerMetricsCustomLabel{{Name: "team"}})
-
-	cq := utiltestingapi.MakeClusterQueue("cq1").Label("team", "alpha").Obj()
-	lq := utiltestingapi.MakeLocalQueue("foo", defaultNamespace).ClusterQueue("cq1").Label("team", "alpha").Obj()
-
-	wl2 := utiltestingapi.MakeWorkload("wl2", defaultNamespace).Queue("foo").
-		Condition(metav1.Condition{
-			Type:    kueue.WorkloadAdmitted,
-			Status:  metav1.ConditionFalse,
-			Reason:  "Inadmissible",
-			Message: "LocalQueue foo doesn't exist",
-		}).
-		Condition(metav1.Condition{
-			Type:    kueue.WorkloadQuotaReserved,
-			Status:  metav1.ConditionFalse,
-			Reason:  "Misconfigured",
-			Message: "LocalQueue foo doesn't exist",
-		}).Obj()
-
-	fakeClient := utiltesting.NewFakeClient(utiltesting.MakeNamespace(defaultNamespace))
-	manager, _ := NewManagerForUnitTestsWithRequeuer(fakeClient, nil, WithCustomLabels(customLabels), WithPreemptionExpectations(preemptexpectations.New()))
-	customLabels.CQStore("cq1", cq.GetLabels(), cq.GetAnnotations())
-	customLabels.LQStore(queue.Key(lq), lq.GetLabels(), lq.GetAnnotations())
-
-	if err := manager.AddClusterQueue(ctx, cq); err != nil {
-		t.Fatalf("Failed adding clusterQueue: %v", err)
-	}
-	if err := manager.AddLocalQueue(ctx, lq); err != nil {
-		t.Fatalf("Failed adding queue: %v", err)
-	}
-
-	// 1. Workload starts as Inadmissible/Misconfigured
-	manager.UpdateUnadmittedWorkload(ctx, wl2)
-
-	dps := testingmetrics.CollectFilteredGaugeVec(metrics.UnadmittedWorkloads, map[string]string{
-		"cluster_queue":    "cq1",
-		"reason":           "Inadmissible",
-		"underlying_cause": kueue.WorkloadQuotaReservedReasonMisconfigured,
-		"custom_team":      "alpha",
+		// Clean up misconfiguredWl for the next subtest
+		manager.RemoveUnadmittedWorkload(ctx, workload.Key(misconfiguredWl))
 	})
-	if len(dps) != 1 || dps[0].Value != 1 {
-		t.Fatalf("Expected exactly 1 metric series with value 1, got %v", dps)
-	}
 
-	// 2. Workload becomes admitted -> cleans up unadmitted metrics
-	wl2Admitted := wl2.DeepCopy()
-	wl2Admitted.Status.Conditions = []metav1.Condition{
-		{
-			Type:    kueue.WorkloadAdmitted,
-			Status:  metav1.ConditionTrue,
-			Reason:  "Admitted",
-			Message: "Admitted successfully",
-		},
-	}
-	manager.UpdateUnadmittedWorkload(ctx, wl2Admitted)
+	t.Run("admission transition (cleans up unadmitted metrics upon admission)", func(t *testing.T) {
+		// 1. Workload starts as Inadmissible/Misconfigured
+		manager.UpdateUnadmittedWorkload(ctx, misconfiguredWl)
 
-	dps = testingmetrics.CollectFilteredGaugeVec(metrics.UnadmittedWorkloads, map[string]string{
-		"cluster_queue":    "cq1",
-		"reason":           "Inadmissible",
-		"underlying_cause": kueue.WorkloadQuotaReservedReasonMisconfigured,
-		"custom_team":      "alpha",
-	})
-	if len(dps) != 0 {
-		t.Fatalf("Expected metric series to be deleted after admission, but got %d series: %v", len(dps), dps)
-	}
-}
-
-func TestUnadmittedWorkloadsMetrics_MissingLocalQueueFallback(t *testing.T) {
-	features.SetFeatureGateDuringTest(t, features.WorkloadUnadmittedObservability, true)
-	defer metrics.InitMetricVectors(nil)
-
-	ctx, _ := utiltesting.ContextWithLog(t)
-	customLabels := metrics.NewCustomLabels([]configapi.ControllerMetricsCustomLabel{{Name: "team"}})
-
-	wl4 := utiltestingapi.MakeWorkload("wl4", defaultNamespace).Queue("non-existent-lq").
-		Condition(metav1.Condition{
-			Type:    kueue.WorkloadAdmitted,
-			Status:  metav1.ConditionFalse,
-			Reason:  "Inadmissible",
-			Message: "LocalQueue non-existent-lq doesn't exist",
-		}).
-		Condition(metav1.Condition{
-			Type:    kueue.WorkloadQuotaReserved,
-			Status:  metav1.ConditionFalse,
-			Reason:  "Misconfigured",
-			Message: "LocalQueue non-existent-lq doesn't exist",
-		}).Obj()
-
-	fakeClient := utiltesting.NewFakeClient(utiltesting.MakeNamespace(defaultNamespace))
-	manager, _ := NewManagerForUnitTestsWithRequeuer(fakeClient, nil, WithCustomLabels(customLabels), WithPreemptionExpectations(preemptexpectations.New()))
-
-	expectUnadmitted := func(cq, reason, cause, team string, want float64) {
-		t.Helper()
 		dps := testingmetrics.CollectFilteredGaugeVec(metrics.UnadmittedWorkloads, map[string]string{
-			"cluster_queue":    cq,
-			"reason":           reason,
-			"underlying_cause": cause,
-			"custom_team":      team,
+			"cluster_queue":    "cq1",
+			"reason":           "Inadmissible",
+			"underlying_cause": kueue.WorkloadQuotaReservedReasonMisconfigured,
+			"custom_team":      "alpha",
 		})
-		if want == 0 {
-			if len(dps) != 0 {
-				t.Fatalf("Expected metric to be deleted (0 series), but got %d series: %v", len(dps), dps)
-			}
-			return
+		if len(dps) != 1 || dps[0].Value != 1 {
+			t.Fatalf("Expected exactly 1 metric series with value 1, got %v", dps)
 		}
-		if len(dps) != 1 || dps[0].Value != want {
-			t.Fatalf("Expected exactly 1 metric series with value %v, got %v", want, dps)
-		}
-	}
 
-	expectLQUnadmitted := func(name, namespace, cq, reason, cause, team string, want float64) {
-		t.Helper()
-		dps := testingmetrics.CollectFilteredGaugeVec(metrics.LocalQueueUnadmittedWorkloads, map[string]string{
-			"name":             name,
-			"namespace":        namespace,
-			"cluster_queue":    cq,
-			"reason":           reason,
-			"underlying_cause": cause,
-			"custom_team":      team,
+		// 2. Workload becomes admitted -> cleans up unadmitted metrics
+		wlAdmitted := misconfiguredWl.DeepCopy()
+		wlAdmitted.Status.Conditions = []metav1.Condition{
+			{
+				Type:    kueue.WorkloadAdmitted,
+				Status:  metav1.ConditionTrue,
+				Reason:  "Admitted",
+				Message: "Admitted successfully",
+			},
+		}
+		manager.UpdateUnadmittedWorkload(ctx, wlAdmitted)
+
+		dps = testingmetrics.CollectFilteredGaugeVec(metrics.UnadmittedWorkloads, map[string]string{
+			"cluster_queue":    "cq1",
+			"reason":           "Inadmissible",
+			"underlying_cause": kueue.WorkloadQuotaReservedReasonMisconfigured,
+			"custom_team":      "alpha",
 		})
-		if want == 0 {
-			if len(dps) != 0 {
-				t.Fatalf("Expected metric to be deleted (0 series), but got %d series: %v", len(dps), dps)
-			}
-			return
+		if len(dps) != 0 {
+			t.Fatalf("Expected metric series to be deleted after admission, but got %d series: %v", len(dps), dps)
 		}
-		if len(dps) != 1 || dps[0].Value != want {
-			t.Fatalf("Expected exactly 1 metric series with value %v, got %v", want, dps)
-		}
-	}
+	})
 
-	// 1. Add wl4 on missing local queue -> fallback empty string for ClusterQueue and custom labels
-	manager.UpdateUnadmittedWorkload(ctx, wl4)
-	expectUnadmitted("", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 1)
-	expectLQUnadmitted("non-existent-lq", defaultNamespace, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 1)
+	t.Run("missing LocalQueue fallback (gracefully handle non-existent queues)", func(t *testing.T) {
+		// 1. Add wlWithMissingQueue on missing local queue -> fallback empty string for ClusterQueue and custom labels
+		manager.UpdateUnadmittedWorkload(ctx, wlWithMissingQueue)
+		expectUnadmitted("", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 1)
+		expectLQUnadmitted("non-existent-lq", defaultNamespace, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 1)
 
-	// 2. Remove wl4 -> deletes/prunes fallback series
-	manager.RemoveUnadmittedWorkload(ctx, workload.Key(wl4))
-	expectUnadmitted("", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
-	expectLQUnadmitted("non-existent-lq", defaultNamespace, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
+		// 2. Remove wlWithMissingQueue -> deletes/prunes fallback series
+		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlWithMissingQueue))
+		expectUnadmitted("", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
+		expectLQUnadmitted("non-existent-lq", defaultNamespace, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
+	})
 }

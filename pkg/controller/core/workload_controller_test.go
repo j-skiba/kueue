@@ -3303,7 +3303,6 @@ func TestReconcile(t *testing.T) {
 				Obj(),
 			reconcilerOpts: []Option{},
 		},
-
 		"workload with existing controller owner should not be finished": {
 			featureGates: map[featuregate.Feature]bool{
 				features.FinishOrphanedWorkloads: true,
@@ -3336,6 +3335,13 @@ func TestReconcile(t *testing.T) {
 			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Active(false).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadEvicted,
+					Status:  metav1.ConditionTrue,
+					Reason:  "Deactivated",
+					Message: "The workload is deactivated",
+				}).
+				SchedulingStatsEviction(kueue.WorkloadSchedulingStatsEviction{Reason: "Deactivated", Count: 1}).
 				Obj(),
 			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
 				Active(false).
@@ -3344,6 +3350,18 @@ func TestReconcile(t *testing.T) {
 					Status:  metav1.ConditionTrue,
 					Reason:  "Deactivated",
 					Message: "The workload is deactivated",
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonDeactivated,
+					Message: "The workload is deactivated",
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
 				}).
 				SchedulingStatsEviction(kueue.WorkloadSchedulingStatsEviction{Reason: "Deactivated", Count: 1}).
 				Obj(),

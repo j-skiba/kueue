@@ -148,13 +148,7 @@ type unadmittedState struct {
 	LQCustomLabels  []string
 }
 
-type unadmittedCQKey struct {
-	ClusterQueue    kueue.ClusterQueueReference
-	Reason          string
-	UnderlyingCause string
-}
-
-type unadmittedLQKey struct {
+type unadmittedKey struct {
 	LocalQueue      queue.LocalQueueReference
 	ClusterQueue    kueue.ClusterQueueReference
 	Reason          string
@@ -204,8 +198,8 @@ type Manager struct {
 	preemptionExpectations *expectations.Store
 
 	unadmittedWorkloads map[workload.Reference]unadmittedState
-	unadmittedCQCounts  map[unadmittedCQKey]int
-	unadmittedLQCounts  map[unadmittedLQKey]int
+	unadmittedCQCounts  map[unadmittedKey]int
+	unadmittedLQCounts  map[unadmittedKey]int
 }
 
 // NewManager is a factory for cache.queue.Manager. For tests,
@@ -220,8 +214,8 @@ func NewManager(client client.Client, checker StatusChecker, requeuer inadmissib
 		workloadAssignedQueues: make(map[workload.Reference]queue.LocalQueueReference),
 		finishedWorkloads:      make(map[workload.Reference]queue.LocalQueueReference),
 		unadmittedWorkloads:    make(map[workload.Reference]unadmittedState),
-		unadmittedCQCounts:     make(map[unadmittedCQKey]int),
-		unadmittedLQCounts:     make(map[unadmittedLQKey]int),
+		unadmittedCQCounts:     make(map[unadmittedKey]int),
+		unadmittedLQCounts:     make(map[unadmittedKey]int),
 		workloadOrdering: workload.Ordering{
 			PodsReadyRequeuingTimestamp: config.EvictionTimestamp,
 		},
@@ -1094,17 +1088,17 @@ func (m *Manager) removeUnadmittedWorkloadWithoutLock(log logr.Logger, wlKey wor
 	m.decrementUnadmittedState(log, oldState)
 }
 
-func parseLQRef(log logr.Logger, ref queue.LocalQueueReference) (metrics.LocalQueueReference, bool) {
+func parseLQRef(log logr.Logger, ref queue.LocalQueueReference) (string, string, bool) {
 	namespace, lqName, err := queue.ParseLocalQueueReference(ref)
 	if err != nil {
 		log.Error(err, "Failed to parse LocalQueue reference for unadmitted metrics", "localQueue", ref)
-		return metrics.LocalQueueReference{}, false
+		return "", "", false
 	}
-	return metrics.LocalQueueReference{Name: lqName, Namespace: namespace}, true
+	return namespace, string(lqName), true
 }
 
 func (m *Manager) updateCQGauge(state unadmittedState, delta int) {
-	cqKey := unadmittedCQKey{
+	cqKey := unadmittedKey{
 		ClusterQueue:    state.ClusterQueue,
 		Reason:          state.Reason,
 		UnderlyingCause: state.UnderlyingCause,
@@ -1120,7 +1114,7 @@ func (m *Manager) updateCQGauge(state unadmittedState, delta int) {
 }
 
 func (m *Manager) updateLQGauge(log logr.Logger, state unadmittedState, delta int) {
-	lqKey := unadmittedLQKey{
+	lqKey := unadmittedKey{
 		LocalQueue:      state.LocalQueue,
 		ClusterQueue:    state.ClusterQueue,
 		Reason:          state.Reason,
@@ -1132,7 +1126,8 @@ func (m *Manager) updateLQGauge(log logr.Logger, state unadmittedState, delta in
 		delete(m.unadmittedLQCounts, lqKey)
 	}
 
-	if lqRef, ok := parseLQRef(log, state.LocalQueue); ok {
+	if namespace, lqName, ok := parseLQRef(log, state.LocalQueue); ok {
+		lqRef := metrics.LocalQueueReference{Name: kueue.LocalQueueName(lqName), Namespace: namespace}
 		if lqCount <= 0 {
 			metrics.DeleteLocalQueueUnadmittedWorkload(lqRef, state.ClusterQueue, state.Reason, state.UnderlyingCause, state.LQCustomLabels, m.roleTracker)
 		} else {
