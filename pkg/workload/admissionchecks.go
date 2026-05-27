@@ -42,7 +42,7 @@ func SyncAdmittedCondition(w *kueue.Workload, now time.Time) bool {
 	isAdmitted := IsAdmitted(w)
 	hasAllTopologyAssignmentsReady := !HasTopologyAssignmentsPending(w)
 
-	if isAdmitted == (hasReservation && hasAllChecksReady && hasAllTopologyAssignmentsReady) {
+	if apimeta.FindStatusCondition(w.Status.Conditions, kueue.WorkloadAdmitted) != nil && isAdmitted == (hasReservation && hasAllChecksReady && hasAllTopologyAssignmentsReady) {
 		return false
 	}
 	newCondition := metav1.Condition{

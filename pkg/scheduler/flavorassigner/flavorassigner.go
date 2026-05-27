@@ -76,6 +76,10 @@ type Assignment struct {
 
 	// quotaCheckStrategy is the strategy to use for quota check.
 	quotaCheckStrategy configapi.QuotaCheckStrategy
+
+	// IsNoFitDueToCapacity is true if the overall assignment failed with NoFit
+	// but at least one candidate flavor for each podset had no structural mismatches.
+	IsNoFitDueToCapacity bool
 }
 
 // UpdateForTASResult updates the Assignment with the TAS result
@@ -247,8 +251,16 @@ func IgnoreUndeclaredResources(quotaCheckStrategy configapi.QuotaCheckStrategy) 
 }
 
 type Status struct {
-	reasons []string
-	err     error
+	reasons              []string
+	err                  error
+	IsStructuralMismatch bool
+}
+
+func (s *Status) MarkStructuralMismatch() *Status {
+	if s != nil {
+		s.IsStructuralMismatch = true
+	}
+	return s
 }
 
 func NewStatus(reasons ...string) *Status {
@@ -723,10 +735,12 @@ func (a *FlavorAssigner) assignFlavors(log logr.Logger, counts []int32) Assignme
 			}
 		}
 		if atLeastOnePodsAssignmentFailed {
+			assignment.resolveNoFitDueToCapacity()
 			return assignment
 		}
 	}
 	if assignment.RepresentativeMode() == NoFit {
+		assignment.resolveNoFitDueToCapacity()
 		return assignment
 	}
 
@@ -761,7 +775,29 @@ func (a *FlavorAssigner) assignFlavors(log logr.Logger, counts []int32) Assignme
 			}
 		}
 	}
+	assignment.resolveNoFitDueToCapacity()
 	return assignment
+}
+
+func (a *Assignment) resolveNoFitDueToCapacity() {
+	if a.RepresentativeMode() != NoFit {
+		return
+	}
+	isNoFitDueToCapacity := true
+	for _, ps := range a.PodSets {
+		hasCapacityCandidate := false
+		for _, att := range ps.FlavorAssignmentAttempts {
+			if !att.IsStructuralMismatch {
+				hasCapacityCandidate = true
+				break
+			}
+		}
+		if !hasCapacityCandidate {
+			isNoFitDueToCapacity = false
+			break
+		}
+	}
+	a.IsNoFitDueToCapacity = isNoFitDueToCapacity
 }
 
 func (a *Assignment) append(requests resources.Requests, psAssignment *PodSetAssignment) {
@@ -845,11 +881,15 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 		attemptedFlavorIdx = idx
 		fName := resourceGroup.Flavors[idx]
 		if features.Enabled(features.ConcurrentAdmission) && !concurrentadmission.IsFlavorAllowedForVariant(a.wl.Obj, fName) {
-			status.appendf("skipping flavor %s due to WorkloadAllowedResourceFlavorAnnotation annotation", fName)
+			msg := fmt.Sprintf("skipping flavor %s due to WorkloadAllowedResourceFlavorAnnotation annotation", fName)
+			status.appendf("%s", msg)
+			skipStatus := NewStatus(msg).MarkStructuralMismatch()
+			consideredFlavors.AddNoFitFlavorAttempt(fName, skipStatus)
 			continue
 		}
 
 		if flavorStatus := a.checkFlavorForPodSets(log, fName, psIDs, podSets, selectors, resourceGroup); !flavorStatus.IsFit() {
+			flavorStatus.MarkStructuralMismatch()
 			status.reasons = append(status.reasons, flavorStatus.reasons...)
 			consideredFlavors.AddNoFitFlavorAttempt(fName, flavorStatus)
 			if flavorStatus.err != nil {
@@ -864,6 +904,7 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 		representativeMode := bestGranularMode()
 		maxBorrow := 0
 		var flavorQuotaReasons []string
+		flavorStructural := false
 
 		for rName, val := range requests {
 			// Ensure the same resource flavor is used for the workload slice as in the original admitted slice.
@@ -878,6 +919,7 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 						msg := fmt.Sprintf("could not assign %s flavor since the original workload is assigned: %s", fName, originalFlavor)
 						status.reasons = append(status.reasons, msg)
 						flavorQuotaReasons = append(flavorQuotaReasons, msg)
+						flavorStructural = true
 						break
 					}
 
@@ -889,6 +931,10 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 			resQuota := a.cq.QuotaFor(resources.FlavorResource{Flavor: fName, Resource: rName})
 			// Check considering the flavor usage by previous pod sets.
 			fr := resources.FlavorResource{Flavor: fName, Resource: rName}
+
+			if val > a.cq.PotentialAvailable(fr) {
+				flavorStructural = true
+			}
 
 			preemptionMode, borrow, s := a.fitsResourceQuota(log, fr, assignmentUsage[fr], val, resQuota)
 			if s != nil {
@@ -912,7 +958,7 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 			}
 		}
 
-		consideredFlavors.AddRepresentativeModeFlavorAttempt(fName, representativeMode.preemptionMode, maxBorrow, flavorQuotaReasons)
+		consideredFlavors.AddRepresentativeModeFlavorAttempt(fName, representativeMode.preemptionMode, maxBorrow, flavorQuotaReasons, flavorStructural)
 
 		if features.Enabled(features.FlavorFungibility) {
 			if !shouldTryNextFlavor(representativeMode, a.cq.FlavorFungibility) {
@@ -1086,6 +1132,7 @@ func (a *FlavorAssigner) fitsResourceQuota(log logr.Logger, fr resources.FlavorR
 			resources.ResourceQuantityString(fr.Resource, requestUsage),
 			resources.ResourceQuantityString(fr.Resource, maxCapacity),
 		)
+		status.MarkStructuralMismatch()
 		return noFit, 0, &status
 	}
 

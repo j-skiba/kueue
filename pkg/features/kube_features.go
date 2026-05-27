@@ -422,6 +422,11 @@ const (
 	// Enable defaulting of WorkloadPriorityClass to a WorkloadPriorityClass
 	// named "default" when no explicit priority class label is set.
 	WorkloadPriorityClassDefaulting featuregate.Feature = "WorkloadPriorityClassDefaulting"
+
+	// owner: @j-skiba
+	//
+	// Enables WorkloadUnadmittedObservability status and metrics labels mapping unadmitted reasons to Workloads QuotaReserved condition.
+	WorkloadUnadmittedObservability featuregate.Feature = "WorkloadUnadmittedObservability"
 )
 
 func init() {
@@ -655,6 +660,9 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 		{Version: version.MustParse("0.18"), Default: true, PreRelease: featuregate.Beta},
 	},
 	WorkloadPriorityClassDefaulting: {
+		{Version: version.MustParse("0.18"), Default: false, PreRelease: featuregate.Alpha},
+	},
+	WorkloadUnadmittedObservability: {
 		{Version: version.MustParse("0.18"), Default: false, PreRelease: featuregate.Alpha},
 	},
 }

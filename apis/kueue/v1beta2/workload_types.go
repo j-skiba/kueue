@@ -972,6 +972,17 @@ const (
 	WorkloadDeactivationTarget = "DeactivationTarget"
 )
 
+// Reasons for the WorkloadQuotaReserved condition.
+const (
+	WorkloadQuotaReservedReasonDeactivated         string = "Deactivated"
+	WorkloadQuotaReservedReasonMisconfigured       string = "Misconfigured"
+	WorkloadQuotaReservedReasonSuspended           string = "Suspended"
+	WorkloadQuotaReservedReasonAdmissionGated      string = "AdmissionGated"
+	WorkloadQuotaReservedReasonWaitingForPodsReady string = "WaitingForPodsReady"
+	WorkloadQuotaReservedReasonPendingCapacity     string = "PendingCapacity"
+	WorkloadQuotaReservedReasonPendingEvaluation   string = "PendingEvaluation"
+)
+
 // Reasons for the WorkloadPreemptionBlocked condition.
 const (
 	// PreemptionGated indicates the Workload could free up quota via

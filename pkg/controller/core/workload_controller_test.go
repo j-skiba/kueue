@@ -422,6 +422,36 @@ func TestReconcile(t *testing.T) {
 		wantResult                reconcile.Result
 		reconcilerOpts            []Option
 	}{
+		"initialize unadmitted workload status on first reconcile cycle": {
+			featureGates: map[featuregate.Feature]bool{
+				features.WorkloadUnadmittedObservability: true,
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Request(corev1.ResourceCPU, "1").
+				Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").
+				ResourceGroup(
+					*utiltestingapi.MakeFlavorQuotas("flavor1").Resource("cpu", "5").Obj(),
+				).Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Request(corev1.ResourceCPU, "1").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+					Message: "Workload is pending evaluation",
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				}).
+				Obj(),
+		},
 		"reconcile DRA ResourceClaim should be rejected as inadmissible": {
 			featureGates: map[featuregate.Feature]bool{
 				features.KueueDRAIntegration:              true,
