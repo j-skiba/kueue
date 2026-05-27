@@ -949,7 +949,7 @@ const (
 	WorkloadQuotaReservedReasonSuspended           = "Suspended"
 	WorkloadQuotaReservedReasonAdmissionGated      = "AdmissionGated"
 	WorkloadQuotaReservedReasonWaitingForPodsReady = "WaitingForPodsReady"
-	WorkloadQuotaReservedReasonPendingCapacity     = "PendingCapacity"
+	WorkloadQuotaReservedReasonWaitingForQuota     = "WaitingForQuota"
 	WorkloadQuotaReservedReasonPendingEvaluation   = "PendingEvaluation"
 	WorkloadQuotaReservedReasonNotEnoughQuota      = "NotEnoughQuota"
 

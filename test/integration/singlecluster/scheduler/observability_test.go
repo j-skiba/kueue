@@ -68,7 +68,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 		util.ExpectObjectToBeDeleted(ctx, k8sClient, spotTaintedFlavor, true)
 	})
 
-	ginkgo.It("Should set PendingCapacity status if one flavor has insufficient quota but another is misconfigured", func() {
+	ginkgo.It("Should set WaitingForQuota status if one flavor has insufficient quota but another is misconfigured", func() {
 		cq := utiltestingapi.MakeClusterQueue("pending-capacity-cq").
 			Cohort("cohort").
 			ResourceGroup(
@@ -107,14 +107,14 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			Request(corev1.ResourceCPU, "3").Obj()
 		util.MustCreate(ctx, k8sClient, newJob)
 
-		// The job should be left pending with Reason = PendingCapacity!
+		// The job should be left pending with Reason = WaitingForQuota!
 		gomega.Eventually(func(g gomega.Gomega) {
 			var wl kueue.Workload
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(newJob), &wl)).To(gomega.Succeed())
 			cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
 			g.Expect(cond).NotTo(gomega.BeNil())
 			g.Expect(string(cond.Status)).To(gomega.Equal(string(metav1.ConditionFalse)))
-			g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonPendingCapacity))
+			g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonWaitingForQuota))
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 	})
 
@@ -184,19 +184,19 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 		util.MustCreate(ctx, k8sClient, existingJob)
 		util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, existingJob)
 
-		// 2. Submit blocked-job (will wait for capacity -> PendingCapacity)
+		// 2. Submit blocked-job (will wait for capacity -> WaitingForQuota)
 		blockedJob := utiltestingapi.MakeWorkload("blocked-job", ns.Name).
 			Queue(kueue.LocalQueueName(lq.Name)).
 			Request(corev1.ResourceCPU, "1").Obj()
 		util.MustCreate(ctx, k8sClient, blockedJob)
 
-		// Wait until blocked-job gets PendingCapacity status
+		// Wait until blocked-job gets WaitingForQuota status
 		gomega.Eventually(func(g gomega.Gomega) {
 			var wl kueue.Workload
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(blockedJob), &wl)).To(gomega.Succeed())
 			cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
 			g.Expect(cond).NotTo(gomega.BeNil())
-			g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonPendingCapacity))
+			g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonWaitingForQuota))
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 
 		// 3. Submit new-job (blocked behind blocked-job in StrictFIFO -> remains PendingEvaluation!)
@@ -213,7 +213,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			g.Expect(string(condReserved.Status)).To(gomega.Equal(string(metav1.ConditionFalse)))
 			g.Expect(condReserved.Reason).To(gomega.BeElementOf(
 				kueue.WorkloadQuotaReservedReasonPendingEvaluation,
-				kueue.WorkloadQuotaReservedReasonPendingCapacity,
+				kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 			))
 
 			condAdmitted := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadAdmitted)
@@ -317,19 +317,19 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 		util.MustCreate(ctx, k8sClient, existingJob)
 		util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, existingJob)
 
-		// 2. Submit a pending job (will stay pending with PendingCapacity status)
+		// 2. Submit a pending job (will stay pending with WaitingForQuota status)
 		pendingJob := utiltestingapi.MakeWorkload("pending-job-metrics", ns.Name).
 			Queue(kueue.LocalQueueName(lq.Name)).
 			Request(corev1.ResourceCPU, "1").Obj()
 		util.MustCreate(ctx, k8sClient, pendingJob)
 
-		// Wait for pending-job to reach PendingCapacity status
+		// Wait for pending-job to reach WaitingForQuota status
 		gomega.Eventually(func(g gomega.Gomega) {
 			var wl kueue.Workload
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(pendingJob), &wl)).To(gomega.Succeed())
 			cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
 			g.Expect(cond).NotTo(gomega.BeNil())
-			g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonPendingCapacity))
+			g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonWaitingForQuota))
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 
 		// Verify the metrics are reported:
@@ -337,7 +337,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			metric := metrics.UnadmittedWorkloads.WithLabelValues(
 				cq.Name,
 				"NoReservation",
-				string(kueue.WorkloadQuotaReservedReasonPendingCapacity),
+				string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
 				roletracker.RoleStandalone,
 			)
 			v, err := testutil.GetGaugeMetricValue(metric)
@@ -349,7 +349,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 				ns.Name,
 				cq.Name,
 				"NoReservation",
-				string(kueue.WorkloadQuotaReservedReasonPendingCapacity),
+				string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
 				roletracker.RoleStandalone,
 			)
 			vLQ, errLQ := testutil.GetGaugeMetricValue(metricLQ)
@@ -365,7 +365,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			g.Expect(testingmetrics.CollectFilteredGaugeVec(metrics.UnadmittedWorkloads, map[string]string{
 				"cluster_queue":    cq.Name,
 				"reason":           "NoReservation",
-				"underlying_cause": string(kueue.WorkloadQuotaReservedReasonPendingCapacity),
+				"underlying_cause": string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
 			})).To(gomega.BeEmpty())
 
 			g.Expect(testingmetrics.CollectFilteredGaugeVec(metrics.LocalQueueUnadmittedWorkloads, map[string]string{
@@ -373,7 +373,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 				"namespace":        ns.Name,
 				"cluster_queue":    cq.Name,
 				"reason":           "NoReservation",
-				"underlying_cause": string(kueue.WorkloadQuotaReservedReasonPendingCapacity),
+				"underlying_cause": string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
 			})).To(gomega.BeEmpty())
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 	})

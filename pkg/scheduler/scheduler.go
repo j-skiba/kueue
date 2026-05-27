@@ -402,7 +402,7 @@ func (s *Scheduler) processEntry(
 		e.requeueReason = qcache.RequeueReasonNoFit
 		log.V(3).Info("Skipping workload as FlavorAssigner assigned NoFit mode")
 		if e.assignment.IsNoFitDueToCapacity {
-			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonPendingCapacity)
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonWaitingForQuota)
 		} else {
 			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonMisconfigured)
 		}
@@ -412,7 +412,7 @@ func (s *Scheduler) processEntry(
 	if mode == flavorassigner.Preempt {
 		if len(e.preemptionTargets) == 0 {
 			e.requeueReason = qcache.RequeueReasonPreemptionNoCandidates
-			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonPendingCapacity)
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonWaitingForQuota)
 			s.reserveCapacityForUnreclaimablePreempt(log, e, cq)
 			return
 		}
@@ -428,7 +428,7 @@ func (s *Scheduler) processEntry(
 	// We skip multiple-preemptions per cohort if any of the targets are overlapping
 	if preemptedWorkloads.HasAny(e.preemptionTargets) {
 		e.markSkipped("Workload has overlapping preemption targets with another workload")
-		e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonPendingCapacity)
+		e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonWaitingForQuota)
 		skippedPreemptions[cq.Name]++
 		return
 	}
@@ -436,7 +436,7 @@ func (s *Scheduler) processEntry(
 	usage := e.assignmentUsage()
 	if !fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets) {
 		e.markSkipped("Workload no longer fits after processing another workload")
-		e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonPendingCapacity)
+		e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonWaitingForQuota)
 		if mode == flavorassigner.Preempt {
 			skippedPreemptions[cq.Name]++
 		}
@@ -987,7 +987,7 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 			if e.quotaReservedReason != "" {
 				reason = e.quotaReservedReason
 			} else {
-				reason = string(kueue.WorkloadQuotaReservedReasonPendingCapacity)
+				reason = string(kueue.WorkloadQuotaReservedReasonWaitingForQuota)
 			}
 		}
 		if err := workload.PatchAdmissionStatus(ctx, s.client, wl, s.clock, func(wl *kueue.Workload) (bool, error) {

@@ -1947,7 +1947,7 @@ func GetQuotaReservedReasonPriority(reason string) int {
 		kueue.WorkloadQuotaReservedReasonWaitingForPodsReady,
 		kueue.WorkloadQuotaReservedReasonAdmissionGated:
 		return 3
-	case kueue.WorkloadQuotaReservedReasonPendingCapacity:
+	case kueue.WorkloadQuotaReservedReasonWaitingForQuota:
 		return 2
 	case kueue.WorkloadQuotaReservedReasonPendingEvaluation:
 		return 1

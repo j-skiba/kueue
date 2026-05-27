@@ -391,7 +391,7 @@ func TestSchedule(t *testing.T) {
 			wantEvents:   nil,
 			eventCmpOpts: ignoreEventMessageCmpOpts,
 		},
-		"OR logic (one flavor is misconfigured, one has insufficient quota) -> PendingCapacity": {
+		"OR logic (one flavor is misconfigured, one has insufficient quota) -> WaitingForQuota": {
 			featureGates: map[featuregate.Feature]bool{features.WorkloadUnadmittedObservability: true},
 			additionalClusterQueues: []kueue.ClusterQueue{
 				*utiltestingapi.MakeClusterQueue("custom-cq").
@@ -439,7 +439,7 @@ func TestSchedule(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:               kueue.WorkloadQuotaReserved,
 						Status:             metav1.ConditionFalse,
-						Reason:             kueue.WorkloadQuotaReservedReasonPendingCapacity,
+						Reason:             kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 						Message:            "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor on-demand, 5 more needed, untolerated taint {key val NoSchedule <nil>} in flavor spot-tainted",
 						LastTransitionTime: metav1.NewTime(now),
 					}).

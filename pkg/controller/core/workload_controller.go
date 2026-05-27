@@ -869,7 +869,7 @@ func (r *WorkloadReconciler) reconcileCheckBasedEviction(ctx context.Context, wl
 // (e.g., capacity or scheduling holds) and must be preserved to prevent the controller
 // from overwriting it with the default PendingEvaluation status.
 func isSchedulerDeterminedReason(reason string) bool {
-	return reason == kueue.WorkloadQuotaReservedReasonPendingCapacity ||
+	return reason == kueue.WorkloadQuotaReservedReasonWaitingForQuota ||
 		reason == kueue.WorkloadQuotaReservedReasonPendingEvaluation ||
 		reason == kueue.WorkloadQuotaReservedReasonWaitingForPodsReady ||
 		reason == kueue.WorkloadQuotaReservedReasonMisconfigured ||
