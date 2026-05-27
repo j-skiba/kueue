@@ -951,8 +951,7 @@ const (
 	WorkloadQuotaReservedReasonWaitingForPodsReady = "WaitingForPodsReady"
 	WorkloadQuotaReservedReasonPendingCapacity     = "PendingCapacity"
 	WorkloadQuotaReservedReasonPendingEvaluation   = "PendingEvaluation"
-	WorkloadQuotaReservedReasonChecksNotReady      = "ChecksNotReady"
-	WorkloadQuotaReservedReasonPendingTopology     = "PendingTopology"
+	WorkloadQuotaReservedReasonNotEnoughQuota      = "NotEnoughQuota"
 
 	// WorkloadFinished means that the workload associated to the
 	// ResourceClaim finished running (failed or succeeded).

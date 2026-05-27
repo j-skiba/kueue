@@ -865,11 +865,15 @@ func (r *WorkloadReconciler) reconcileCheckBasedEviction(ctx context.Context, wl
 	return true, nil
 }
 
-func isPreservedQuotaReservedReason(reason string) bool {
+// isSchedulerDeterminedReason returns true if the reason is determined by the scheduler
+// (e.g., capacity or scheduling holds) and must be preserved to prevent the controller
+// from overwriting it with the default PendingEvaluation status.
+func isSchedulerDeterminedReason(reason string) bool {
 	return reason == kueue.WorkloadQuotaReservedReasonPendingCapacity ||
 		reason == kueue.WorkloadQuotaReservedReasonPendingEvaluation ||
 		reason == kueue.WorkloadQuotaReservedReasonWaitingForPodsReady ||
-		reason == kueue.WorkloadQuotaReservedReasonMisconfigured
+		reason == kueue.WorkloadQuotaReservedReasonMisconfigured ||
+		reason == kueue.WorkloadQuotaReservedReasonNotEnoughQuota
 }
 
 func (r *WorkloadReconciler) reconcileUnadmittedStatus(
@@ -984,7 +988,7 @@ func (r *WorkloadReconciler) getUnadmittedQuotaReservedReason(
 	default:
 		quotaReservedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
 		if quotaReservedCond != nil && quotaReservedCond.Status == metav1.ConditionFalse &&
-			isPreservedQuotaReservedReason(quotaReservedCond.Reason) {
+			isSchedulerDeterminedReason(quotaReservedCond.Reason) {
 			return quotaReservedCond.Reason, quotaReservedCond.Message
 		}
 		return kueue.WorkloadQuotaReservedReasonPendingEvaluation, "The workload is pending capacity evaluation"

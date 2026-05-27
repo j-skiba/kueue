@@ -46,6 +46,10 @@ const (
 	PendingStatusActive       = "active"
 	PendingStatusInadmissible = "inadmissible"
 
+	// Underlying causes for unadmitted workloads used in metrics.
+	UnadmittedCauseChecksNotReady  = "ChecksNotReady"
+	UnadmittedCausePendingTopology = "PendingTopology"
+
 	// CQStatusPending means the ClusterQueue is accepted but not yet active,
 	// this can be because of:
 	// - a missing ResourceFlavor referenced by the ClusterQueue

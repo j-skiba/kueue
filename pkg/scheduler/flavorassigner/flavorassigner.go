@@ -254,11 +254,19 @@ type Status struct {
 	reasons              []string
 	err                  error
 	IsStructuralMismatch bool
+	IsExceedingLimits    bool
 }
 
 func (s *Status) MarkStructuralMismatch() *Status {
 	if s != nil {
 		s.IsStructuralMismatch = true
+	}
+	return s
+}
+
+func (s *Status) MarkExceedingLimits() *Status {
+	if s != nil {
+		s.IsExceedingLimits = true
 	}
 	return s
 }
