@@ -77,9 +77,12 @@ type Assignment struct {
 	// quotaCheckStrategy is the strategy to use for quota check.
 	quotaCheckStrategy configapi.QuotaCheckStrategy
 
-	// IsNoFitDueToCapacity is true if the overall assignment failed with NoFit
-	// but at least one candidate flavor for each podset had no structural mismatches.
-	IsNoFitDueToCapacity bool
+	// IsWaitingForQuota is true if the overall assignment failed with NoFit
+	// but at least one candidate flavor for each podset is structurally compatible.
+	IsWaitingForQuota bool
+	// IsNotEnoughQuota is true if the overall assignment failed with NoFit
+	// but all compatible candidate flavors exceed the maximum capacity limits.
+	IsNotEnoughQuota bool
 }
 
 // UpdateForTASResult updates the Assignment with the TAS result
@@ -791,21 +794,43 @@ func (a *Assignment) resolveNoFitDueToCapacity() {
 	if a.RepresentativeMode() != NoFit {
 		return
 	}
-	isNoFitDueToCapacity := true
+	isWaitingForQuota := true
+	isNotEnoughQuota := false
+	for _, ps := range a.PodSets {
+		hasCompatible := false
+		for _, att := range ps.FlavorAssignmentAttempts {
+			if !att.IsStructuralMismatch {
+				hasCompatible = true
+				break
+			}
+		}
+		if !hasCompatible {
+			isWaitingForQuota = false
+			return
+		}
+	}
+
+	if !features.Enabled(features.UnadmittedWorkloadsObservability) {
+		a.IsWaitingForQuota = isWaitingForQuota
+		return
+	}
+
 	for _, ps := range a.PodSets {
 		hasCapacityCandidate := false
 		for _, att := range ps.FlavorAssignmentAttempts {
-			if !att.IsStructuralMismatch {
+			if !att.IsStructuralMismatch && !att.IsExceedingLimits {
 				hasCapacityCandidate = true
 				break
 			}
 		}
 		if !hasCapacityCandidate {
-			isNoFitDueToCapacity = false
+			isWaitingForQuota = false
+			isNotEnoughQuota = true
 			break
 		}
 	}
-	a.IsNoFitDueToCapacity = isNoFitDueToCapacity
+	a.IsWaitingForQuota = isWaitingForQuota
+	a.IsNotEnoughQuota = isNotEnoughQuota
 }
 
 func (a *Assignment) append(requests resources.Requests, psAssignment *PodSetAssignment) {
@@ -913,6 +938,7 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 		maxBorrow := 0
 		var flavorQuotaReasons []string
 		flavorStructural := false
+		flavorExceedingLimits := false
 
 		for rName, val := range requests {
 			// Ensure the same resource flavor is used for the workload slice as in the original admitted slice.
@@ -940,14 +966,20 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 			// Check considering the flavor usage by previous pod sets.
 			fr := resources.FlavorResource{Flavor: fName, Resource: rName}
 
-			if val > a.cq.PotentialAvailable(fr) {
-				flavorStructural = true
+			if features.Enabled(features.UnadmittedWorkloadsObservability) && val > a.cq.PotentialAvailable(fr) {
+				flavorExceedingLimits = true
 			}
 
 			preemptionMode, borrow, s := a.fitsResourceQuota(log, fr, assignmentUsage[fr], val, resQuota)
 			if s != nil {
 				flavorQuotaReasons = append(flavorQuotaReasons, s.reasons...)
 				status.reasons = append(status.reasons, s.reasons...)
+				if s.IsStructuralMismatch {
+					flavorStructural = true
+				}
+				if s.IsExceedingLimits {
+					flavorExceedingLimits = true
+				}
 			}
 			maxBorrow = max(maxBorrow, borrow)
 			mode := granularMode{preemptionMode, borrowingLevel(borrow)}
@@ -966,7 +998,7 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 			}
 		}
 
-		consideredFlavors.AddRepresentativeModeFlavorAttempt(fName, representativeMode.preemptionMode, maxBorrow, flavorQuotaReasons, flavorStructural)
+		consideredFlavors.AddRepresentativeModeFlavorAttempt(fName, representativeMode.preemptionMode, maxBorrow, flavorQuotaReasons, flavorStructural, flavorExceedingLimits)
 
 		if features.Enabled(features.FlavorFungibility) {
 			if !shouldTryNextFlavor(representativeMode, a.cq.FlavorFungibility) {
@@ -1140,7 +1172,9 @@ func (a *FlavorAssigner) fitsResourceQuota(log logr.Logger, fr resources.FlavorR
 			resources.ResourceQuantityString(fr.Resource, requestUsage),
 			resources.ResourceQuantityString(fr.Resource, maxCapacity),
 		)
-		status.MarkStructuralMismatch()
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
+			status.MarkExceedingLimits()
+		}
 		return noFit, 0, &status
 	}
 

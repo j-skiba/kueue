@@ -2164,7 +2164,7 @@ func TestQueueSecondPassIfNeeded(t *testing.T) {
 }
 
 func TestUnadmittedWorkloadsMetrics(t *testing.T) {
-	features.SetFeatureGateDuringTest(t, features.WorkloadUnadmittedObservability, true)
+	features.SetFeatureGateDuringTest(t, features.UnadmittedWorkloadsObservability, true)
 	defer metrics.InitMetricVectors(nil)
 
 	ctx, _ := utiltesting.ContextWithLog(t)
@@ -2356,5 +2356,31 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlWithMissingQueue))
 		expectUnadmitted("", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
 		expectLQUnadmitted("non-existent-lq", defaultNamespace, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
+	})
+
+	t.Run("queue transition (moving pending workload between local queues updates metrics)", func(t *testing.T) {
+		lq2 := utiltestingapi.MakeLocalQueue("bar", defaultNamespace).ClusterQueue("cq1").Label("team", "beta").Obj()
+		customLabels.LQStore(queue.Key(lq2), lq2.GetLabels(), lq2.GetAnnotations())
+		if err := manager.AddLocalQueue(ctx, lq2); err != nil {
+			t.Fatalf("Failed adding queue: %v", err)
+		}
+
+		// 1. Workload starts on queue "foo"
+		manager.UpdateUnadmittedWorkload(ctx, pendingWl1)
+		expectLQUnadmitted("foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectLQUnadmitted("bar", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 0)
+
+		// 2. Move workload to queue "bar"
+		wlMoved := pendingWl1.DeepCopy()
+		wlMoved.Spec.QueueName = "bar"
+		manager.UpdateUnadmittedWorkload(ctx, wlMoved)
+
+		// Old queue series must be deleted/pruned, new queue series must be registered/incremented
+		expectLQUnadmitted("foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
+		expectLQUnadmitted("bar", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 1)
+
+		// Clean up for other tests
+		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlMoved))
+		expectLQUnadmitted("bar", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 0)
 	})
 }

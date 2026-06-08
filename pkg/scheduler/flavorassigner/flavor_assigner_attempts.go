@@ -38,6 +38,7 @@ type FlavorAssignmentAttempt struct {
 	PreemptionPossibility *preemptioncommon.PreemptionPossibility
 	Reasons               []string
 	IsStructuralMismatch  bool
+	IsExceedingLimits     bool
 }
 
 type FlavorAssignmentAttempts []FlavorAssignmentAttempt
@@ -55,6 +56,7 @@ func (fa *FlavorAssignmentAttempts) AddNoFitFlavorAttempt(flavor kueue.ResourceF
 	if status != nil {
 		flavorAttempt.Reasons = append(flavorAttempt.Reasons, status.reasons...)
 		flavorAttempt.IsStructuralMismatch = status.IsStructuralMismatch
+		flavorAttempt.IsExceedingLimits = status.IsExceedingLimits
 	}
 	*fa = append(*fa, flavorAttempt)
 }
@@ -64,6 +66,7 @@ func (fa *FlavorAssignmentAttempts) AddRepresentativeModeFlavorAttempt(
 	preemptionMode preemptionMode,
 	maxBorrow int, reasons []string,
 	isStructural bool,
+	isExceedingLimits bool,
 ) {
 	flavorAssignmentMode := preemptionMode.flavorAssignmentMode()
 	flavorAttempt := FlavorAssignmentAttempt{
@@ -72,6 +75,7 @@ func (fa *FlavorAssignmentAttempts) AddRepresentativeModeFlavorAttempt(
 		PreemptionPossibility: preemptionMode.preemptionPossibility(),
 		Borrow:                maxBorrow,
 		IsStructuralMismatch:  isStructural,
+		IsExceedingLimits:     isExceedingLimits,
 	}
 	if len(reasons) > 0 {
 		slices.Sort(reasons)
@@ -138,6 +142,7 @@ func mergeFlavorAttempts(dst map[kueue.ResourceFlavorReference]FlavorAssignmentA
 				PreemptionPossibility: existingPreemption,
 				Reasons:               reasons,
 				IsStructuralMismatch:  existing.IsStructuralMismatch || at.IsStructuralMismatch,
+				IsExceedingLimits:     existing.IsExceedingLimits || at.IsExceedingLimits,
 			}
 			continue
 		}
@@ -149,6 +154,7 @@ func mergeFlavorAttempts(dst map[kueue.ResourceFlavorReference]FlavorAssignmentA
 			PreemptionPossibility: at.PreemptionPossibility,
 			Reasons:               mergeUnique(nil, at.Reasons),
 			IsStructuralMismatch:  at.IsStructuralMismatch,
+			IsExceedingLimits:     at.IsExceedingLimits,
 		}
 		slices.Sort(cp.Reasons)
 		dst[at.Flavor] = cp

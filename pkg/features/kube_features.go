@@ -426,7 +426,12 @@ const (
 	// owner: @j-skiba
 	//
 	// Enables dynamic, tiered QuotaReserved reasons and metrics observability for unadmitted workloads.
-	WorkloadUnadmittedObservability featuregate.Feature = "WorkloadUnadmittedObservability"
+	UnadmittedWorkloadsObservability featuregate.Feature = "UnadmittedWorkloadsObservability"
+
+	// owner: @j-skiba
+	//
+	// Gates the immediate, proactive initialization of both QuotaReserved and Admitted status conditions to False during a workload's first reconciliation.
+	UnadmittedWorkloadsExplicitStatus featuregate.Feature = "UnadmittedWorkloadsExplicitStatus"
 )
 
 func init() {
@@ -662,7 +667,10 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 	WorkloadPriorityClassDefaulting: {
 		{Version: version.MustParse("0.18"), Default: false, PreRelease: featuregate.Alpha},
 	},
-	WorkloadUnadmittedObservability: {
+	UnadmittedWorkloadsObservability: {
+		{Version: version.MustParse("0.18"), Default: false, PreRelease: featuregate.Alpha},
+	},
+	UnadmittedWorkloadsExplicitStatus: {
 		{Version: version.MustParse("0.18"), Default: false, PreRelease: featuregate.Alpha},
 	},
 }

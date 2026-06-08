@@ -219,6 +219,35 @@ func TestSyncAdmittedCondition(t *testing.T) {
 			},
 			wantChange: true,
 		},
+		"reservation and check lost with UnadmittedWorkloadsObservability enabled": {
+			featureGates: map[featuregate.Feature]bool{features.UnadmittedWorkloadsObservability: true},
+			checkStates: []kueue.AdmissionCheckState{
+				{
+					Name:  "check1",
+					State: kueue.CheckStateReady,
+				},
+				{
+					Name:  "check2",
+					State: kueue.CheckStatePending,
+				},
+			},
+			conditions: []metav1.Condition{
+				{
+					Type:               kueue.WorkloadAdmitted,
+					Status:             metav1.ConditionTrue,
+					LastTransitionTime: metav1.NewTime(testTime.Add(-time.Second)),
+				},
+			},
+			wantConditions: []metav1.Condition{
+				{
+					Type:               kueue.WorkloadAdmitted,
+					Status:             metav1.ConditionFalse,
+					Reason:             "NoReservation",
+					ObservedGeneration: 1,
+				},
+			},
+			wantChange: true,
+		},
 		"reservation lost with past admitted time (set)": {
 			conditions: []metav1.Condition{
 				{

@@ -201,7 +201,7 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	var wl kueue.Workload
 	var getErr error
 	defer func() {
-		if features.Enabled(features.WorkloadUnadmittedObservability) {
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
 			if getErr != nil && apierrors.IsNotFound(getErr) {
 				r.queues.RemoveUnadmittedWorkload(ctx, workload.NewReference(req.Namespace, req.Name))
 			} else if getErr == nil {
@@ -295,7 +295,7 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		log.V(3).Info("Rejecting workload that uses DRA resources because KueueDRAIntegration feature gate is disabled")
 		err := workload.PatchAdmissionStatus(ctx, r.client, &wl, r.clock, func(wl *kueue.Workload) (bool, error) {
 			reason := kueue.WorkloadInadmissible
-			if features.Enabled(features.WorkloadUnadmittedObservability) {
+			if features.Enabled(features.UnadmittedWorkloadsObservability) {
 				reason = kueue.WorkloadQuotaReservedReasonMisconfigured
 			}
 			updated := workload.UnsetQuotaReservationWithCondition(wl, reason,
@@ -318,7 +318,7 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			log.V(3).Info("Workload is inadmissible because it uses resource claims which is not supported")
 			err := workload.PatchAdmissionStatus(ctx, r.client, &wl, r.clock, func(wl *kueue.Workload) (bool, error) {
 				reason := kueue.WorkloadInadmissible
-				if features.Enabled(features.WorkloadUnadmittedObservability) {
+				if features.Enabled(features.UnadmittedWorkloadsObservability) {
 					reason = kueue.WorkloadQuotaReservedReasonMisconfigured
 				}
 				updated := workload.UnsetQuotaReservationWithCondition(wl, reason, "KueueDRAIntegration feature does not support use of resource claims", r.clock.Now())
@@ -342,7 +342,7 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			log.Error(err, "Failed to process DRA resources for workload")
 			updateErr := workload.PatchAdmissionStatus(ctx, r.client, &wl, r.clock, func(wl *kueue.Workload) (bool, error) {
 				reason := kueue.WorkloadInadmissible
-				if features.Enabled(features.WorkloadUnadmittedObservability) {
+				if features.Enabled(features.UnadmittedWorkloadsObservability) {
 					reason = kueue.WorkloadQuotaReservedReasonMisconfigured
 				}
 				updated := workload.UnsetQuotaReservationWithCondition(wl, reason, err.Error(), r.clock.Now())
@@ -368,7 +368,7 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				log.Error(err, "Failed to process DRA extended resources for workload")
 				updateErr := workload.PatchAdmissionStatus(ctx, r.client, &wl, r.clock, func(wl *kueue.Workload) (bool, error) {
 					reason := kueue.WorkloadInadmissible
-					if features.Enabled(features.WorkloadUnadmittedObservability) {
+					if features.Enabled(features.UnadmittedWorkloadsObservability) {
 						reason = kueue.WorkloadQuotaReservedReasonMisconfigured
 					}
 					updated := workload.UnsetQuotaReservationWithCondition(wl, reason, err.Error(), r.clock.Now())
@@ -607,7 +607,7 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				return workload.SetRequeuedCondition(wl, kueue.WorkloadClusterQueueRestarted, "The ClusterQueue was restarted after being stopped", true), nil
 			}))
 		}
-		if !features.Enabled(features.WorkloadUnadmittedObservability) && cqOk {
+		if !features.Enabled(features.UnadmittedWorkloadsObservability) && cqOk {
 			if updated, err := r.reconcileSyncAdmissionChecks(ctx, &wl, &cq); updated || err != nil {
 				return ctrl.Result{}, err
 			}
@@ -620,7 +620,7 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		var updated bool
 		var err error
 
-		if features.Enabled(features.WorkloadUnadmittedObservability) {
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
 			var cqPtr *kueue.ClusterQueue
 			if cqExists {
 				cqPtr = &cq
@@ -714,7 +714,7 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{RequeueAfter: recheckAfter}, nil
 	}
 
-	if features.Enabled(features.WorkloadUnadmittedObservability) {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
 		return ctrl.Result{}, nil
 	}
 
@@ -894,8 +894,13 @@ func (r *WorkloadReconciler) reconcileUnadmittedStatus(
 	}
 
 	var targetReason, targetMessage string
+	var shouldUpdateQuotaReserved bool
 	if !workload.HasQuotaReservation(wl) {
-		targetReason, targetMessage = r.getUnadmittedQuotaReservedReason(wl, lqExists, lq, cqOk, cq)
+		quotaReservedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
+		if quotaReservedCond != nil || features.Enabled(features.UnadmittedWorkloadsExplicitStatus) {
+			shouldUpdateQuotaReserved = true
+			targetReason, targetMessage = r.getUnadmittedQuotaReservedReason(wl, lqExists, lq, cqOk, cq)
+		}
 	}
 
 	var updated bool
@@ -907,7 +912,7 @@ func (r *WorkloadReconciler) reconcileUnadmittedStatus(
 			changed = true
 		}
 
-		if !workload.HasQuotaReservation(wl) {
+		if shouldUpdateQuotaReserved {
 			quotaReservedCond := metav1.Condition{
 				Type:               kueue.WorkloadQuotaReserved,
 				Status:             metav1.ConditionFalse,
@@ -1051,7 +1056,7 @@ func (r *WorkloadReconciler) reconcileOnLocalQueueActiveState(ctx context.Contex
 	if !lqExists || !lq.DeletionTimestamp.IsZero() {
 		log.V(3).Info("Workload is inadmissible because the LocalQueue is terminating or missing", "localQueue", klog.KRef("", string(wl.Spec.QueueName)))
 		reason := kueue.WorkloadInadmissible
-		if features.Enabled(features.WorkloadUnadmittedObservability) {
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
 			reason = kueue.WorkloadQuotaReservedReasonMisconfigured
 		}
 		return true, workload.PatchAdmissionStatus(ctx, r.client, wl, r.clock, func(wl *kueue.Workload) (bool, error) {
@@ -1062,7 +1067,7 @@ func (r *WorkloadReconciler) reconcileOnLocalQueueActiveState(ctx context.Contex
 	if queueStopPolicy != kueue.None {
 		log.V(3).Info("Workload is inadmissible because the LocalQueue is stopped", "localQueue", klog.KRef("", string(wl.Spec.QueueName)))
 		reason := kueue.WorkloadInadmissible
-		if features.Enabled(features.WorkloadUnadmittedObservability) {
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
 			reason = kueue.WorkloadQuotaReservedReasonSuspended
 		}
 		return true, workload.PatchAdmissionStatus(ctx, r.client, wl, r.clock, func(wl *kueue.Workload) (bool, error) {
@@ -1102,7 +1107,7 @@ func (r *WorkloadReconciler) reconcileOnClusterQueueActiveState(ctx context.Cont
 	if !cqExists || !cq.DeletionTimestamp.IsZero() {
 		log.V(3).Info("Workload is inadmissible because the ClusterQueue is terminating or missing", "clusterQueue", klog.KRef("", string(cqName)))
 		reason := kueue.WorkloadInadmissible
-		if features.Enabled(features.WorkloadUnadmittedObservability) {
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
 			reason = kueue.WorkloadQuotaReservedReasonMisconfigured
 		}
 		return true, workload.PatchAdmissionStatus(ctx, r.client, wl, r.clock, func(wl *kueue.Workload) (bool, error) {
@@ -1113,7 +1118,7 @@ func (r *WorkloadReconciler) reconcileOnClusterQueueActiveState(ctx context.Cont
 	if queueStopPolicy != kueue.None {
 		log.V(3).Info("Workload is inadmissible because the ClusterQueue is stopped", "clusterQueue", klog.KRef("", string(cqName)))
 		reason := kueue.WorkloadInadmissible
-		if features.Enabled(features.WorkloadUnadmittedObservability) {
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
 			reason = kueue.WorkloadQuotaReservedReasonSuspended
 		}
 		return true, workload.PatchAdmissionStatus(ctx, r.client, wl, r.clock, func(wl *kueue.Workload) (bool, error) {
@@ -1339,7 +1344,7 @@ func (r *WorkloadReconciler) Delete(e event.TypedDeleteEvent[*kueue.Workload]) b
 	// Even if the state is unknown, the last cached state tells us whether the
 	// workload was in the queues and should be cleared from them.
 	r.queues.DeleteAndForgetWorkload(log, wlKey)
-	if features.Enabled(features.WorkloadUnadmittedObservability) {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
 		r.queues.RemoveUnadmittedWorkload(ctx, wlKey)
 	}
 	return true

@@ -401,8 +401,10 @@ func (s *Scheduler) processEntry(
 	if mode == flavorassigner.NoFit {
 		e.requeueReason = qcache.RequeueReasonNoFit
 		log.V(3).Info("Skipping workload as FlavorAssigner assigned NoFit mode")
-		if e.assignment.IsNoFitDueToCapacity {
+		if e.assignment.IsWaitingForQuota {
 			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonWaitingForQuota)
+		} else if e.assignment.IsNotEnoughQuota {
+			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonNotEnoughQuota)
 		} else {
 			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonMisconfigured)
 		}
@@ -535,7 +537,7 @@ func (s *Scheduler) waitForPodsReadyIfBlocked(ctx context.Context, log logr.Logg
 	wl := e.Obj.DeepCopy()
 	if err := workload.PatchAdmissionStatus(ctx, s.client, wl, s.clock, func(wl *kueue.Workload) (bool, error) {
 		reason := "Waiting"
-		if features.Enabled(features.WorkloadUnadmittedObservability) {
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
 			reason = string(kueue.WorkloadQuotaReservedReasonWaitingForPodsReady)
 		}
 		return workload.UnsetQuotaReservationWithCondition(wl, reason, "waiting for all admitted workloads to be in PodsReady condition", s.clock.Now()), nil
@@ -983,7 +985,7 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 	if e.status == notNominated || e.status == skipped || e.status == preemptionGated {
 		wl := e.Obj.DeepCopy()
 		reason := "Pending"
-		if features.Enabled(features.WorkloadUnadmittedObservability) {
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
 			if e.quotaReservedReason != "" {
 				reason = e.quotaReservedReason
 			} else {

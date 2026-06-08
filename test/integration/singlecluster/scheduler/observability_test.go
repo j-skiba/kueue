@@ -40,10 +40,12 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 		onDemandFlavor    *kueue.ResourceFlavor
 		spotTaintedFlavor *kueue.ResourceFlavor
 		cqs               []*kueue.ClusterQueue
+		customFlavors     []*kueue.ResourceFlavor
 	)
 
 	ginkgo.BeforeEach(func() {
-		features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.WorkloadUnadmittedObservability, true)
+		features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.UnadmittedWorkloadsObservability, true)
+		features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.UnadmittedWorkloadsExplicitStatus, true)
 		ns = util.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "obs-")
 
 		onDemandFlavor = utiltestingapi.MakeResourceFlavor("on-demand").Obj()
@@ -64,6 +66,10 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, cq, true)
 		}
 		cqs = nil
+		for _, rf := range customFlavors {
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, rf, true)
+		}
+		customFlavors = nil
 		util.ExpectObjectToBeDeleted(ctx, k8sClient, onDemandFlavor, true)
 		util.ExpectObjectToBeDeleted(ctx, k8sClient, spotTaintedFlavor, true)
 	})
@@ -118,8 +124,8 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 	})
 
-	ginkgo.It("Should set Misconfigured status if both flavors are misconfigured", func() {
-		cq := utiltestingapi.MakeClusterQueue("misconfigured-cq").
+	ginkgo.It("Should set NotEnoughQuota status if one flavor has taint mismatch but another exceeds limits", func() {
+		cq := utiltestingapi.MakeClusterQueue("not-enough-quota-cq").
 			ResourceGroup(
 				*utiltestingapi.MakeFlavorQuotas("spot-tainted").Resource(corev1.ResourceCPU, "20").Obj(),
 				*utiltestingapi.MakeFlavorQuotas("on-demand").Resource(corev1.ResourceCPU, "5").Obj(),
@@ -127,15 +133,56 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 		util.MustCreate(ctx, k8sClient, cq)
 		cqs = append(cqs, cq)
 
-		lq := utiltestingapi.MakeLocalQueue("misconfigured-q", ns.Name).ClusterQueue(cq.Name).Obj()
+		lq := utiltestingapi.MakeLocalQueue("not-enough-quota-q", ns.Name).ClusterQueue(cq.Name).Obj()
 		util.MustCreate(ctx, k8sClient, lq)
 
 		// Submit a new job requesting 10 CPUs
-		// - spot-tainted is misconfigured (taints mismatch)
-		// - on-demand is misconfigured (exceeds max capacity limits 5)
+		// - spot-tainted is structurally mismatched (taints mismatch)
+		// - on-demand exceeds max capacity limits (5)
 		newJob := utiltestingapi.MakeWorkload("new-job", ns.Name).
 			Queue(kueue.LocalQueueName(lq.Name)).
 			Request(corev1.ResourceCPU, "10").Obj()
+		util.MustCreate(ctx, k8sClient, newJob)
+
+		// The job should be left pending with Reason = NotEnoughQuota!
+		gomega.Eventually(func(g gomega.Gomega) {
+			var wl kueue.Workload
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(newJob), &wl)).To(gomega.Succeed())
+			cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
+			g.Expect(cond).NotTo(gomega.BeNil())
+			g.Expect(string(cond.Status)).To(gomega.Equal(string(metav1.ConditionFalse)))
+			g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonNotEnoughQuota))
+		}, util.Timeout, util.Interval).Should(gomega.Succeed())
+	})
+
+	ginkgo.It("Should set Misconfigured status if both flavors are structurally incompatible", func() {
+		// Create a second tainted flavor so that both flavors in the CQ are structurally incompatible
+		taintedFlavor := utiltestingapi.MakeResourceFlavor("tainted-on-demand").
+			Taint(corev1.Taint{
+				Key:    "key",
+				Value:  "val2",
+				Effect: corev1.TaintEffectNoSchedule,
+			}).Obj()
+		util.MustCreate(ctx, k8sClient, taintedFlavor)
+		customFlavors = append(customFlavors, taintedFlavor)
+
+		cq := utiltestingapi.MakeClusterQueue("misconfigured-cq").
+			ResourceGroup(
+				*utiltestingapi.MakeFlavorQuotas("spot-tainted").Resource(corev1.ResourceCPU, "20").Obj(),
+				*utiltestingapi.MakeFlavorQuotas("tainted-on-demand").Resource(corev1.ResourceCPU, "5").Obj(),
+			).Obj()
+		util.MustCreate(ctx, k8sClient, cq)
+		cqs = append(cqs, cq)
+
+		lq := utiltestingapi.MakeLocalQueue("misconfigured-q", ns.Name).ClusterQueue(cq.Name).Obj()
+		util.MustCreate(ctx, k8sClient, lq)
+
+		// Submit a new job requesting 1 CPU
+		// - spot-tainted is structurally mismatched (taint mismatch)
+		// - tainted-on-demand is structurally mismatched (taint mismatch)
+		newJob := utiltestingapi.MakeWorkload("new-job", ns.Name).
+			Queue(kueue.LocalQueueName(lq.Name)).
+			Request(corev1.ResourceCPU, "1").Obj()
 		util.MustCreate(ctx, k8sClient, newJob)
 
 		// The job should be left pending with Reason = Misconfigured!
@@ -376,5 +423,21 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 				"underlying_cause": string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
 			})).To(gomega.BeEmpty())
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
+	})
+
+	ginkgo.It("Should not initialize conditions to False on first cycle if UnadmittedWorkloadsExplicitStatus is disabled", func() {
+		features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.UnadmittedWorkloadsExplicitStatus, false)
+
+		newJob := utiltestingapi.MakeWorkload("new-job-no-explicit-status", ns.Name).
+			Queue("non-existent-q").
+			Request(corev1.ResourceCPU, "1").Obj()
+		util.MustCreate(ctx, k8sClient, newJob)
+
+		gomega.Consistently(func(g gomega.Gomega) {
+			var wl kueue.Workload
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(newJob), &wl)).To(gomega.Succeed())
+			g.Expect(apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)).To(gomega.BeNil())
+			g.Expect(apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadAdmitted)).To(gomega.BeNil())
+		}, util.ShortTimeout, util.Interval).Should(gomega.Succeed())
 	})
 })

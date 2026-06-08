@@ -749,7 +749,7 @@ func (m *Manager) deleteAndForgetWorkloadWithoutLock(log logr.Logger, wlKey work
 	m.deleteWorkloadWithoutLock(log, wlKey)
 	delete(m.workloadAssignedQueues, wlKey)
 	m.deleteFinishedWorkloadWithoutLock(wlKey)
-	if features.Enabled(features.WorkloadUnadmittedObservability) {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
 		m.removeUnadmittedWorkloadWithoutLock(log, wlKey)
 	}
 }
@@ -1011,10 +1011,7 @@ func (m *Manager) UpdateUnadmittedWorkload(ctx context.Context, wl *kueue.Worklo
 	log := ctrl.LoggerFrom(ctx)
 	m.Lock()
 	defer m.Unlock()
-	m.updateUnadmittedWorkloadWithoutLock(log, wl)
-}
 
-func (m *Manager) updateUnadmittedWorkloadWithoutLock(log logr.Logger, wl *kueue.Workload) {
 	wlKey := workload.Key(wl)
 
 	admittedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadAdmitted)
@@ -1058,7 +1055,8 @@ func (m *Manager) updateUnadmittedWorkloadWithoutLock(log logr.Logger, wl *kueue
 	}
 
 	oldState, existed := m.unadmittedWorkloads[wlKey]
-	if existed && oldState.ClusterQueue == newState.ClusterQueue &&
+	if existed && oldState.LocalQueue == newState.LocalQueue &&
+		oldState.ClusterQueue == newState.ClusterQueue &&
 		oldState.Reason == newState.Reason &&
 		oldState.UnderlyingCause == newState.UnderlyingCause {
 		return
@@ -1088,13 +1086,12 @@ func (m *Manager) removeUnadmittedWorkloadWithoutLock(log logr.Logger, wlKey wor
 	m.decrementUnadmittedState(log, oldState)
 }
 
-func parseLQRef(log logr.Logger, ref queue.LocalQueueReference) (string, string, bool) {
+func parseLQRef(ref queue.LocalQueueReference) (string, string, error) {
 	namespace, lqName, err := queue.ParseLocalQueueReference(ref)
 	if err != nil {
-		log.Error(err, "Failed to parse LocalQueue reference for unadmitted metrics", "localQueue", ref)
-		return "", "", false
+		return "", "", err
 	}
-	return namespace, string(lqName), true
+	return namespace, string(lqName), nil
 }
 
 func (m *Manager) updateCQGauge(state unadmittedState, delta int) {
@@ -1126,13 +1123,17 @@ func (m *Manager) updateLQGauge(log logr.Logger, state unadmittedState, delta in
 		delete(m.unadmittedLQCounts, lqKey)
 	}
 
-	if namespace, lqName, ok := parseLQRef(log, state.LocalQueue); ok {
-		lqRef := metrics.LocalQueueReference{Name: kueue.LocalQueueName(lqName), Namespace: namespace}
-		if lqCount <= 0 {
-			metrics.DeleteLocalQueueUnadmittedWorkload(lqRef, state.ClusterQueue, state.Reason, state.UnderlyingCause, state.LQCustomLabels, m.roleTracker)
-		} else {
-			metrics.UpdateLocalQueueUnadmittedWorkload(lqRef, state.ClusterQueue, state.Reason, state.UnderlyingCause, float64(lqCount), state.LQCustomLabels, m.roleTracker)
-		}
+	namespace, lqName, err := parseLQRef(state.LocalQueue)
+	if err != nil {
+		log.Error(err, "Failed to parse LocalQueue reference for unadmitted metrics", "localQueue", state.LocalQueue)
+		return
+	}
+
+	lqRef := metrics.LocalQueueReference{Name: kueue.LocalQueueName(lqName), Namespace: namespace}
+	if lqCount <= 0 {
+		metrics.DeleteLocalQueueUnadmittedWorkload(lqRef, state.ClusterQueue, state.Reason, state.UnderlyingCause, state.LQCustomLabels, m.roleTracker)
+	} else {
+		metrics.UpdateLocalQueueUnadmittedWorkload(lqRef, state.ClusterQueue, state.Reason, state.UnderlyingCause, float64(lqCount), state.LQCustomLabels, m.roleTracker)
 	}
 }
 

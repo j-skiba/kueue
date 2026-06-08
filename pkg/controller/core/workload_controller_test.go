@@ -424,7 +424,8 @@ func TestReconcile(t *testing.T) {
 	}{
 		"initialize unadmitted workload status on first reconcile cycle": {
 			featureGates: map[featuregate.Feature]bool{
-				features.WorkloadUnadmittedObservability: true,
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: true,
 			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
@@ -3331,7 +3332,8 @@ func TestReconcile(t *testing.T) {
 		},
 		"WorkloadUnadmittedObservability: deactivated workload": {
 			featureGates: map[featuregate.Feature]bool{
-				features.WorkloadUnadmittedObservability: true,
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: true,
 			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Active(false).
@@ -3368,7 +3370,8 @@ func TestReconcile(t *testing.T) {
 		},
 		"WorkloadUnadmittedObservability: missing local queue": {
 			featureGates: map[featuregate.Feature]bool{
-				features.WorkloadUnadmittedObservability: true,
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: true,
 			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("non-existent-lq").
@@ -3391,7 +3394,8 @@ func TestReconcile(t *testing.T) {
 		},
 		"WorkloadUnadmittedObservability: stopped local queue": {
 			featureGates: map[featuregate.Feature]bool{
-				features.WorkloadUnadmittedObservability: true,
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: true,
 			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
@@ -3416,7 +3420,8 @@ func TestReconcile(t *testing.T) {
 		},
 		"WorkloadUnadmittedObservability: missing cluster queue": {
 			featureGates: map[featuregate.Feature]bool{
-				features.WorkloadUnadmittedObservability: true,
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: true,
 			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
@@ -3440,7 +3445,8 @@ func TestReconcile(t *testing.T) {
 		},
 		"WorkloadUnadmittedObservability: stopped cluster queue": {
 			featureGates: map[featuregate.Feature]bool{
-				features.WorkloadUnadmittedObservability: true,
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: true,
 			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
@@ -3465,7 +3471,8 @@ func TestReconcile(t *testing.T) {
 		},
 		"WorkloadUnadmittedObservability: inactive cluster queue": {
 			featureGates: map[featuregate.Feature]bool{
-				features.WorkloadUnadmittedObservability: true,
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: true,
 			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
@@ -3492,7 +3499,8 @@ func TestReconcile(t *testing.T) {
 		},
 		"WorkloadUnadmittedObservability: admission-gated workload": {
 			featureGates: map[featuregate.Feature]bool{
-				features.WorkloadUnadmittedObservability: true,
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: true,
 			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
@@ -3524,6 +3532,18 @@ func TestReconcile(t *testing.T) {
 					Message:   "Workload admission is gated by: example.com/controller1",
 				},
 			},
+		},
+		"WorkloadUnadmittedObservability: explicit status disabled (leaves conditions empty)": {
+			featureGates: map[featuregate.Feature]bool{
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: false,
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("non-existent-lq").
+				Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("non-existent-lq").
+				Obj(),
 		},
 	}
 	for name, tc := range cases {

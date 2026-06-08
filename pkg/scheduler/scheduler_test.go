@@ -81,6 +81,12 @@ func TestSchedule(t *testing.T) {
 				Value:  "val",
 				Effect: corev1.TaintEffectNoSchedule,
 			}).Obj(),
+		utiltestingapi.MakeResourceFlavor("spot-tainted-2").
+			Taint(corev1.Taint{
+				Key:    "key",
+				Value:  "val2",
+				Effect: corev1.TaintEffectNoSchedule,
+			}).Obj(),
 	}
 	clusterQueues := []kueue.ClusterQueue{
 		*utiltestingapi.MakeClusterQueue("sales").
@@ -392,7 +398,10 @@ func TestSchedule(t *testing.T) {
 			eventCmpOpts: ignoreEventMessageCmpOpts,
 		},
 		"OR logic (one flavor is misconfigured, one has insufficient quota) -> WaitingForQuota": {
-			featureGates: map[featuregate.Feature]bool{features.WorkloadUnadmittedObservability: true},
+			featureGates: map[featuregate.Feature]bool{
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: true,
+			},
 			additionalClusterQueues: []kueue.ClusterQueue{
 				*utiltestingapi.MakeClusterQueue("custom-cq").
 					QueueingStrategy(kueue.StrictFIFO).
@@ -473,8 +482,11 @@ func TestSchedule(t *testing.T) {
 				"custom-cq": {"sales/new-job"},
 			},
 		},
-		"OR logic (both flavors are misconfigured) -> Misconfigured": {
-			featureGates: map[featuregate.Feature]bool{features.WorkloadUnadmittedObservability: true},
+		"OR logic (one flavor has taint mismatch but another exceeds limits) -> NotEnoughQuota": {
+			featureGates: map[featuregate.Feature]bool{
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: true,
+			},
 			additionalClusterQueues: []kueue.ClusterQueue{
 				*utiltestingapi.MakeClusterQueue("custom-cq2").
 					QueueingStrategy(kueue.StrictFIFO).
@@ -501,7 +513,7 @@ func TestSchedule(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:               kueue.WorkloadQuotaReserved,
 						Status:             metav1.ConditionFalse,
-						Reason:             kueue.WorkloadQuotaReservedReasonMisconfigured,
+						Reason:             kueue.WorkloadQuotaReservedReasonNotEnoughQuota,
 						Message:            "couldn't assign flavors to pod set main: insufficient quota for cpu in flavor on-demand, previously considered podsets requests (0) + current podset request (10) > maximum capacity (5), untolerated taint {key val NoSchedule <nil>} in flavor spot-tainted",
 						LastTransitionTime: metav1.NewTime(now),
 					}).
@@ -522,6 +534,60 @@ func TestSchedule(t *testing.T) {
 			},
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"custom-cq2": {"sales/new-job2"},
+			},
+		},
+		"OR logic (both flavors are structurally incompatible) -> Misconfigured": {
+			featureGates: map[featuregate.Feature]bool{
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: true,
+			},
+			additionalClusterQueues: []kueue.ClusterQueue{
+				*utiltestingapi.MakeClusterQueue("custom-cq3").
+					QueueingStrategy(kueue.StrictFIFO).
+					ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas("spot-tainted").
+							Resource(corev1.ResourceCPU, "20", "20").Obj(),
+						*utiltestingapi.MakeFlavorQuotas("spot-tainted-2").
+							Resource(corev1.ResourceCPU, "5", "5").Obj(),
+					).Obj(),
+			},
+			additionalLocalQueues: []kueue.LocalQueue{
+				*utiltestingapi.MakeLocalQueue("custom-q3", "sales").ClusterQueue("custom-cq3").Obj(),
+			},
+			workloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("new-job3", "sales").
+					Queue("custom-q3").
+					Request(corev1.ResourceCPU, "1").
+					Obj(),
+			},
+			wantWorkloads: []kueue.Workload{
+				*utiltestingapi.MakeWorkload("new-job3", "sales").
+					Queue("custom-q3").
+					Request(corev1.ResourceCPU, "1").
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadQuotaReservedReasonMisconfigured,
+						Message:            "couldn't assign flavors to pod set main: untolerated taint {key val NoSchedule <nil>} in flavor spot-tainted, untolerated taint {key val2 NoSchedule <nil>} in flavor spot-tainted-2",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionFalse,
+						Reason:             "NoReservation",
+						Message:            "The workload has no reservation",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name: "main",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					}).
+					Obj(),
+			},
+			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"custom-cq3": {"sales/new-job3"},
 			},
 		},
 		"workload fits in single clusterQueue, with check state pending": {
