@@ -401,10 +401,8 @@ func (s *Scheduler) processEntry(
 	if mode == flavorassigner.NoFit {
 		e.requeueReason = qcache.RequeueReasonNoFit
 		log.V(3).Info("Skipping workload as FlavorAssigner assigned NoFit mode")
-		if e.assignment.IsWaitingForQuota {
-			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonWaitingForQuota)
-		} else if e.assignment.IsNotEnoughQuota {
-			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonNotEnoughQuota)
+		if e.assignment.NoFitReason != "" {
+			e.quotaReservedReason = e.assignment.NoFitReason
 		} else {
 			e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonMisconfigured)
 		}

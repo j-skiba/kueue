@@ -110,7 +110,7 @@ func assertPodSetConsideredFlexible(t *testing.T, podSetName string, want, got [
 				continue
 			}
 
-			if diff := cmp.Diff(wa, ga, cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "IsStructuralMismatch", "IsExceedingLimits")); diff != "" {
+			if diff := cmp.Diff(wa, ga, cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "Mismatch")); diff != "" {
 				t.Errorf("podset %q: flavor %q mismatch (fit case) (-want +got):\n%s", podSetName, flavor, diff)
 			}
 		}
@@ -124,7 +124,7 @@ func assertPodSetConsideredFlexible(t *testing.T, podSetName string, want, got [
 			t.Errorf("podset %q: expected flavor %q in FlavorAssignmentAttempts (no-fit case)", podSetName, flavor)
 			continue
 		}
-		if diff := cmp.Diff(wa, ga, cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "IsStructuralMismatch", "IsExceedingLimits")); diff != "" {
+		if diff := cmp.Diff(wa, ga, cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "Mismatch")); diff != "" {
 			t.Errorf("podset %q: flavor %q mismatch (no-fit case) (-want +got):\n%s", podSetName, flavor, diff)
 		}
 	}
@@ -3380,7 +3380,7 @@ func TestAssignFlavors(t *testing.T) {
 			if diff := cmp.Diff(tc.wantAssignment, assignment,
 				cmpopts.EquateEmpty(),
 				cmpopts.IgnoreUnexported(Assignment{}, FlavorAssignment{}),
-				statusComparer, cmpopts.IgnoreFields(Assignment{}, "LastState", "IsWaitingForQuota", "IsNotEnoughQuota"),
+				statusComparer, cmpopts.IgnoreFields(Assignment{}, "LastState", "NoFitReason"),
 				cmpopts.IgnoreFields(PodSetAssignment{}, "FlavorAssignmentAttempts"),
 			); diff != "" {
 				t.Errorf("Unexpected assignment (-want,+got):\n%s", diff)
@@ -3710,8 +3710,8 @@ func TestDeletedFlavors(t *testing.T) {
 				cmpopts.EquateEmpty(),
 				cmpopts.IgnoreUnexported(Assignment{}, FlavorAssignment{}),
 				statusComparer,
-				cmpopts.IgnoreFields(Assignment{}, "LastState", "IsWaitingForQuota", "IsNotEnoughQuota"),
-				cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "IsStructuralMismatch", "IsExceedingLimits"),
+				cmpopts.IgnoreFields(Assignment{}, "LastState", "NoFitReason"),
+				cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "Mismatch"),
 			); diff != "" {
 				t.Errorf("Unexpected assignment (-want,+got):\n%s", diff)
 			}
@@ -4677,37 +4677,33 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 	}
 
 	tests := map[string]struct {
-		podSet                kueue.PodSet
-		cq                    *kueue.ClusterQueue
-		siblingCQs            []*kueue.ClusterQueue
-		resourceFlavors       map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor
-		cqUsage               resources.FlavorResourceQuantities
-		siblingCQUsage        map[kueue.ClusterQueueReference]resources.FlavorResourceQuantities
-		replaceWl             *workload.Info
-		topologies            []*kueue.Topology
-		allowedFlavors        []kueue.ResourceFlavorReference
-		featureGates          map[featuregate.Feature]bool
-		simulationResult      map[resources.FlavorResource]simulationResultForFlavor
-		wantIsWaitingForQuota bool
-		wantIsNotEnoughQuota  bool
+		podSet           kueue.PodSet
+		cq               *kueue.ClusterQueue
+		siblingCQs       []*kueue.ClusterQueue
+		resourceFlavors  map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor
+		cqUsage          resources.FlavorResourceQuantities
+		siblingCQUsage   map[kueue.ClusterQueueReference]resources.FlavorResourceQuantities
+		replaceWl        *workload.Info
+		topologies       []*kueue.Topology
+		allowedFlavors   []kueue.ResourceFlavorReference
+		featureGates     map[featuregate.Feature]bool
+		simulationResult map[resources.FlavorResource]simulationResultForFlavor
+		wantNoFitReason  string
 	}{
 		"insufficient quota": {
-			podSet:                *utiltestingapi.MakePodSet("main", 1).Request(corev1.ResourceCPU, "3").Obj(),
-			wantIsWaitingForQuota: false,
-			wantIsNotEnoughQuota:  true,
+			podSet:          *utiltestingapi.MakePodSet("main", 1).Request(corev1.ResourceCPU, "3").Obj(),
+			wantNoFitReason: "ExceedsMaxQuota",
 		},
 		"exceeds max capacity limits": {
-			podSet:                *utiltestingapi.MakePodSet("main", 1).Request(corev1.ResourceCPU, "5").Obj(),
-			wantIsWaitingForQuota: false,
-			wantIsNotEnoughQuota:  true,
+			podSet:          *utiltestingapi.MakePodSet("main", 1).Request(corev1.ResourceCPU, "5").Obj(),
+			wantNoFitReason: "ExceedsMaxQuota",
 		},
 		"taints mismatch": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
 				Request(corev1.ResourceCPU, "1").
 				NodeSelector(map[string]string{"type": "wrong"}).
 				Obj(),
-			wantIsWaitingForQuota: false,
-			wantIsNotEnoughQuota:  false,
+			wantNoFitReason: "",
 		},
 		"node affinity mismatch": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
@@ -4715,8 +4711,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 				NodeSelector(map[string]string{"type": "non-existent"}).
 				Toleration(corev1.Toleration{Key: "key", Operator: corev1.TolerationOpEqual, Value: "val", Effect: corev1.TaintEffectNoSchedule}).
 				Obj(),
-			wantIsWaitingForQuota: false,
-			wantIsNotEnoughQuota:  false,
+			wantNoFitReason: "",
 		},
 		"flavor mismatch for workload slices": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
@@ -4738,8 +4733,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 			featureGates: map[featuregate.Feature]bool{
 				features.ElasticJobsViaWorkloadSlices: true,
 			},
-			wantIsWaitingForQuota: false,
-			wantIsNotEnoughQuota:  false,
+			wantNoFitReason: "",
 		},
 		"prioritization of structural mismatch over capacity mismatch": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
@@ -4747,8 +4741,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 				Request(corev1.ResourceMemory, "20Gi").
 				NodeSelector(map[string]string{"type": "wrong"}).
 				Obj(),
-			wantIsWaitingForQuota: false,
-			wantIsNotEnoughQuota:  false,
+			wantNoFitReason: "",
 		},
 		"TAS not supported": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
@@ -4758,8 +4751,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 			featureGates: map[featuregate.Feature]bool{
 				features.TopologyAwareScheduling: true,
 			},
-			wantIsWaitingForQuota: false,
-			wantIsNotEnoughQuota:  false,
+			wantNoFitReason: "",
 		},
 		"TAS level not supported": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
@@ -4774,8 +4766,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 			featureGates: map[featuregate.Feature]bool{
 				features.TopologyAwareScheduling: true,
 			},
-			wantIsWaitingForQuota: false,
-			wantIsNotEnoughQuota:  false,
+			wantNoFitReason: "",
 		},
 		"TAS only flavor mismatch": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
@@ -4790,8 +4781,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 			featureGates: map[featuregate.Feature]bool{
 				features.TopologyAwareScheduling: true,
 			},
-			wantIsWaitingForQuota: false,
-			wantIsNotEnoughQuota:  false,
+			wantNoFitReason: "",
 		},
 		"flavor not allowed by annotations": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).Request(corev1.ResourceCPU, "1").Obj(),
@@ -4802,8 +4792,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 			featureGates: map[featuregate.Feature]bool{
 				features.ConcurrentAdmission: true,
 			},
-			wantIsWaitingForQuota: false,
-			wantIsNotEnoughQuota:  false,
+			wantNoFitReason: "",
 		},
 		"insufficient capacity, cohort has available capacity (waiting for quota)": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).Request(corev1.ResourceCPU, "3").Obj(),
@@ -4827,8 +4816,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 					{Flavor: "flavor-b", Resource: corev1.ResourceCPU}: 2_000,
 				},
 			},
-			wantIsWaitingForQuota: true,
-			wantIsNotEnoughQuota:  false,
+			wantNoFitReason: "WaitingForQuota",
 		},
 		"exceeds cohort max capacity limits": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).Request(corev1.ResourceCPU, "5").Obj(),
@@ -4846,8 +4834,25 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 						*utiltestingapi.MakeFlavorQuotas("flavor-b").Resource(corev1.ResourceCPU, "2", "2").Obj(),
 					).Obj(),
 			},
-			wantIsWaitingForQuota: false,
-			wantIsNotEnoughQuota:  true,
+			wantNoFitReason: "ExceedsMaxQuota",
+		},
+		"exceeds borrowing limit but cohort has capacity": {
+			podSet: *utiltestingapi.MakePodSet("main", 1).Request(corev1.ResourceCPU, "4").Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").
+				Cohort("cohort").
+				ResourceGroup(
+					*utiltestingapi.MakeFlavorQuotas("flavor-a").Resource(corev1.ResourceCPU, "2", "1").Obj(),
+					*utiltestingapi.MakeFlavorQuotas("flavor-b").Resource(corev1.ResourceCPU, "2", "1").Obj(),
+				).Obj(),
+			siblingCQs: []*kueue.ClusterQueue{
+				utiltestingapi.MakeClusterQueue("sibling").
+					Cohort("cohort").
+					ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas("flavor-a").Resource(corev1.ResourceCPU, "5", "5").Obj(),
+						*utiltestingapi.MakeFlavorQuotas("flavor-b").Resource(corev1.ResourceCPU, "5", "5").Obj(),
+					).Obj(),
+			},
+			wantNoFitReason: "BorrowingLimitReached",
 		},
 	}
 
@@ -4909,12 +4914,9 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 			assigner := New(wlInfo, cqSnapshot, testFlavors, false, &testOracle{simulationResult: tc.simulationResult}, tc.replaceWl, configapi.QuotaCheckBlockUndeclared)
 			gotAssignment := assigner.Assign(log, nil)
 
-			t.Logf("TEST CASE %q: mode=%v, IsWaitingForQuota=%v, IsNotEnoughQuota=%v, attempts=%+v", name, gotAssignment.RepresentativeMode(), gotAssignment.IsWaitingForQuota, gotAssignment.IsNotEnoughQuota, gotAssignment.PodSets[0].FlavorAssignmentAttempts)
-			if gotAssignment.IsWaitingForQuota != tc.wantIsWaitingForQuota {
-				t.Errorf("gotAssignment.IsWaitingForQuota = %v, want %v", gotAssignment.IsWaitingForQuota, tc.wantIsWaitingForQuota)
-			}
-			if gotAssignment.IsNotEnoughQuota != tc.wantIsNotEnoughQuota {
-				t.Errorf("gotAssignment.IsNotEnoughQuota = %v, want %v", gotAssignment.IsNotEnoughQuota, tc.wantIsNotEnoughQuota)
+			t.Logf("TEST CASE %q: mode=%v, NoFitReason=%q, attempts=%+v", name, gotAssignment.RepresentativeMode(), gotAssignment.NoFitReason, gotAssignment.PodSets[0].FlavorAssignmentAttempts)
+			if gotAssignment.NoFitReason != tc.wantNoFitReason {
+				t.Errorf("gotAssignment.NoFitReason = %q, want %q", gotAssignment.NoFitReason, tc.wantNoFitReason)
 			}
 		})
 	}

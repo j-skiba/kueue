@@ -1940,16 +1940,22 @@ func TASAssignedNodeNames(wl *kueue.Workload) []string {
 func GetQuotaReservedReasonPriority(reason string) int {
 	switch reason {
 	case kueue.WorkloadQuotaReservedReasonDeactivated:
-		return 6
+		return 8
 	case kueue.WorkloadQuotaReservedReasonMisconfigured:
-		return 5
-	case kueue.WorkloadQuotaReservedReasonNotEnoughQuota:
-		return 4
+		return 7
+	case kueue.WorkloadQuotaReservedReasonExceedsMaxQuota,
+		kueue.WorkloadQuotaReservedReasonNotEnoughQuota:
+		return 6
 	case kueue.WorkloadQuotaReservedReasonSuspended,
 		kueue.WorkloadQuotaReservedReasonWaitingForPodsReady,
 		kueue.WorkloadQuotaReservedReasonAdmissionGated:
+		return 5
+	case kueue.WorkloadQuotaReservedReasonBorrowingLimitReached:
+		return 4
+	case kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+		kueue.WorkloadQuotaReservedReasonTopologyPlacementFailed:
 		return 3
-	case kueue.WorkloadQuotaReservedReasonWaitingForQuota:
+	case kueue.WorkloadQuotaReservedReasonPreemptionPending:
 		return 2
 	case kueue.WorkloadQuotaReservedReasonPendingEvaluation:
 		return 1

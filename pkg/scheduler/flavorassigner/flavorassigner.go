@@ -77,12 +77,8 @@ type Assignment struct {
 	// quotaCheckStrategy is the strategy to use for quota check.
 	quotaCheckStrategy configapi.QuotaCheckStrategy
 
-	// IsWaitingForQuota is true if the overall assignment failed with NoFit
-	// but at least one candidate flavor for each podset is structurally compatible.
-	IsWaitingForQuota bool
-	// IsNotEnoughQuota is true if the overall assignment failed with NoFit
-	// but all compatible candidate flavors exceed the maximum capacity limits.
-	IsNotEnoughQuota bool
+	// NoFitReason contains the reason why the overall assignment failed with NoFit.
+	NoFitReason string
 }
 
 // UpdateForTASResult updates the Assignment with the TAS result
@@ -253,23 +249,51 @@ func IgnoreUndeclaredResources(quotaCheckStrategy configapi.QuotaCheckStrategy) 
 	return features.Enabled(features.QuotaCheckStrategy) && quotaCheckStrategy == configapi.QuotaCheckIgnoreUndeclared
 }
 
+type MismatchType string
+
+const (
+	MismatchNone            MismatchType = ""
+	MismatchBorrowingLimit  MismatchType = "BorrowingLimitReached"
+	MismatchExceedsMaxQuota MismatchType = "ExceedsMaxQuota"
+	MismatchStructural      MismatchType = "Structural"
+)
+
+func MergeMismatch(a, b MismatchType) MismatchType {
+	if a == MismatchStructural || b == MismatchStructural {
+		return MismatchStructural
+	}
+	if a == MismatchExceedsMaxQuota || b == MismatchExceedsMaxQuota {
+		return MismatchExceedsMaxQuota
+	}
+	if a == MismatchBorrowingLimit || b == MismatchBorrowingLimit {
+		return MismatchBorrowingLimit
+	}
+	return MismatchNone
+}
+
 type Status struct {
-	reasons              []string
-	err                  error
-	IsStructuralMismatch bool
-	IsExceedingLimits    bool
+	reasons  []string
+	err      error
+	Mismatch MismatchType
 }
 
 func (s *Status) MarkStructuralMismatch() *Status {
 	if s != nil {
-		s.IsStructuralMismatch = true
+		s.Mismatch = MismatchStructural
 	}
 	return s
 }
 
-func (s *Status) MarkExceedingLimits() *Status {
+func (s *Status) MarkExceedsMaxQuota() *Status {
 	if s != nil {
-		s.IsExceedingLimits = true
+		s.Mismatch = MismatchExceedsMaxQuota
+	}
+	return s
+}
+
+func (s *Status) MarkBorrowingLimitReached() *Status {
+	if s != nil {
+		s.Mismatch = MismatchBorrowingLimit
 	}
 	return s
 }
@@ -795,42 +819,54 @@ func (a *Assignment) resolveNoFitDueToCapacity() {
 		return
 	}
 	isWaitingForQuota := true
-	isNotEnoughQuota := false
 	for _, ps := range a.PodSets {
 		hasCompatible := false
 		for _, att := range ps.FlavorAssignmentAttempts {
-			if !att.IsStructuralMismatch {
+			if att.Mismatch != MismatchStructural {
 				hasCompatible = true
 				break
 			}
 		}
 		if !hasCompatible {
 			isWaitingForQuota = false
-			return
-		}
-	}
-
-	if !features.Enabled(features.UnadmittedWorkloadsObservability) {
-		a.IsWaitingForQuota = isWaitingForQuota
-		return
-	}
-
-	for _, ps := range a.PodSets {
-		hasCapacityCandidate := false
-		for _, att := range ps.FlavorAssignmentAttempts {
-			if !att.IsStructuralMismatch && !att.IsExceedingLimits {
-				hasCapacityCandidate = true
-				break
-			}
-		}
-		if !hasCapacityCandidate {
-			isWaitingForQuota = false
-			isNotEnoughQuota = true
 			break
 		}
 	}
-	a.IsWaitingForQuota = isWaitingForQuota
-	a.IsNotEnoughQuota = isNotEnoughQuota
+	if !isWaitingForQuota {
+		a.NoFitReason = ""
+		return
+	}
+
+	if !features.Enabled(features.UnadmittedWorkloadsObservability) {
+		a.NoFitReason = string(kueue.WorkloadQuotaReservedReasonWaitingForQuota)
+		return
+	}
+
+	overallReason := string(kueue.WorkloadQuotaReservedReasonWaitingForQuota)
+	for _, ps := range a.PodSets {
+		hasCapacityCandidate := false
+		hasBorrowingLimitCandidate := false
+		for _, att := range ps.FlavorAssignmentAttempts {
+			if att.Mismatch != MismatchStructural {
+				if att.Mismatch == MismatchNone {
+					hasCapacityCandidate = true
+				} else if att.Mismatch == MismatchBorrowingLimit {
+					hasBorrowingLimitCandidate = true
+				}
+			}
+		}
+		if !hasCapacityCandidate {
+			if hasBorrowingLimitCandidate {
+				if overallReason == string(kueue.WorkloadQuotaReservedReasonWaitingForQuota) {
+					overallReason = string(kueue.WorkloadQuotaReservedReasonBorrowingLimitReached)
+				}
+			} else {
+				overallReason = string(kueue.WorkloadQuotaReservedReasonExceedsMaxQuota)
+				break
+			}
+		}
+	}
+	a.NoFitReason = overallReason
 }
 
 func (a *Assignment) append(requests resources.Requests, psAssignment *PodSetAssignment) {
@@ -937,8 +973,7 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 		representativeMode := bestGranularMode()
 		maxBorrow := 0
 		var flavorQuotaReasons []string
-		flavorStructural := false
-		flavorExceedingLimits := false
+		var flavorMismatch MismatchType
 
 		for rName, val := range requests {
 			// Ensure the same resource flavor is used for the workload slice as in the original admitted slice.
@@ -953,7 +988,7 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 						msg := fmt.Sprintf("could not assign %s flavor since the original workload is assigned: %s", fName, originalFlavor)
 						status.reasons = append(status.reasons, msg)
 						flavorQuotaReasons = append(flavorQuotaReasons, msg)
-						flavorStructural = true
+						flavorMismatch = MergeMismatch(flavorMismatch, MismatchStructural)
 						break
 					}
 
@@ -967,19 +1002,23 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 			fr := resources.FlavorResource{Flavor: fName, Resource: rName}
 
 			if features.Enabled(features.UnadmittedWorkloadsObservability) && val > a.cq.PotentialAvailable(fr) {
-				flavorExceedingLimits = true
+				if a.cq.HasParent() {
+					cohortQuota := a.cq.Parent().ResourceNode.SubtreeQuota[fr]
+					if val > cohortQuota {
+						flavorMismatch = MergeMismatch(flavorMismatch, MismatchExceedsMaxQuota)
+					} else {
+						flavorMismatch = MergeMismatch(flavorMismatch, MismatchBorrowingLimit)
+					}
+				} else {
+					flavorMismatch = MergeMismatch(flavorMismatch, MismatchExceedsMaxQuota)
+				}
 			}
 
 			preemptionMode, borrow, s := a.fitsResourceQuota(log, fr, assignmentUsage[fr], val, resQuota)
 			if s != nil {
 				flavorQuotaReasons = append(flavorQuotaReasons, s.reasons...)
 				status.reasons = append(status.reasons, s.reasons...)
-				if s.IsStructuralMismatch {
-					flavorStructural = true
-				}
-				if s.IsExceedingLimits {
-					flavorExceedingLimits = true
-				}
+				flavorMismatch = MergeMismatch(flavorMismatch, s.Mismatch)
 			}
 			maxBorrow = max(maxBorrow, borrow)
 			mode := granularMode{preemptionMode, borrowingLevel(borrow)}
@@ -998,7 +1037,7 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 			}
 		}
 
-		consideredFlavors.AddRepresentativeModeFlavorAttempt(fName, representativeMode.preemptionMode, maxBorrow, flavorQuotaReasons, flavorStructural, flavorExceedingLimits)
+		consideredFlavors.AddRepresentativeModeFlavorAttempt(fName, representativeMode.preemptionMode, maxBorrow, flavorQuotaReasons, flavorMismatch)
 
 		if features.Enabled(features.FlavorFungibility) {
 			if !shouldTryNextFlavor(representativeMode, a.cq.FlavorFungibility) {
@@ -1173,7 +1212,16 @@ func (a *FlavorAssigner) fitsResourceQuota(log logr.Logger, fr resources.FlavorR
 			resources.ResourceQuantityString(fr.Resource, maxCapacity),
 		)
 		if features.Enabled(features.UnadmittedWorkloadsObservability) {
-			status.MarkExceedingLimits()
+			if a.cq.HasParent() {
+				cohortQuota := a.cq.Parent().ResourceNode.SubtreeQuota[fr]
+				if val > cohortQuota {
+					status.MarkExceedsMaxQuota()
+				} else {
+					status.MarkBorrowingLimitReached()
+				}
+			} else {
+				status.MarkExceedsMaxQuota()
+			}
 		}
 		return noFit, 0, &status
 	}

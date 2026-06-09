@@ -144,14 +144,14 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			Request(corev1.ResourceCPU, "10").Obj()
 		util.MustCreate(ctx, k8sClient, newJob)
 
-		// The job should be left pending with Reason = NotEnoughQuota!
+		// The job should be left pending with Reason = ExceedsMaxQuota
 		gomega.Eventually(func(g gomega.Gomega) {
 			var wl kueue.Workload
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(newJob), &wl)).To(gomega.Succeed())
 			cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
 			g.Expect(cond).NotTo(gomega.BeNil())
 			g.Expect(string(cond.Status)).To(gomega.Equal(string(metav1.ConditionFalse)))
-			g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonNotEnoughQuota))
+			g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonExceedsMaxQuota))
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 	})
 

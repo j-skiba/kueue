@@ -944,14 +944,18 @@ const (
 	WorkloadQuotaReserved = "QuotaReserved"
 
 	// Reasons for the WorkloadQuotaReserved condition.
-	WorkloadQuotaReservedReasonDeactivated         = "Deactivated"
-	WorkloadQuotaReservedReasonMisconfigured       = "Misconfigured"
-	WorkloadQuotaReservedReasonSuspended           = "Suspended"
-	WorkloadQuotaReservedReasonAdmissionGated      = "AdmissionGated"
-	WorkloadQuotaReservedReasonWaitingForPodsReady = "WaitingForPodsReady"
-	WorkloadQuotaReservedReasonWaitingForQuota     = "WaitingForQuota"
-	WorkloadQuotaReservedReasonPendingEvaluation   = "PendingEvaluation"
-	WorkloadQuotaReservedReasonNotEnoughQuota      = "NotEnoughQuota"
+	WorkloadQuotaReservedReasonDeactivated             = "Deactivated"
+	WorkloadQuotaReservedReasonMisconfigured           = "Misconfigured"
+	WorkloadQuotaReservedReasonSuspended               = "Suspended"
+	WorkloadQuotaReservedReasonAdmissionGated          = "AdmissionGated"
+	WorkloadQuotaReservedReasonWaitingForPodsReady     = "WaitingForPodsReady"
+	WorkloadQuotaReservedReasonWaitingForQuota         = "WaitingForQuota"
+	WorkloadQuotaReservedReasonPendingEvaluation       = "PendingEvaluation"
+	WorkloadQuotaReservedReasonNotEnoughQuota          = "NotEnoughQuota"
+	WorkloadQuotaReservedReasonExceedsMaxQuota         = "ExceedsMaxQuota"
+	WorkloadQuotaReservedReasonBorrowingLimitReached   = "BorrowingLimitReached"
+	WorkloadQuotaReservedReasonTopologyPlacementFailed = "TopologyPlacementFailed"
+	WorkloadQuotaReservedReasonPreemptionPending       = "PreemptionPending"
 
 	// WorkloadFinished means that the workload associated to the
 	// ResourceClaim finished running (failed or succeeded).
