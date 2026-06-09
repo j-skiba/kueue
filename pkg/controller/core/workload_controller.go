@@ -586,21 +586,16 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	cqName, cqOk := r.queues.ClusterQueueForWorkload(&wl)
-	if !cqOk && lqExists {
-		cqName = lq.Spec.ClusterQueue
-	}
 	var cq kueue.ClusterQueue
 	var cqExists bool
-	if cqName != "" {
-		err := r.client.Get(ctx, types.NamespacedName{Name: string(cqName)}, &cq)
-		if client.IgnoreNotFound(err) != nil {
-			return ctrl.Result{}, err
-		}
-		cqExists = err == nil
-	}
 
-	if cqExists {
+	cqName, cqOk := r.queues.ClusterQueueForWorkload(&wl)
+	if cqOk {
+		// because we need to react to API cluster cq events, the list of checks from a cache can lead to race conditions
+		if err := r.client.Get(ctx, types.NamespacedName{Name: string(cqName)}, &cq); err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+		cqExists = true
 		// If stopped cluster queue is started we need to set the WorkloadRequeued condition to true.
 		if isDisabledRequeuedByClusterQueueStopped(&wl) && ptr.Deref(cq.Spec.StopPolicy, kueue.None) == kueue.None {
 			return ctrl.Result{}, client.IgnoreNotFound(workload.PatchAdmissionStatus(ctx, r.client, &wl, r.clock, func(wl *kueue.Workload) (bool, error) {

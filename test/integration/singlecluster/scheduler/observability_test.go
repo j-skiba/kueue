@@ -439,5 +439,17 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			g.Expect(apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)).To(gomega.BeNil())
 			g.Expect(apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadAdmitted)).To(gomega.BeNil())
 		}, util.ShortTimeout, util.Interval).Should(gomega.Succeed())
+
+		gomega.Eventually(func(g gomega.Gomega) {
+			metric := metrics.UnadmittedWorkloads.WithLabelValues(
+				"",
+				"NoReservation",
+				string(kueue.WorkloadQuotaReservedReasonPendingEvaluation),
+				roletracker.RoleStandalone,
+			)
+			v, err := testutil.GetGaugeMetricValue(metric)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(v).To(gomega.Equal(float64(1)))
+		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 	})
 })

@@ -1014,8 +1014,7 @@ func (m *Manager) UpdateUnadmittedWorkload(ctx context.Context, wl *kueue.Worklo
 
 	wlKey := workload.Key(wl)
 
-	admittedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadAdmitted)
-	if workload.IsFinished(wl) || admittedCond == nil || admittedCond.Status != metav1.ConditionFalse {
+	if workload.IsFinished(wl) || workload.IsAdmitted(wl) {
 		m.removeUnadmittedWorkloadWithoutLock(log, wlKey)
 		return
 	}
@@ -1031,7 +1030,13 @@ func (m *Manager) UpdateUnadmittedWorkload(ctx context.Context, wl *kueue.Worklo
 	lqCustomLabels := m.customLabels.LQGet(qKey)
 	cqCustomLabels := m.customLabels.CQGet(cqName)
 
-	reason := admittedCond.Reason
+	admittedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadAdmitted)
+	var reason string
+	if admittedCond != nil {
+		reason = admittedCond.Reason
+	} else {
+		reason = "NoReservation"
+	}
 	var underlyingCause string
 	quotaReservedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
 	switch {
