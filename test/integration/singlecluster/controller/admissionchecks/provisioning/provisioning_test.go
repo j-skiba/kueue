@@ -1585,6 +1585,10 @@ var _ = ginkgo.Describe("Provisioning with scheduling", ginkgo.Label("controller
 	})
 
 	ginkgo.When("A workload is preempted from a flavor which uses an admission check", func() {
+		ginkgo.BeforeEach(func() {
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.WorkloadRequestUseMergePatch, true)
+		})
+
 		ginkgo.It("Should be successfully re-admitted on another flavor without an admission check", framework.SlowSpec, func() {
 			ginkgo.By("Set up ClusterQueue and LocalQueue", func() {
 				cq = utiltestingapi.MakeClusterQueue("cluster-queue").

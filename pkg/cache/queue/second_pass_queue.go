@@ -93,3 +93,9 @@ func (q *secondPassQueue) deleteByKey(key workload.Reference) {
 func (q *secondPassQueue) nextDelay(iteration int) time.Duration {
 	return q.backoff.WaitTime(iteration)
 }
+
+func (q *secondPassQueue) isTracked(key workload.Reference) bool {
+	q.RLock()
+	defer q.RUnlock()
+	return q.prequeued.Has(key) || q.queued[key] != nil
+}

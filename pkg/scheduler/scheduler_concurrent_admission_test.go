@@ -334,7 +334,14 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
 				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
 				metrics.AdmissionCyclePreemptionSkips.Reset()
-				features.SetFeatureGatesDuringTest(t, tc.featureGates)
+				fg := map[featuregate.Feature]bool{
+					features.UnadmittedWorkloadsObservability:  false,
+					features.UnadmittedWorkloadsExplicitStatus: false,
+				}
+				for k, v := range tc.featureGates {
+					fg[k] = v
+				}
+				features.SetFeatureGatesDuringTest(t, fg)
 
 				ctx, log := utiltesting.ContextWithLog(t)
 

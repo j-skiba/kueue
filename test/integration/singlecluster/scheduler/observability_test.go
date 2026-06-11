@@ -124,7 +124,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 	})
 
-	ginkgo.It("Should set NotEnoughQuota status if one flavor has taint mismatch but another exceeds limits", func() {
+	ginkgo.It("Should set ExceedsMaxQuota status if one flavor has taint mismatch but another exceeds limits", func() {
 		cq := utiltestingapi.MakeClusterQueue("not-enough-quota-cq").
 			ResourceGroup(
 				*utiltestingapi.MakeFlavorQuotas("spot-tainted").Resource(corev1.ResourceCPU, "20").Obj(),
@@ -155,7 +155,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 	})
 
-	ginkgo.It("Should set Misconfigured status if both flavors are structurally incompatible", func() {
+	ginkgo.It("Should set NoMatchingFlavor status if both flavors are structurally incompatible", func() {
 		// Create a second tainted flavor so that both flavors in the CQ are structurally incompatible
 		taintedFlavor := utiltestingapi.MakeResourceFlavor("tainted-on-demand").
 			Taint(corev1.Taint{
@@ -185,14 +185,14 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			Request(corev1.ResourceCPU, "1").Obj()
 		util.MustCreate(ctx, k8sClient, newJob)
 
-		// The job should be left pending with Reason = Misconfigured!
+		// The job should be left pending with Reason = NoMatchingFlavor!
 		gomega.Eventually(func(g gomega.Gomega) {
 			var wl kueue.Workload
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(newJob), &wl)).To(gomega.Succeed())
 			cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
 			g.Expect(cond).NotTo(gomega.BeNil())
 			g.Expect(string(cond.Status)).To(gomega.Equal(string(metav1.ConditionFalse)))
-			g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonMisconfigured))
+			g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonNoMatchingFlavor))
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 	})
 
@@ -450,6 +450,63 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			v, err := testutil.GetGaugeMetricValue(metric)
 			g.Expect(err).NotTo(gomega.HaveOccurred())
 			g.Expect(v).To(gomega.Equal(float64(1)))
+		}, util.Timeout, util.Interval).Should(gomega.Succeed())
+	})
+
+	ginkgo.It("Should set PendingPreemption status when workload requires preemption and triggers it", func() {
+		cq := utiltestingapi.MakeClusterQueue("preemption-cq").
+			QueueingStrategy(kueue.StrictFIFO).
+			Preemption(kueue.ClusterQueuePreemption{
+				WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
+			}).
+			ResourceGroup(
+				*utiltestingapi.MakeFlavorQuotas("on-demand").Resource(corev1.ResourceCPU, "4").Obj(),
+			).Obj()
+		util.MustCreate(ctx, k8sClient, cq)
+		cqs = append(cqs, cq)
+
+		lq := utiltestingapi.MakeLocalQueue("preemption-q", ns.Name).ClusterQueue(cq.Name).Obj()
+		util.MustCreate(ctx, k8sClient, lq)
+
+		// Wait for CQ and LQ status conditions to be synchronized
+		gomega.Eventually(func(g gomega.Gomega) {
+			var createdCQ kueue.ClusterQueue
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cq), &createdCQ)).To(gomega.Succeed())
+			cond := apimeta.FindStatusCondition(createdCQ.Status.Conditions, kueue.ClusterQueueActive)
+			g.Expect(cond).NotTo(gomega.BeNil())
+		}, util.Timeout, util.Interval).Should(gomega.Succeed())
+
+		gomega.Eventually(func(g gomega.Gomega) {
+			var createdLQ kueue.LocalQueue
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(lq), &createdLQ)).To(gomega.Succeed())
+			cond := apimeta.FindStatusCondition(createdLQ.Status.Conditions, kueue.LocalQueueActive)
+			g.Expect(cond).NotTo(gomega.BeNil())
+		}, util.Timeout, util.Interval).Should(gomega.Succeed())
+
+		// 1. Submit a low priority job to consume all CPU (4)
+		lowPriorityJob := utiltestingapi.MakeWorkload("low-priority-job", ns.Name).
+			Queue(kueue.LocalQueueName(lq.Name)).
+			Request(corev1.ResourceCPU, "4").
+			Priority(-10).Obj()
+		util.MustCreate(ctx, k8sClient, lowPriorityJob)
+		util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, lowPriorityJob)
+
+		// 2. Submit a high priority job that requires preemption (needs 2 CPUs, but CQ is at 4/4)
+		highPriorityJob := utiltestingapi.MakeWorkload("high-priority-job", ns.Name).
+			Queue(kueue.LocalQueueName(lq.Name)).
+			Request(corev1.ResourceCPU, "2").
+			Priority(10).Obj()
+		util.MustCreate(ctx, k8sClient, highPriorityJob)
+
+		// The high priority job should trigger preemption, and during the preemption transition,
+		// its status should be set to PendingPreemption.
+		gomega.Eventually(func(g gomega.Gomega) {
+			var wl kueue.Workload
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(highPriorityJob), &wl)).To(gomega.Succeed())
+			cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
+			g.Expect(cond).NotTo(gomega.BeNil())
+			g.Expect(string(cond.Status)).To(gomega.Equal(string(metav1.ConditionFalse)))
+			g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonPendingPreemption))
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 	})
 })

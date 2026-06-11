@@ -452,6 +452,7 @@ func (s *Scheduler) processEntry(
 	preemptionTargets, oldWorkloadSlice := workloadslicing.FindReplacedSliceTarget(e.Obj, e.preemptionTargets)
 
 	if mode == flavorassigner.Preempt {
+		e.quotaReservedReason = string(kueue.WorkloadQuotaReservedReasonPendingPreemption)
 		s.issuePreemptions(ctx, log, e, preemptionTargets)
 		return
 	}

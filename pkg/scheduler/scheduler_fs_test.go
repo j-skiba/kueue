@@ -28,6 +28,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/component-base/featuregate"
 	"k8s.io/component-base/metrics/testutil"
 	testingclock "k8s.io/utils/clock/testing"
 	"k8s.io/utils/ptr"
@@ -3459,7 +3460,11 @@ func TestScheduleForFairSharing(t *testing.T) {
 	for name, tc := range cases {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
-				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
+				features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
+					features.WorkloadRequestUseMergePatch:      enabled,
+					features.UnadmittedWorkloadsObservability:  false,
+					features.UnadmittedWorkloadsExplicitStatus: false,
+				})
 				metrics.AdmissionCyclePreemptionSkips.Reset()
 
 				ctx, log := utiltesting.ContextWithLog(t)

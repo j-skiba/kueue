@@ -919,9 +919,14 @@ func (m *Manager) DeleteSecondPassWithoutLock(wlKey workload.Reference) {
 func (m *Manager) QueueSecondPassIfNeeded(ctx context.Context, w *kueue.Workload, iteration int) bool {
 	log := ctrl.LoggerFrom(ctx)
 	if workload.NeedsSecondPass(w) {
+		wlKey := workload.Key(w)
+		if m.secondPassQueue.isTracked(wlKey) {
+			log.V(4).Info("Workload is already tracked in second pass queue, skipping setting new timer", "workload", wlKey)
+			return true
+		}
 		iteration++
 		delay := m.secondPassQueue.nextDelay(iteration)
-		log.V(3).Info("Workload pre-queued for second pass (with backoff)", "workload", workload.Key(w), "delay", delay)
+		log.V(3).Info("Workload pre-queued for second pass (with backoff)", "workload", wlKey, "delay", delay)
 		m.secondPassQueue.prequeue(w)
 		m.clock.AfterFunc(delay, func() {
 			m.queueSecondPass(ctx, w, iteration)
@@ -1041,9 +1046,9 @@ func (m *Manager) UpdateUnadmittedWorkload(ctx context.Context, wl *kueue.Worklo
 	quotaReservedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
 	switch {
 	case reason == kueue.WorkloadAdmittedReasonUnsatisfiedChecks:
-		underlyingCause = metrics.UnadmittedCauseChecksNotReady
+		underlyingCause = kueue.WorkloadAdmittedReasonUnsatisfiedChecks
 	case reason == kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests:
-		underlyingCause = metrics.UnadmittedCausePendingTopology
+		underlyingCause = kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests
 	case quotaReservedCond != nil && quotaReservedCond.Status == metav1.ConditionFalse:
 		underlyingCause = quotaReservedCond.Reason
 	default:

@@ -2369,8 +2369,8 @@ var _ = ginkgo.Describe("Pod controller interacting with Workload controller whe
 					gomega.BeComparableTo(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: fmt.Sprintf("Exceeded the PodsReady timeout %s", wlKey.String()),
+						Reason:  getPendingReason(),
+						Message: getPendingMessage(wlKey.String()),
 					}, util.IgnoreConditionTimestampsAndObservedGeneration),
 					gomega.BeComparableTo(metav1.Condition{
 						Type:    kueue.WorkloadEvicted,
@@ -2419,8 +2419,8 @@ var _ = ginkgo.Describe("Pod controller interacting with Workload controller whe
 					gomega.BeComparableTo(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "The workload is deactivated due to exceeding the maximum number of re-queuing retries",
+						Reason:  getDeactivatedReason(),
+						Message: getDeactivatedMessage("The workload is deactivated due to exceeding the maximum number of re-queuing retries"),
 					}, util.IgnoreConditionTimestampsAndObservedGeneration),
 					gomega.BeComparableTo(metav1.Condition{
 						Type:    kueue.WorkloadEvicted,
@@ -3039,3 +3039,31 @@ var _ = ginkgo.Describe("Pod controller with deployment-owned pods and waitForPo
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 	})
 })
+
+func getPendingReason() string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
+	}
+	return "Pending"
+}
+
+func getDeactivatedReason() string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return string(kueue.WorkloadQuotaReservedReasonDeactivated)
+	}
+	return "Pending"
+}
+
+func getPendingMessage(wlKeyName string) string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return "The workload is pending capacity evaluation"
+	}
+	return fmt.Sprintf("Exceeded the PodsReady timeout %s", wlKeyName)
+}
+
+func getDeactivatedMessage(legacyMessage string) string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return "The workload is deactivated"
+	}
+	return legacyMessage
+}

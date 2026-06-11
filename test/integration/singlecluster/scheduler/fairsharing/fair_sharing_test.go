@@ -234,7 +234,7 @@ var _ = ginkgo.Describe("Scheduler", ginkgo.Label("feature:fairsharing"), func()
 					gomega.BeComparableTo(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
+						Reason:  getReason(kueue.WorkloadQuotaReservedReasonExceedsMaxQuota),
 						Message: "couldn't assign flavors to pod set main: insufficient quota for cpu in flavor default, previously considered podsets requests (0) + current podset request (10) > maximum capacity (8)",
 					}, util.IgnoreConditionTimestampsAndObservedGeneration),
 				))
@@ -1516,3 +1516,10 @@ var _ = ginkgo.Describe("Scheduler with AdmissionFairSharing = nil", ginkgo.Labe
 		})
 	})
 })
+
+func getReason(observabilityReason string) string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return observabilityReason
+	}
+	return "Pending"
+}

@@ -946,16 +946,16 @@ const (
 	// Reasons for the WorkloadQuotaReserved condition.
 	WorkloadQuotaReservedReasonDeactivated             = "Deactivated"
 	WorkloadQuotaReservedReasonMisconfigured           = "Misconfigured"
+	WorkloadQuotaReservedReasonNoMatchingFlavor        = "NoMatchingFlavor"
 	WorkloadQuotaReservedReasonSuspended               = "Suspended"
 	WorkloadQuotaReservedReasonAdmissionGated          = "AdmissionGated"
 	WorkloadQuotaReservedReasonWaitingForPodsReady     = "WaitingForPodsReady"
 	WorkloadQuotaReservedReasonWaitingForQuota         = "WaitingForQuota"
 	WorkloadQuotaReservedReasonPendingEvaluation       = "PendingEvaluation"
-	WorkloadQuotaReservedReasonNotEnoughQuota          = "NotEnoughQuota"
 	WorkloadQuotaReservedReasonExceedsMaxQuota         = "ExceedsMaxQuota"
 	WorkloadQuotaReservedReasonBorrowingLimitReached   = "BorrowingLimitReached"
 	WorkloadQuotaReservedReasonTopologyPlacementFailed = "TopologyPlacementFailed"
-	WorkloadQuotaReservedReasonPreemptionPending       = "PreemptionPending"
+	WorkloadQuotaReservedReasonPendingPreemption       = "PendingPreemption"
 
 	// WorkloadFinished means that the workload associated to the
 	// ResourceClaim finished running (failed or succeeded).

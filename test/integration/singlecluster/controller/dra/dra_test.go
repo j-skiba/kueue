@@ -39,6 +39,8 @@ import (
 )
 
 var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFailure, func() {
+	var reason string
+
 	ginkgo.BeforeAll(func() {
 		fwk.StartManager(ctx, cfg, managerSetup(nil))
 	})
@@ -49,6 +51,10 @@ var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFail
 
 	ginkgo.BeforeEach(func() {
 		ctx = context.Background()
+		reason = string(kueue.WorkloadInadmissible)
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
+			reason = string(kueue.WorkloadQuotaReservedReasonMisconfigured)
+		}
 	})
 
 	ginkgo.When("DRA is configured via ConfigMap", func() {
@@ -146,7 +152,7 @@ var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFail
 				g.Expect(updatedWl.Status.Conditions).To(gomega.ContainElement(gomega.And(
 					gomega.HaveField("Type", kueue.WorkloadQuotaReserved),
 					gomega.HaveField("Status", metav1.ConditionFalse),
-					gomega.HaveField("Reason", kueue.WorkloadInadmissible),
+					gomega.HaveField("Reason", reason),
 				)))
 			}, util.Timeout, util.Interval).Should(gomega.Succeed())
 		})
@@ -419,7 +425,7 @@ var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFail
 				g.Expect(updatedWl.Status.Conditions).To(gomega.ContainElement(gomega.And(
 					gomega.HaveField("Type", kueue.WorkloadQuotaReserved),
 					gomega.HaveField("Status", metav1.ConditionFalse),
-					gomega.HaveField("Reason", kueue.WorkloadInadmissible),
+					gomega.HaveField("Reason", reason),
 					gomega.HaveField("Message", gomega.And(
 						gomega.ContainSubstring("DeviceClass"),
 						gomega.ContainSubstring("is not mapped"),
@@ -536,7 +542,7 @@ var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFail
 				g.Expect(updatedWl.Status.Conditions).To(gomega.ContainElement(gomega.And(
 					gomega.HaveField("Type", kueue.WorkloadQuotaReserved),
 					gomega.HaveField("Status", metav1.ConditionFalse),
-					gomega.HaveField("Reason", kueue.WorkloadInadmissible),
+					gomega.HaveField("Reason", reason),
 					gomega.HaveField("Message", gomega.ContainSubstring("AllocationMode 'All' is not supported")),
 				)))
 			}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
@@ -646,7 +652,7 @@ var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFail
 				g.Expect(updatedWl.Status.Conditions).To(gomega.ContainElement(gomega.And(
 					gomega.HaveField("Type", kueue.WorkloadQuotaReserved),
 					gomega.HaveField("Status", metav1.ConditionFalse),
-					gomega.HaveField("Reason", kueue.WorkloadInadmissible),
+					gomega.HaveField("Reason", reason),
 					gomega.HaveField("Message", gomega.ContainSubstring("insufficient matching devices for CEL selector")),
 				)))
 			}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
@@ -685,7 +691,7 @@ var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFail
 				g.Expect(updatedWl.Status.Conditions).To(gomega.ContainElement(gomega.And(
 					gomega.HaveField("Type", kueue.WorkloadQuotaReserved),
 					gomega.HaveField("Status", metav1.ConditionFalse),
-					gomega.HaveField("Reason", kueue.WorkloadInadmissible),
+					gomega.HaveField("Reason", reason),
 					gomega.HaveField("Message", gomega.ContainSubstring("device constraints (MatchAttribute) are not supported")),
 				)))
 			}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
@@ -732,7 +738,7 @@ var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFail
 				g.Expect(updatedWl.Status.Conditions).To(gomega.ContainElement(gomega.And(
 					gomega.HaveField("Type", kueue.WorkloadQuotaReserved),
 					gomega.HaveField("Status", metav1.ConditionFalse),
-					gomega.HaveField("Reason", kueue.WorkloadInadmissible),
+					gomega.HaveField("Reason", reason),
 					gomega.HaveField("Message", gomega.ContainSubstring("AdminAccess is not supported")),
 				)))
 			}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
@@ -770,7 +776,7 @@ var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFail
 				g.Expect(updatedWl.Status.Conditions).To(gomega.ContainElement(gomega.And(
 					gomega.HaveField("Type", kueue.WorkloadQuotaReserved),
 					gomega.HaveField("Status", metav1.ConditionFalse),
-					gomega.HaveField("Reason", kueue.WorkloadInadmissible),
+					gomega.HaveField("Reason", reason),
 					gomega.HaveField("Message", gomega.ContainSubstring("device config is not supported")),
 				)))
 			}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
@@ -807,7 +813,7 @@ var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFail
 				g.Expect(updatedWl.Status.Conditions).To(gomega.ContainElement(gomega.And(
 					gomega.HaveField("Type", kueue.WorkloadQuotaReserved),
 					gomega.HaveField("Status", metav1.ConditionFalse),
-					gomega.HaveField("Reason", kueue.WorkloadInadmissible),
+					gomega.HaveField("Reason", reason),
 					gomega.HaveField("Message", gomega.ContainSubstring("FirstAvailable device selection is not supported")),
 				)))
 			}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
@@ -1208,7 +1214,7 @@ var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFail
 				g.Expect(updatedWl.Status.Conditions).To(gomega.ContainElement(gomega.And(
 					gomega.HaveField("Type", kueue.WorkloadQuotaReserved),
 					gomega.HaveField("Status", metav1.ConditionFalse),
-					gomega.HaveField("Reason", kueue.WorkloadInadmissible),
+					gomega.HaveField("Reason", reason),
 					gomega.HaveField("Message", gomega.ContainSubstring("KueueDRAIntegration feature gate is not enabled")),
 				)))
 			}, util.Timeout, util.Interval).Should(gomega.Succeed())
@@ -1231,7 +1237,7 @@ var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFail
 				g.Expect(updatedWl.Status.Conditions).To(gomega.ContainElement(gomega.And(
 					gomega.HaveField("Type", kueue.WorkloadQuotaReserved),
 					gomega.HaveField("Status", metav1.ConditionFalse),
-					gomega.HaveField("Reason", kueue.WorkloadInadmissible),
+					gomega.HaveField("Reason", reason),
 					gomega.HaveField("Message", gomega.ContainSubstring("KueueDRAIntegration feature gate is not enabled")),
 				)))
 			}, util.Timeout, util.Interval).Should(gomega.Succeed())

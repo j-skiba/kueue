@@ -869,11 +869,11 @@ func isSchedulerDeterminedReason(reason string) bool {
 		kueue.WorkloadQuotaReservedReasonPendingEvaluation,
 		kueue.WorkloadQuotaReservedReasonWaitingForPodsReady,
 		kueue.WorkloadQuotaReservedReasonMisconfigured,
-		kueue.WorkloadQuotaReservedReasonNotEnoughQuota,
+		kueue.WorkloadQuotaReservedReasonNoMatchingFlavor,
 		kueue.WorkloadQuotaReservedReasonExceedsMaxQuota,
 		kueue.WorkloadQuotaReservedReasonBorrowingLimitReached,
 		kueue.WorkloadQuotaReservedReasonTopologyPlacementFailed,
-		kueue.WorkloadQuotaReservedReasonPreemptionPending:
+		kueue.WorkloadQuotaReservedReasonPendingPreemption:
 		return true
 	default:
 		return false
@@ -979,11 +979,13 @@ func (r *WorkloadReconciler) getUnadmittedQuotaReservedReason(
 	case ptr.Deref(lq.Spec.StopPolicy, kueue.None) != kueue.None:
 		return kueue.WorkloadQuotaReservedReasonSuspended, fmt.Sprintf("LocalQueue %s is inactive", wl.Spec.QueueName)
 	case !cqOk:
-		cqName, _ := r.queues.ClusterQueueForWorkloadWithoutLock(wl)
+		cqName, _ := r.queues.ClusterQueueForWorkload(wl)
 		if cqName == "" && lq != nil {
 			cqName = lq.Spec.ClusterQueue
 		}
 		return kueue.WorkloadQuotaReservedReasonMisconfigured, fmt.Sprintf("ClusterQueue %s doesn't exist", cqName)
+	case !cq.DeletionTimestamp.IsZero():
+		return kueue.WorkloadQuotaReservedReasonMisconfigured, fmt.Sprintf("ClusterQueue %s is terminating", cq.Name)
 	case isSuspendedByCQ:
 		return kueue.WorkloadQuotaReservedReasonSuspended, fmt.Sprintf("ClusterQueue %s is inactive", lq.Spec.ClusterQueue)
 	case cqOk && cq != nil && !apimeta.IsStatusConditionTrue(cq.Status.Conditions, kueue.ClusterQueueActive):

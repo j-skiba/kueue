@@ -403,6 +403,11 @@ func TestReconcile(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	fakeClock := testingclock.NewFakeClock(now)
 
+	enabledObservabilityGates := map[featuregate.Feature]bool{
+		features.UnadmittedWorkloadsObservability:  true,
+		features.UnadmittedWorkloadsExplicitStatus: true,
+	}
+
 	cases := map[string]struct {
 		featureGates map[featuregate.Feature]bool
 
@@ -423,10 +428,7 @@ func TestReconcile(t *testing.T) {
 		reconcilerOpts            []Option
 	}{
 		"initialize unadmitted workload status on first reconcile cycle": {
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsObservability:  true,
-				features.UnadmittedWorkloadsExplicitStatus: true,
-			},
+			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Request(corev1.ResourceCPU, "1").
@@ -3331,10 +3333,7 @@ func TestReconcile(t *testing.T) {
 				Obj(),
 		},
 		"WorkloadUnadmittedObservability: deactivated workload": {
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsObservability:  true,
-				features.UnadmittedWorkloadsExplicitStatus: true,
-			},
+			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Active(false).
 				Condition(metav1.Condition{
@@ -3369,10 +3368,7 @@ func TestReconcile(t *testing.T) {
 				Obj(),
 		},
 		"WorkloadUnadmittedObservability: missing local queue": {
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsObservability:  true,
-				features.UnadmittedWorkloadsExplicitStatus: true,
-			},
+			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("non-existent-lq").
 				Obj(),
@@ -3393,10 +3389,7 @@ func TestReconcile(t *testing.T) {
 				Obj(),
 		},
 		"WorkloadUnadmittedObservability: stopped local queue": {
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsObservability:  true,
-				features.UnadmittedWorkloadsExplicitStatus: true,
-			},
+			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Obj(),
@@ -3419,10 +3412,7 @@ func TestReconcile(t *testing.T) {
 				Obj(),
 		},
 		"WorkloadUnadmittedObservability: missing cluster queue": {
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsObservability:  true,
-				features.UnadmittedWorkloadsExplicitStatus: true,
-			},
+			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Obj(),
@@ -3444,10 +3434,7 @@ func TestReconcile(t *testing.T) {
 				Obj(),
 		},
 		"WorkloadUnadmittedObservability: stopped cluster queue": {
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsObservability:  true,
-				features.UnadmittedWorkloadsExplicitStatus: true,
-			},
+			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Obj(),
@@ -3470,10 +3457,7 @@ func TestReconcile(t *testing.T) {
 				Obj(),
 		},
 		"WorkloadUnadmittedObservability: inactive cluster queue": {
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsObservability:  true,
-				features.UnadmittedWorkloadsExplicitStatus: true,
-			},
+			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Obj(),
@@ -3498,10 +3482,7 @@ func TestReconcile(t *testing.T) {
 				Obj(),
 		},
 		"WorkloadUnadmittedObservability: admission-gated workload": {
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsObservability:  true,
-				features.UnadmittedWorkloadsExplicitStatus: true,
-			},
+			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Annotation(constants.AdmissionGatedByAnnotation, "example.com/controller1").
@@ -3549,7 +3530,14 @@ func TestReconcile(t *testing.T) {
 	for name, tc := range cases {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
-				features.SetFeatureGatesDuringTest(t, tc.featureGates)
+				fg := map[featuregate.Feature]bool{
+					features.UnadmittedWorkloadsObservability:  false,
+					features.UnadmittedWorkloadsExplicitStatus: false,
+				}
+				for k, v := range tc.featureGates {
+					fg[k] = v
+				}
+				features.SetFeatureGatesDuringTest(t, fg)
 				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
 				features.SetFeatureGateDuringTest(t, features.AdmissionGatedBy, true)
 

@@ -1944,7 +1944,7 @@ func GetQuotaReservedReasonPriority(reason string) int {
 	case kueue.WorkloadQuotaReservedReasonMisconfigured:
 		return 7
 	case kueue.WorkloadQuotaReservedReasonExceedsMaxQuota,
-		kueue.WorkloadQuotaReservedReasonNotEnoughQuota:
+		kueue.WorkloadQuotaReservedReasonNoMatchingFlavor:
 		return 6
 	case kueue.WorkloadQuotaReservedReasonSuspended,
 		kueue.WorkloadQuotaReservedReasonWaitingForPodsReady,
@@ -1955,7 +1955,7 @@ func GetQuotaReservedReasonPriority(reason string) int {
 	case kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 		kueue.WorkloadQuotaReservedReasonTopologyPlacementFailed:
 		return 3
-	case kueue.WorkloadQuotaReservedReasonPreemptionPending:
+	case kueue.WorkloadQuotaReservedReasonPendingPreemption:
 		return 2
 	case kueue.WorkloadQuotaReservedReasonPendingEvaluation:
 		return 1

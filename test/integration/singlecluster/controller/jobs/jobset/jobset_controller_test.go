@@ -58,13 +58,14 @@ const (
 
 var _ = ginkgo.Describe("JobSet controller", ginkgo.Label("job:jobset", "area:jobs"), ginkgo.Ordered, ginkgo.ContinueOnFailure, ginkgo.ContinueOnFailure, func() {
 	ginkgo.BeforeAll(func() {
-		fwk.StartManager(ctx, cfg, managerSetup(jobframework.WithManageJobsWithoutQueueName(true),
+		fwk.StartManager(ctx, cfg, managerAndWorkloadControllerSetup(jobframework.WithManageJobsWithoutQueueName(true),
 			jobframework.WithManagedJobsNamespaceSelector(util.NewNamespaceSelectorExcluding("unmanaged-ns"))))
 		unmanagedNamespace := utiltesting.MakeNamespace("unmanaged-ns")
 		util.MustCreate(ctx, k8sClient, unmanagedNamespace)
-	})
-	ginkgo.AfterAll(func() {
-		fwk.StopManager(ctx)
+
+		ginkgo.DeferCleanup(func() {
+			fwk.StopManager(ctx)
+		})
 	})
 
 	var (
@@ -99,12 +100,13 @@ var _ = ginkgo.Describe("JobSet controller", ginkgo.Label("job:jobset", "area:jo
 			util.MustCreate(ctx, k8sClient, onDemandFlavor)
 			spotFlavor = utiltestingapi.MakeResourceFlavor("spot").NodeLabel(instanceKey, "spot").Obj()
 			util.MustCreate(ctx, k8sClient, spotFlavor)
-		})
 
-		ginkgo.AfterEach(func() {
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, onDemandFlavor, true)
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, spotFlavor, true)
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue, true)
+			ginkgo.DeferCleanup(func() {
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, localQueue, true)
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue, true)
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, onDemandFlavor, true)
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, spotFlavor, true)
+			})
 		})
 
 		ginkgo.It("Should reconcile JobSets", func() {
@@ -407,6 +409,9 @@ var _ = ginkgo.Describe("JobSet controller", ginkgo.Label("job:jobset", "area:jo
 			jobSetLookupKey := types.NamespacedName{Name: mixJobSet.Name, Namespace: ns.Name}
 			ginkgo.By("create the jobset", func() {
 				util.MustCreate(ctx, k8sClient, mixJobSet)
+				ginkgo.DeferCleanup(func() {
+					util.ExpectObjectToBeDeleted(ctx, k8sClient, mixJobSet, true)
+				})
 				gomega.Eventually(func(g gomega.Gomega) {
 					createdJobSet1 := &jobsetapi.JobSet{}
 					g.Expect(k8sClient.Get(ctx, jobSetLookupKey, createdJobSet1)).Should(gomega.Succeed())
@@ -415,6 +420,10 @@ var _ = ginkgo.Describe("JobSet controller", ginkgo.Label("job:jobset", "area:jo
 			})
 
 			wlLookupKey := types.NamespacedName{Name: workloadjobset.GetWorkloadNameForJobSet(mixJobSet.Name, mixJobSet.UID), Namespace: ns.Name}
+			ginkgo.DeferCleanup(func() {
+				wl := &kueue.Workload{ObjectMeta: metav1.ObjectMeta{Name: wlLookupKey.Name, Namespace: wlLookupKey.Namespace}}
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, wl, true)
+			})
 			ginkgo.By("waiting for workload to be created", func() {
 				createdWorkload := &kueue.Workload{}
 				checkPSOpts := cmpopts.IgnoreFields(kueue.PodSet{}, "Template", "MinCount")
@@ -497,13 +506,13 @@ var _ = ginkgo.Describe("JobSet controller", ginkgo.Label("job:jobset", "area:jo
 			util.MustCreate(ctx, k8sClient, testFlavor)
 
 			jobLookupKey = &types.NamespacedName{Name: jobSetName, Namespace: ns.Name}
-		})
 
-		ginkgo.AfterEach(func() {
-			gomega.Expect(util.DeleteObject(ctx, k8sClient, admissionCheck)).To(gomega.Succeed())
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, testFlavor, true)
-			gomega.Expect(util.DeleteNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueueAc, true)
+			ginkgo.DeferCleanup(func() {
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, localQueue, true)
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueueAc, true)
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, admissionCheck, true)
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, testFlavor, true)
+			})
 		})
 
 		ginkgo.It("labels and annotations should be propagated from admission check to job", func() {

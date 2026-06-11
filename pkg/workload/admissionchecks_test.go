@@ -36,6 +36,10 @@ import (
 
 func TestSyncAdmittedCondition(t *testing.T) {
 	testTime := time.Now().Truncate(time.Second)
+	disabledObservabilityGates := map[featuregate.Feature]bool{
+		features.UnadmittedWorkloadsObservability:  false,
+		features.UnadmittedWorkloadsExplicitStatus: false,
+	}
 	cases := map[string]struct {
 		featureGates map[featuregate.Feature]bool
 
@@ -373,7 +377,14 @@ func TestSyncAdmittedCondition(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			features.SetFeatureGatesDuringTest(t, tc.featureGates)
+			fg := map[featuregate.Feature]bool{}
+			for k, v := range disabledObservabilityGates {
+				fg[k] = v
+			}
+			for k, v := range tc.featureGates {
+				fg[k] = v
+			}
+			features.SetFeatureGatesDuringTest(t, fg)
 			builder := utiltestingapi.MakeWorkload("foo", "bar").
 				Admission(tc.admission).
 				AdmissionChecks(tc.checkStates...).

@@ -482,7 +482,7 @@ func TestSchedule(t *testing.T) {
 				"custom-cq": {"sales/new-job"},
 			},
 		},
-		"OR logic (one flavor has taint mismatch but another exceeds limits) -> NotEnoughQuota": {
+		"OR logic (one flavor has taint mismatch but another exceeds limits) -> ExceedsMaxQuota": {
 			featureGates: map[featuregate.Feature]bool{
 				features.UnadmittedWorkloadsObservability:  true,
 				features.UnadmittedWorkloadsExplicitStatus: true,
@@ -536,7 +536,7 @@ func TestSchedule(t *testing.T) {
 				"custom-cq2": {"sales/new-job2"},
 			},
 		},
-		"OR logic (both flavors are structurally incompatible) -> Misconfigured": {
+		"OR logic (both flavors are structurally incompatible) -> NoMatchingFlavor": {
 			featureGates: map[featuregate.Feature]bool{
 				features.UnadmittedWorkloadsObservability:  true,
 				features.UnadmittedWorkloadsExplicitStatus: true,
@@ -567,7 +567,7 @@ func TestSchedule(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:               kueue.WorkloadQuotaReserved,
 						Status:             metav1.ConditionFalse,
-						Reason:             kueue.WorkloadQuotaReservedReasonMisconfigured,
+						Reason:             kueue.WorkloadQuotaReservedReasonNoMatchingFlavor,
 						Message:            "couldn't assign flavors to pod set main: untolerated taint {key val NoSchedule <nil>} in flavor spot-tainted, untolerated taint {key val2 NoSchedule <nil>} in flavor spot-tainted-2",
 						LastTransitionTime: metav1.NewTime(now),
 					}).
@@ -6093,7 +6093,14 @@ func TestSchedule(t *testing.T) {
 			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
 				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
 				metrics.AdmissionCyclePreemptionSkips.Reset()
-				features.SetFeatureGatesDuringTest(t, tc.featureGates)
+				fg := map[featuregate.Feature]bool{
+					features.UnadmittedWorkloadsObservability:  false,
+					features.UnadmittedWorkloadsExplicitStatus: false,
+				}
+				for k, v := range tc.featureGates {
+					fg[k] = v
+				}
+				features.SetFeatureGatesDuringTest(t, fg)
 
 				ctx, log := utiltesting.ContextWithLog(t)
 
@@ -7261,6 +7268,8 @@ func TestLastSchedulingContext(t *testing.T) {
 	for _, tc := range cases {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", tc.name, enabled), func(t *testing.T) {
+				features.SetFeatureGateDuringTest(t, features.UnadmittedWorkloadsObservability, false)
+				features.SetFeatureGateDuringTest(t, features.UnadmittedWorkloadsExplicitStatus, false)
 				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
 				ctx, log := utiltesting.ContextWithLog(t)
 
@@ -7493,6 +7502,8 @@ func TestRequeueAndUpdate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			features.SetFeatureGateDuringTest(t, features.UnadmittedWorkloadsObservability, false)
+			features.SetFeatureGateDuringTest(t, features.UnadmittedWorkloadsExplicitStatus, false)
 			ctx, _ := utiltesting.ContextWithLog(t)
 
 			updates := 0
@@ -8001,6 +8012,8 @@ func TestSchedulerWhenWorkloadModifiedConcurrently(t *testing.T) {
 	for name, tc := range testCases {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s when the WorkloadRequestUseMergePatch feature is %t", name, enabled), func(t *testing.T) {
+				features.SetFeatureGateDuringTest(t, features.UnadmittedWorkloadsObservability, false)
+				features.SetFeatureGateDuringTest(t, features.UnadmittedWorkloadsExplicitStatus, false)
 				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
 				ctx, log := utiltesting.ContextWithLog(t)
 				var patched bool

@@ -4703,7 +4703,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 				Request(corev1.ResourceCPU, "1").
 				NodeSelector(map[string]string{"type": "wrong"}).
 				Obj(),
-			wantNoFitReason: "",
+			wantNoFitReason: "NoMatchingFlavor",
 		},
 		"node affinity mismatch": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
@@ -4711,7 +4711,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 				NodeSelector(map[string]string{"type": "non-existent"}).
 				Toleration(corev1.Toleration{Key: "key", Operator: corev1.TolerationOpEqual, Value: "val", Effect: corev1.TaintEffectNoSchedule}).
 				Obj(),
-			wantNoFitReason: "",
+			wantNoFitReason: "NoMatchingFlavor",
 		},
 		"flavor mismatch for workload slices": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
@@ -4733,7 +4733,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 			featureGates: map[featuregate.Feature]bool{
 				features.ElasticJobsViaWorkloadSlices: true,
 			},
-			wantNoFitReason: "",
+			wantNoFitReason: "NoMatchingFlavor",
 		},
 		"prioritization of structural mismatch over capacity mismatch": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
@@ -4741,7 +4741,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 				Request(corev1.ResourceMemory, "20Gi").
 				NodeSelector(map[string]string{"type": "wrong"}).
 				Obj(),
-			wantNoFitReason: "",
+			wantNoFitReason: "NoMatchingFlavor",
 		},
 		"TAS not supported": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
@@ -4751,7 +4751,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 			featureGates: map[featuregate.Feature]bool{
 				features.TopologyAwareScheduling: true,
 			},
-			wantNoFitReason: "",
+			wantNoFitReason: "NoMatchingFlavor",
 		},
 		"TAS level not supported": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
@@ -4766,7 +4766,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 			featureGates: map[featuregate.Feature]bool{
 				features.TopologyAwareScheduling: true,
 			},
-			wantNoFitReason: "",
+			wantNoFitReason: "NoMatchingFlavor",
 		},
 		"TAS only flavor mismatch": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).
@@ -4781,7 +4781,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 			featureGates: map[featuregate.Feature]bool{
 				features.TopologyAwareScheduling: true,
 			},
-			wantNoFitReason: "",
+			wantNoFitReason: "NoMatchingFlavor",
 		},
 		"flavor not allowed by annotations": {
 			podSet: *utiltestingapi.MakePodSet("main", 1).Request(corev1.ResourceCPU, "1").Obj(),

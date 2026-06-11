@@ -3092,8 +3092,14 @@ func TestScheduleForTAS(t *testing.T) {
 	for name, tc := range cases {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
-				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
-				features.SetFeatureGatesDuringTest(t, tc.featureGates)
+				fg := map[featuregate.Feature]bool{
+					features.UnadmittedWorkloadsObservability:  false,
+					features.UnadmittedWorkloadsExplicitStatus: false,
+				}
+				for k, v := range tc.featureGates {
+					fg[k] = v
+				}
+				features.SetFeatureGatesDuringTest(t, fg)
 				ctx, log := utiltesting.ContextWithLog(t)
 				testWls := make([]kueue.Workload, 0, len(tc.workloads))
 				for _, wl := range tc.workloads {
@@ -4539,8 +4545,14 @@ func TestScheduleForTASPreemption(t *testing.T) {
 	for name, tc := range cases {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
-				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
-				features.SetFeatureGatesDuringTest(t, tc.featureGates)
+				fg := map[featuregate.Feature]bool{
+					features.UnadmittedWorkloadsObservability:  false,
+					features.UnadmittedWorkloadsExplicitStatus: false,
+				}
+				for k, v := range tc.featureGates {
+					fg[k] = v
+				}
+				features.SetFeatureGatesDuringTest(t, fg)
 
 				ctx, log := utiltesting.ContextWithLog(t)
 				testWls := make([]kueue.Workload, 0, len(tc.workloads))
@@ -6809,7 +6821,11 @@ func TestScheduleForTASCohorts(t *testing.T) {
 	for name, tc := range cases {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
-				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
+				features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
+					features.WorkloadRequestUseMergePatch:      enabled,
+					features.UnadmittedWorkloadsObservability:  false,
+					features.UnadmittedWorkloadsExplicitStatus: false,
+				})
 				ctx, log := utiltesting.ContextWithLog(t)
 
 				testWls := make([]kueue.Workload, 0, len(tc.workloads))

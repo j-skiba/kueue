@@ -833,7 +833,7 @@ func (a *Assignment) resolveNoFitDueToCapacity() {
 		}
 	}
 	if !isWaitingForQuota {
-		a.NoFitReason = ""
+		a.NoFitReason = string(kueue.WorkloadQuotaReservedReasonNoMatchingFlavor)
 		return
 	}
 
@@ -848,9 +848,10 @@ func (a *Assignment) resolveNoFitDueToCapacity() {
 		hasBorrowingLimitCandidate := false
 		for _, att := range ps.FlavorAssignmentAttempts {
 			if att.Mismatch != MismatchStructural {
-				if att.Mismatch == MismatchNone {
+				switch att.Mismatch {
+				case MismatchNone:
 					hasCapacityCandidate = true
-				} else if att.Mismatch == MismatchBorrowingLimit {
+				case MismatchBorrowingLimit:
 					hasBorrowingLimitCandidate = true
 				}
 			}
