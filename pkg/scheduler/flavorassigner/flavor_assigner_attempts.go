@@ -37,7 +37,7 @@ type FlavorAssignmentAttempt struct {
 	Borrow                int
 	PreemptionPossibility *preemptioncommon.PreemptionPossibility
 	Reasons               []string
-	Mismatch              MismatchType
+	Reason                string
 }
 
 type FlavorAssignmentAttempts []FlavorAssignmentAttempt
@@ -54,7 +54,7 @@ func (fa *FlavorAssignmentAttempts) AddNoFitFlavorAttempt(flavor kueue.ResourceF
 	}
 	if status != nil {
 		flavorAttempt.Reasons = append(flavorAttempt.Reasons, status.reasons...)
-		flavorAttempt.Mismatch = status.Mismatch
+		flavorAttempt.Reason = status.Reason
 	}
 	*fa = append(*fa, flavorAttempt)
 }
@@ -63,7 +63,7 @@ func (fa *FlavorAssignmentAttempts) AddRepresentativeModeFlavorAttempt(
 	flavor kueue.ResourceFlavorReference,
 	preemptionMode preemptionMode,
 	maxBorrow int, reasons []string,
-	mismatch MismatchType,
+	reason string,
 ) {
 	flavorAssignmentMode := preemptionMode.flavorAssignmentMode()
 	flavorAttempt := FlavorAssignmentAttempt{
@@ -71,7 +71,7 @@ func (fa *FlavorAssignmentAttempts) AddRepresentativeModeFlavorAttempt(
 		Mode:                  flavorAssignmentMode,
 		PreemptionPossibility: preemptionMode.preemptionPossibility(),
 		Borrow:                maxBorrow,
-		Mismatch:              mismatch,
+		Reason:                reason,
 	}
 	if len(reasons) > 0 {
 		slices.Sort(reasons)
@@ -108,7 +108,7 @@ func mergeFlavorAttemptsForResource(
 				}
 				at.Reasons = mergeUnique(at.Reasons, []string{msg})
 				slices.Sort(at.Reasons)
-				at.Mismatch = MismatchStructural
+				at.Reason = kueue.WorkloadQuotaReservedReasonNoMatchingFlavor
 				dst[flv] = at
 			}
 		}
@@ -137,7 +137,7 @@ func mergeFlavorAttempts(dst map[kueue.ResourceFlavorReference]FlavorAssignmentA
 				Borrow:                maxBorrow,
 				PreemptionPossibility: existingPreemption,
 				Reasons:               reasons,
-				Mismatch:              MergeMismatch(existing.Mismatch, at.Mismatch),
+				Reason:                MergeMismatch(existing.Reason, at.Reason),
 			}
 			continue
 		}
@@ -148,7 +148,7 @@ func mergeFlavorAttempts(dst map[kueue.ResourceFlavorReference]FlavorAssignmentA
 			Borrow:                at.Borrow,
 			PreemptionPossibility: at.PreemptionPossibility,
 			Reasons:               mergeUnique(nil, at.Reasons),
-			Mismatch:              at.Mismatch,
+			Reason:                at.Reason,
 		}
 		slices.Sort(cp.Reasons)
 		dst[at.Flavor] = cp

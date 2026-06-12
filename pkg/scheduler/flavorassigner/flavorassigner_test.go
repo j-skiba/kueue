@@ -110,7 +110,7 @@ func assertPodSetConsideredFlexible(t *testing.T, podSetName string, want, got [
 				continue
 			}
 
-			if diff := cmp.Diff(wa, ga, cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "Mismatch")); diff != "" {
+			if diff := cmp.Diff(wa, ga, cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "Reason")); diff != "" {
 				t.Errorf("podset %q: flavor %q mismatch (fit case) (-want +got):\n%s", podSetName, flavor, diff)
 			}
 		}
@@ -124,7 +124,7 @@ func assertPodSetConsideredFlexible(t *testing.T, podSetName string, want, got [
 			t.Errorf("podset %q: expected flavor %q in FlavorAssignmentAttempts (no-fit case)", podSetName, flavor)
 			continue
 		}
-		if diff := cmp.Diff(wa, ga, cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "Mismatch")); diff != "" {
+		if diff := cmp.Diff(wa, ga, cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "Reason")); diff != "" {
 			t.Errorf("podset %q: flavor %q mismatch (no-fit case) (-want +got):\n%s", podSetName, flavor, diff)
 		}
 	}
@@ -3711,7 +3711,7 @@ func TestDeletedFlavors(t *testing.T) {
 				cmpopts.IgnoreUnexported(Assignment{}, FlavorAssignment{}),
 				statusComparer,
 				cmpopts.IgnoreFields(Assignment{}, "LastState", "NoFitReason"),
-				cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "Mismatch"),
+				cmpopts.IgnoreFields(FlavorAssignmentAttempt{}, "Reason"),
 			); diff != "" {
 				t.Errorf("Unexpected assignment (-want,+got):\n%s", diff)
 			}
