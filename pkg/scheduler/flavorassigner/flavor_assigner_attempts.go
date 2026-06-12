@@ -137,7 +137,7 @@ func mergeFlavorAttempts(dst map[kueue.ResourceFlavorReference]FlavorAssignmentA
 				Borrow:                maxBorrow,
 				PreemptionPossibility: existingPreemption,
 				Reasons:               reasons,
-				Reason:                MergeMismatch(existing.Reason, at.Reason),
+				Reason:                MergeReason(existing.Reason, at.Reason),
 			}
 			continue
 		}
