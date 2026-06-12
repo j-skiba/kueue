@@ -952,7 +952,7 @@ func (r *WorkloadReconciler) getUnadmittedQuotaReservedReason(
 	}
 
 	quotaReservedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
-	hasStatusReason := quotaReservedCond != nil && quotaReservedCond.Status == metav1.ConditionFalse
+	hasFalseQuotaReserved := quotaReservedCond != nil && quotaReservedCond.Status == metav1.ConditionFalse
 
 	// 1. Deactivated
 	if wl.Spec.Active != nil && !*wl.Spec.Active {
@@ -982,12 +982,12 @@ func (r *WorkloadReconciler) getUnadmittedQuotaReservedReason(
 			return kueue.WorkloadQuotaReservedReasonMisconfigured, fmt.Sprintf("ClusterQueue %s is inactive", lq.Spec.ClusterQueue)
 		}
 	}
-	if hasStatusReason && quotaReservedCond.Reason == kueue.WorkloadQuotaReservedReasonMisconfigured {
+	if hasFalseQuotaReserved && quotaReservedCond.Reason == kueue.WorkloadQuotaReservedReasonMisconfigured {
 		return quotaReservedCond.Reason, quotaReservedCond.Message
 	}
 
 	// 3. NoMatchingFlavor - scheduler-determined
-	if hasStatusReason && quotaReservedCond.Reason == kueue.WorkloadQuotaReservedReasonNoMatchingFlavor {
+	if hasFalseQuotaReserved && quotaReservedCond.Reason == kueue.WorkloadQuotaReservedReasonNoMatchingFlavor {
 		return quotaReservedCond.Reason, quotaReservedCond.Message
 	}
 
@@ -1005,7 +1005,7 @@ func (r *WorkloadReconciler) getUnadmittedQuotaReservedReason(
 	}
 
 	// 6-11. Remaining scheduler-determined reasons
-	if hasStatusReason {
+	if hasFalseQuotaReserved {
 		r := quotaReservedCond.Reason
 		if r != kueue.WorkloadQuotaReservedReasonDeactivated &&
 			r != kueue.WorkloadQuotaReservedReasonMisconfigured &&
