@@ -305,6 +305,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cq), &createdCQ)).To(gomega.Succeed())
 			cond := apimeta.FindStatusCondition(createdCQ.Status.Conditions, kueue.ClusterQueueActive)
 			g.Expect(cond).NotTo(gomega.BeNil())
+			g.Expect(cond.Status).To(gomega.Equal(metav1.ConditionTrue))
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 
 		// Wait for LQ status condition to be synchronized
@@ -348,6 +349,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cq), &createdCQ)).To(gomega.Succeed())
 			cond := apimeta.FindStatusCondition(createdCQ.Status.Conditions, kueue.ClusterQueueActive)
 			g.Expect(cond).NotTo(gomega.BeNil())
+			g.Expect(cond.Status).To(gomega.Equal(metav1.ConditionTrue))
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 
 		gomega.Eventually(func(g gomega.Gomega) {

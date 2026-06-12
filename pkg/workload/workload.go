@@ -1939,24 +1939,34 @@ func TASAssignedNodeNames(wl *kueue.Workload) []string {
 // A higher weight indicates a more severe unadmitted reason.
 func GetQuotaReservedReasonPriority(reason string) int {
 	switch reason {
+	// --- Flavor-Independent (Workload-wide) Reasons ---
+	// These blockers take absolute precedence over flavor assignment checks.
 	case kueue.WorkloadQuotaReservedReasonDeactivated:
-		return 8
+		return 12
 	case kueue.WorkloadQuotaReservedReasonMisconfigured:
+		return 11
+	case kueue.WorkloadQuotaReservedReasonNoMatchingFlavor:
+		return 10
+	case kueue.WorkloadQuotaReservedReasonSuspended:
+		return 9
+	case kueue.WorkloadQuotaReservedReasonAdmissionGated:
+		return 8
+	case kueue.WorkloadQuotaReservedReasonWaitingForPodsReady:
 		return 7
-	case kueue.WorkloadQuotaReservedReasonExceedsMaxQuota,
-		kueue.WorkloadQuotaReservedReasonNoMatchingFlavor:
+	// --- Nominated Flavor Reasons ---
+	// These blockers apply to the selected nominated flavor assignment.
+	case kueue.WorkloadQuotaReservedReasonExceedsMaxQuota:
 		return 6
-	case kueue.WorkloadQuotaReservedReasonSuspended,
-		kueue.WorkloadQuotaReservedReasonWaitingForPodsReady,
-		kueue.WorkloadQuotaReservedReasonAdmissionGated:
-		return 5
 	case kueue.WorkloadQuotaReservedReasonBorrowingLimitReached:
+		return 5
+	case kueue.WorkloadQuotaReservedReasonWaitingForQuota:
 		return 4
-	case kueue.WorkloadQuotaReservedReasonWaitingForQuota,
-		kueue.WorkloadQuotaReservedReasonTopologyPlacementFailed:
+	case kueue.WorkloadQuotaReservedReasonTopologyPlacementFailed:
 		return 3
 	case kueue.WorkloadQuotaReservedReasonPendingPreemption:
 		return 2
+	// --- Pending Evaluation ---
+	// Lowest precedence state for active workloads awaiting evaluation.
 	case kueue.WorkloadQuotaReservedReasonPendingEvaluation:
 		return 1
 	default:

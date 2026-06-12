@@ -2184,7 +2184,7 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 			Type:    kueue.WorkloadQuotaReserved,
 			Status:  metav1.ConditionFalse,
 			Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
-			Message: "The workload is pending capacity evaluation",
+			Message: "The workload is pending evaluation",
 		}).Obj()
 
 	pendingWl2 := utiltestingapi.MakeWorkload("pending-wl2", defaultNamespace).Queue("foo").
@@ -2198,7 +2198,7 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 			Type:    kueue.WorkloadQuotaReserved,
 			Status:  metav1.ConditionFalse,
 			Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
-			Message: "The workload is pending capacity evaluation",
+			Message: "The workload is pending evaluation",
 		}).Obj()
 
 	misconfiguredWl := utiltestingapi.MakeWorkload("misconfigured-wl", defaultNamespace).Queue("foo").

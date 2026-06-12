@@ -446,7 +446,7 @@ func TestReconcile(t *testing.T) {
 					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
-					Message: "The workload is pending capacity evaluation",
+					Message: "The workload is pending evaluation",
 				}).
 				Condition(metav1.Condition{
 					Type:    kueue.WorkloadAdmitted,
@@ -3394,7 +3394,7 @@ func TestReconcile(t *testing.T) {
 				Queue("lq").
 				Obj(),
 			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").StopPolicy(kueue.Hold).Obj(),
-			cq: utiltestingapi.MakeClusterQueue("cq").Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").Active(metav1.ConditionTrue).Obj(),
 			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Condition(metav1.Condition{

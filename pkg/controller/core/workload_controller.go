@@ -860,26 +860,6 @@ func (r *WorkloadReconciler) reconcileCheckBasedEviction(ctx context.Context, wl
 	return true, nil
 }
 
-// isSchedulerDeterminedReason returns true if the reason is determined by the scheduler
-// (e.g., capacity or scheduling holds) and must be preserved to prevent the controller
-// from overwriting it with the default PendingEvaluation status.
-func isSchedulerDeterminedReason(reason string) bool {
-	switch reason {
-	case kueue.WorkloadQuotaReservedReasonWaitingForQuota,
-		kueue.WorkloadQuotaReservedReasonPendingEvaluation,
-		kueue.WorkloadQuotaReservedReasonWaitingForPodsReady,
-		kueue.WorkloadQuotaReservedReasonMisconfigured,
-		kueue.WorkloadQuotaReservedReasonNoMatchingFlavor,
-		kueue.WorkloadQuotaReservedReasonExceedsMaxQuota,
-		kueue.WorkloadQuotaReservedReasonBorrowingLimitReached,
-		kueue.WorkloadQuotaReservedReasonTopologyPlacementFailed,
-		kueue.WorkloadQuotaReservedReasonPendingPreemption:
-		return true
-	default:
-		return false
-	}
-}
-
 func (r *WorkloadReconciler) reconcileUnadmittedStatus(
 	ctx context.Context,
 	wl *kueue.Workload,
@@ -971,39 +951,72 @@ func (r *WorkloadReconciler) getUnadmittedQuotaReservedReason(
 		}
 	}
 
-	switch {
-	case wl.Spec.Active != nil && !*wl.Spec.Active:
+	quotaReservedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
+	hasStatusReason := quotaReservedCond != nil && quotaReservedCond.Status == metav1.ConditionFalse
+
+	// 1. Deactivated
+	if wl.Spec.Active != nil && !*wl.Spec.Active {
 		return kueue.WorkloadQuotaReservedReasonDeactivated, "The workload is deactivated"
-	case !lqExists:
+	}
+
+	// 2. Misconfigured
+	if !lqExists {
 		return kueue.WorkloadQuotaReservedReasonMisconfigured, fmt.Sprintf("LocalQueue %s doesn't exist", wl.Spec.QueueName)
-	case ptr.Deref(lq.Spec.StopPolicy, kueue.None) != kueue.None:
-		return kueue.WorkloadQuotaReservedReasonSuspended, fmt.Sprintf("LocalQueue %s is inactive", wl.Spec.QueueName)
-	case !cqOk:
+	}
+	if !cqOk {
 		cqName, _ := r.queues.ClusterQueueForWorkload(wl)
 		if cqName == "" && lq != nil {
 			cqName = lq.Spec.ClusterQueue
 		}
 		return kueue.WorkloadQuotaReservedReasonMisconfigured, fmt.Sprintf("ClusterQueue %s doesn't exist", cqName)
-	case !cq.DeletionTimestamp.IsZero():
-		return kueue.WorkloadQuotaReservedReasonMisconfigured, fmt.Sprintf("ClusterQueue %s is terminating", cq.Name)
-	case isSuspendedByCQ:
-		return kueue.WorkloadQuotaReservedReasonSuspended, fmt.Sprintf("ClusterQueue %s is inactive", lq.Spec.ClusterQueue)
-	case cqOk && cq != nil && !apimeta.IsStatusConditionTrue(cq.Status.Conditions, kueue.ClusterQueueActive):
-		activeCond := apimeta.FindStatusCondition(cq.Status.Conditions, kueue.ClusterQueueActive)
-		if activeCond != nil {
-			return kueue.WorkloadQuotaReservedReasonMisconfigured, activeCond.Message
+	}
+	if cq != nil {
+		if !cq.DeletionTimestamp.IsZero() {
+			return kueue.WorkloadQuotaReservedReasonMisconfigured, fmt.Sprintf("ClusterQueue %s is terminating", cq.Name)
 		}
-		return kueue.WorkloadQuotaReservedReasonMisconfigured, fmt.Sprintf("ClusterQueue %s is inactive", lq.Spec.ClusterQueue)
-	case features.Enabled(features.AdmissionGatedBy) && workload.HasAdmissionGate(wl):
+		if !apimeta.IsStatusConditionTrue(cq.Status.Conditions, kueue.ClusterQueueActive) && !isSuspendedByCQ {
+			activeCond := apimeta.FindStatusCondition(cq.Status.Conditions, kueue.ClusterQueueActive)
+			if activeCond != nil {
+				return kueue.WorkloadQuotaReservedReasonMisconfigured, activeCond.Message
+			}
+			return kueue.WorkloadQuotaReservedReasonMisconfigured, fmt.Sprintf("ClusterQueue %s is inactive", lq.Spec.ClusterQueue)
+		}
+	}
+	if hasStatusReason && quotaReservedCond.Reason == kueue.WorkloadQuotaReservedReasonMisconfigured {
+		return quotaReservedCond.Reason, quotaReservedCond.Message
+	}
+
+	// 3. NoMatchingFlavor - scheduler-determined
+	if hasStatusReason && quotaReservedCond.Reason == kueue.WorkloadQuotaReservedReasonNoMatchingFlavor {
+		return quotaReservedCond.Reason, quotaReservedCond.Message
+	}
+
+	// 4. Suspended
+	if ptr.Deref(lq.Spec.StopPolicy, kueue.None) != kueue.None {
+		return kueue.WorkloadQuotaReservedReasonSuspended, fmt.Sprintf("LocalQueue %s is inactive", wl.Spec.QueueName)
+	}
+	if isSuspendedByCQ {
+		return kueue.WorkloadQuotaReservedReasonSuspended, fmt.Sprintf("ClusterQueue %s is inactive", lq.Spec.ClusterQueue)
+	}
+
+	// 5. AdmissionGated
+	if features.Enabled(features.AdmissionGatedBy) && workload.HasAdmissionGate(wl) {
 		return kueue.WorkloadQuotaReservedReasonAdmissionGated, fmt.Sprintf("Admission is gated by: %s", wl.Annotations[constants.AdmissionGatedByAnnotation])
-	default:
-		quotaReservedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
-		if quotaReservedCond != nil && quotaReservedCond.Status == metav1.ConditionFalse &&
-			isSchedulerDeterminedReason(quotaReservedCond.Reason) {
+	}
+
+	// 6-11. Remaining scheduler-determined reasons
+	if hasStatusReason {
+		r := quotaReservedCond.Reason
+		if r != kueue.WorkloadQuotaReservedReasonDeactivated &&
+			r != kueue.WorkloadQuotaReservedReasonMisconfigured &&
+			r != kueue.WorkloadQuotaReservedReasonSuspended &&
+			r != kueue.WorkloadQuotaReservedReasonAdmissionGated {
 			return quotaReservedCond.Reason, quotaReservedCond.Message
 		}
-		return kueue.WorkloadQuotaReservedReasonPendingEvaluation, "The workload is pending capacity evaluation"
 	}
+
+	// 12. PendingEvaluation - default fallback
+	return kueue.WorkloadQuotaReservedReasonPendingEvaluation, "The workload is pending evaluation"
 }
 
 func (r *WorkloadReconciler) syncPreemptionGateStates(wl *kueue.Workload) bool {
@@ -1696,9 +1709,13 @@ func (w *workloadQueueHandler) Update(ctx context.Context, ev event.UpdateEvent,
 		ctx = ctrl.LoggerInto(ctx, log)
 		log.V(5).Info("Workload cluster queue update event")
 
+		oldActive := apimeta.IsStatusConditionTrue(oldCq.Status.Conditions, kueue.ClusterQueueActive)
+		newActive := apimeta.IsStatusConditionTrue(newCq.Status.Conditions, kueue.ClusterQueueActive)
+
 		if !newCq.DeletionTimestamp.IsZero() ||
 			!gocmp.Equal(oldCq.Spec.AdmissionChecksStrategy, newCq.Spec.AdmissionChecksStrategy) ||
-			!ptr.Equal(oldCq.Spec.StopPolicy, newCq.Spec.StopPolicy) {
+			!ptr.Equal(oldCq.Spec.StopPolicy, newCq.Spec.StopPolicy) ||
+			oldActive != newActive {
 			w.queueReconcileForWorkloadsOfClusterQueue(ctx, newCq.Name, wq)
 		}
 		return

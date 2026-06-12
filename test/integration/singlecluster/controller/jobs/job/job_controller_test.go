@@ -4683,7 +4683,7 @@ func getPendingReasonWithScheduler(schedulerReason string) string {
 
 func getPendingMessage(wlKeyName string) string {
 	if features.Enabled(features.UnadmittedWorkloadsObservability) {
-		return "The workload is pending capacity evaluation"
+		return "The workload is pending evaluation"
 	}
 	return fmt.Sprintf("Exceeded the PodsReady timeout %s", wlKeyName)
 }
