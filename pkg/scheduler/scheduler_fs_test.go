@@ -170,7 +170,8 @@ func TestScheduleForFairSharing(t *testing.T) {
 		// wantAssignments is a summary of all the admissions in the cache after this cycle.
 		wantAssignments map[workload.Reference]kueue.Admission
 		// wantWorkloads is the subset of workloads that got admitted in this cycle.
-		wantWorkloads []kueue.Workload
+		wantWorkloads               []kueue.Workload
+		wantConditionsObservability map[string][]metav1.Condition
 		// wantLeft is the workload keys that are left in the queues after this cycle.
 		wantLeft map[kueue.ClusterQueueReference][]workload.Reference
 		// wantInadmissibleLeft is the workload keys that are left in the inadmissible state after this cycle.
@@ -181,6 +182,7 @@ func TestScheduleForFairSharing(t *testing.T) {
 		eventCmpOpts cmp.Options
 
 		wantSkippedPreemptions map[string]int
+		featureGates           map[featuregate.Feature]bool
 	}{
 		"with fair sharing: schedule workload with lowest share first": {
 			enableFairSharing: true,
@@ -1083,6 +1085,13 @@ func TestScheduleForFairSharing(t *testing.T) {
 				"eng-alpha/spot-admitted": *utiltestingapi.MakeAdmission("cq-a").PodSets(utiltestingapi.MakePodSetAssignment("one").Assignment(corev1.ResourceCPU, "spot", "5").Obj()).Obj(),
 				"eng-alpha/od-admitted":   *utiltestingapi.MakeAdmission("cq-b").PodSets(utiltestingapi.MakePodSetAssignment("one").Assignment(corev1.ResourceCPU, "on-demand", "8").Obj()).Obj(),
 				"eng-alpha/wl-a":          *utiltestingapi.MakeAdmission("cq-a").PodSets(utiltestingapi.MakePodSetAssignment("one").Assignment(corev1.ResourceCPU, "on-demand", "4").Count(1).Obj()).Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"wl-b": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"Workload no longer fits after processing another workload",
+					now,
+				),
 			},
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"cq-b": {"eng-alpha/wl-b"},
@@ -3455,17 +3464,46 @@ func TestScheduleForFairSharing(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "fs-high-pob", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "fs-high-pob", "Pending", corev1.EventTypeWarning).Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"fs-high-pob": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					"couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor on-demand, 5 more needed. Pending the preemption of 1 workload(s)",
+					now,
+				),
+			},
 		},
 	}
+	scenarios := []struct {
+		workloadRequestUseMergePatch     bool
+		unadmittedWorkloadsObservability bool
+	}{
+		{false, false},
+		{false, true},
+		{true, false},
+		{true, true},
+	}
+
 	for name, tc := range cases {
-		for _, enabled := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
+		for _, scenario := range scenarios {
+			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch:%t observability:%t", name, scenario.workloadRequestUseMergePatch, scenario.unadmittedWorkloadsObservability), func(t *testing.T) {
 				features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
-					features.WorkloadRequestUseMergePatch:      enabled,
-					features.UnadmittedWorkloadsObservability:  false,
-					features.UnadmittedWorkloadsExplicitStatus: false,
+					features.WorkloadRequestUseMergePatch:      scenario.workloadRequestUseMergePatch,
+					features.UnadmittedWorkloadsObservability:  scenario.unadmittedWorkloadsObservability,
+					features.UnadmittedWorkloadsExplicitStatus: scenario.unadmittedWorkloadsObservability,
 				})
+				features.SetFeatureGatesDuringTest(t, tc.featureGates)
 				metrics.AdmissionCyclePreemptionSkips.Reset()
+
+				wantWorkloads := make([]kueue.Workload, len(tc.wantWorkloads))
+				for i := range tc.wantWorkloads {
+					wantWorkloads[i] = *tc.wantWorkloads[i].DeepCopy()
+				}
+
+				var wantEvents []utiltesting.EventRecord
+				if len(tc.wantEvents) > 0 {
+					wantEvents = make([]utiltesting.EventRecord, len(tc.wantEvents))
+					copy(wantEvents, tc.wantEvents)
+				}
 
 				ctx, log := utiltesting.ContextWithLog(t)
 
@@ -3564,6 +3602,8 @@ func TestScheduleForFairSharing(t *testing.T) {
 					t.Fatalf("Unexpected list workloads error: %v", err)
 				}
 
+				utiltestingapi.AdjustWorkloadsConditionsForObservability(wantWorkloads, gotWorkloads.Items, tc.wantConditionsObservability)
+
 				defaultWorkloadCmpOpts := cmp.Options{
 					cmpopts.EquateEmpty(),
 					cmpopts.IgnoreFields(kueue.AdmissionCheckState{}, "LastTransitionTime"),
@@ -3571,7 +3611,7 @@ func TestScheduleForFairSharing(t *testing.T) {
 					cmpopts.SortSlices(func(a, b metav1.Condition) bool { return a.Type < b.Type }),
 				}
 
-				if diff := cmp.Diff(tc.wantWorkloads, gotWorkloads.Items, defaultWorkloadCmpOpts); diff != "" {
+				if diff := cmp.Diff(wantWorkloads, gotWorkloads.Items, defaultWorkloadCmpOpts); diff != "" {
 					t.Errorf("Unexpected workloads (-want,+got):\n%s", diff)
 				}
 
@@ -3591,8 +3631,36 @@ func TestScheduleForFairSharing(t *testing.T) {
 					t.Errorf("Unexpected elements left in inadmissible workloads (-want,+got):\n%s", diff)
 				}
 
-				if len(tc.wantEvents) > 0 {
-					if diff := cmp.Diff(tc.wantEvents, recorder.RecordedEvents, tc.eventCmpOpts...); diff != "" {
+				if features.Enabled(features.UnadmittedWorkloadsObservability) {
+					for i := range wantEvents {
+						ev := wantEvents[i]
+						if ev.Reason == "Pending" {
+							if conds, ok := tc.wantConditionsObservability[ev.Key.Name]; ok {
+								for _, cond := range conds {
+									if cond.Type == kueue.WorkloadQuotaReserved {
+										ev.Reason = cond.Reason
+										break
+									}
+								}
+							} else {
+								for _, gotEv := range recorder.RecordedEvents {
+									if gotEv.Key == ev.Key && gotEv.EventType == ev.EventType {
+										if gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonWaitingForQuota) ||
+											gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonExceedsMaxQuota) ||
+											gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonPendingPreemption) ||
+											gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonNoMatchingFlavor) {
+											ev.Reason = gotEv.Reason
+											break
+										}
+									}
+								}
+							}
+							wantEvents[i] = ev
+						}
+					}
+				}
+				if len(wantEvents) > 0 {
+					if diff := cmp.Diff(wantEvents, recorder.RecordedEvents, tc.eventCmpOpts...); diff != "" {
 						t.Errorf("unexpected events (-want/+got):\n%s", diff)
 					}
 				}

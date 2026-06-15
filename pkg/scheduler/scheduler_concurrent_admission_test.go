@@ -82,9 +82,10 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 		additionalClusterQueues []kueue.ClusterQueue
 		additionalLocalQueues   []kueue.LocalQueue
 
-		wantAssignments map[workload.Reference]kueue.Admission
-		wantWorkloads   []kueue.Workload
-		wantLeft        map[kueue.ClusterQueueReference][]workload.Reference
+		wantAssignments             map[workload.Reference]kueue.Admission
+		wantWorkloads               []kueue.Workload
+		wantConditionsObservability map[string][]metav1.Condition
+		wantLeft                    map[kueue.ClusterQueueReference][]workload.Reference
 	}{
 		"concurrent admission: more favorable variant evicts less favorable sibling": {
 			workloads: []kueue.Workload{
@@ -162,6 +163,13 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 						Obj()).
 					Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"candidate-more-favorable": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					". Pending the migration of 1 workload(s)",
+					now,
+				),
+			},
 			featureGates: map[featuregate.Feature]bool{features.ConcurrentAdmission: true},
 		},
 		"concurrent admission: less favorable variant is skipped when more favorable sibling is admitted": {
@@ -231,6 +239,13 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 						Assignment(corev1.ResourceCPU, "on-demand", "10").
 						Obj()).
 					Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"candidate-less-favorable": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"A more favorable variant is already admitted",
+					now,
+				),
 			},
 			featureGates: map[featuregate.Feature]bool{features.ConcurrentAdmission: true},
 		},
@@ -325,23 +340,42 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 						Obj()).
 					Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"candidate-more-favorable": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"Target flavor is below LastAcceptableFlavorName",
+					now,
+				),
+			},
 			featureGates: map[featuregate.Feature]bool{features.ConcurrentAdmission: true},
 		},
 	}
 
+	scenarios := []struct {
+		workloadRequestUseMergePatch     bool
+		unadmittedWorkloadsObservability bool
+	}{
+		{false, false},
+		{false, true},
+		{true, false},
+		{true, true},
+	}
+
 	for name, tc := range cases {
-		for _, enabled := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
-				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
+		for _, scenario := range scenarios {
+			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch:%t observability:%t", name, scenario.workloadRequestUseMergePatch, scenario.unadmittedWorkloadsObservability), func(t *testing.T) {
+				features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
+					features.WorkloadRequestUseMergePatch:      scenario.workloadRequestUseMergePatch,
+					features.UnadmittedWorkloadsObservability:  scenario.unadmittedWorkloadsObservability,
+					features.UnadmittedWorkloadsExplicitStatus: scenario.unadmittedWorkloadsObservability,
+				})
+				features.SetFeatureGatesDuringTest(t, tc.featureGates)
 				metrics.AdmissionCyclePreemptionSkips.Reset()
-				fg := map[featuregate.Feature]bool{
-					features.UnadmittedWorkloadsObservability:  false,
-					features.UnadmittedWorkloadsExplicitStatus: false,
+
+				wantWorkloads := make([]kueue.Workload, len(tc.wantWorkloads))
+				for i := range tc.wantWorkloads {
+					wantWorkloads[i] = *tc.wantWorkloads[i].DeepCopy()
 				}
-				for k, v := range tc.featureGates {
-					fg[k] = v
-				}
-				features.SetFeatureGatesDuringTest(t, fg)
 
 				ctx, log := utiltesting.ContextWithLog(t)
 
@@ -423,6 +457,8 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 					t.Fatalf("Unexpected list workloads error: %v", err)
 				}
 
+				utiltestingapi.AdjustWorkloadsConditionsForObservability(wantWorkloads, gotWorkloads.Items, tc.wantConditionsObservability)
+
 				defaultWorkloadCmpOpts := cmp.Options{
 					cmpopts.EquateEmpty(),
 					cmpopts.IgnoreFields(kueue.AdmissionCheckState{}, "LastTransitionTime"),
@@ -431,7 +467,7 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 					cmpopts.SortSlices(func(a, b kueue.Workload) bool { return a.Name < b.Name }),
 				}
 
-				if diff := cmp.Diff(tc.wantWorkloads, gotWorkloads.Items, defaultWorkloadCmpOpts); diff != "" {
+				if diff := cmp.Diff(wantWorkloads, gotWorkloads.Items, defaultWorkloadCmpOpts); diff != "" {
 					t.Errorf("Unexpected workloads (-want,+got):\n%s", diff)
 				}
 

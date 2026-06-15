@@ -266,7 +266,8 @@ func TestScheduleForTAS(t *testing.T) {
 		// wantInadmissibleLeft is the workload keys that are left in the inadmissible state after this cycle.
 		wantInadmissibleLeft map[kueue.ClusterQueueReference][]workload.Reference
 		// wantEvents asserts on the events, the comparison options are passed by eventCmpOpts
-		wantEvents []utiltesting.EventRecord
+		wantEvents                  []utiltesting.EventRecord
+		wantConditionsObservability map[string][]metav1.Condition
 		// eventCmpOpts are the comparison options for the events
 		eventCmpOpts cmp.Options
 
@@ -1995,6 +1996,13 @@ func TestScheduleForTAS(t *testing.T) {
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s)`).
 					Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"foo": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s)`,
+					now,
+				),
+			},
 		},
 		"workload does not get scheduled as the node capacity is already used by another TAS workload": {
 			nodes:           defaultSingleNode,
@@ -2036,6 +2044,13 @@ func TestScheduleForTAS(t *testing.T) {
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1`).
 					Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"foo": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1`,
+					now,
+				),
+			},
 		},
 		"workload does not get scheduled as the node capacity is already used by a non-TAS pod": {
 			nodes: defaultSingleNode,
@@ -2064,6 +2079,13 @@ func TestScheduleForTAS(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "foo", "Pending", "Warning").
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1`).
 					Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"foo": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1`,
+					now,
+				),
 			},
 		},
 		"workload gets admitted next to already admitted workload, multiple resources used": {
@@ -2536,6 +2558,13 @@ func TestScheduleForTAS(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "foo", "Pending", "Warning").
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "pods": 1`).
 					Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"foo": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "pods": 1`,
+					now,
+				),
 			},
 		},
 		"workload with zero value request gets scheduled": {
@@ -3087,23 +3116,44 @@ func TestScheduleForTAS(t *testing.T) {
 					Message(`couldn't assign flavors to pod set one: topology "tas-three-level" doesn't allow to fit; 0/1 slice(s) fit on level cloud.provider.com/rack; 2/3 slice(s) fit on level kubernetes.io/hostname`).
 					Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"foo": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					`couldn't assign flavors to pod set one: topology "tas-three-level" doesn't allow to fit; 0/1 slice(s) fit on level cloud.provider.com/rack; 2/3 slice(s) fit on level kubernetes.io/hostname`,
+					now,
+				),
+			},
 		},
 	}
+	scenarios := []struct {
+		workloadRequestUseMergePatch     bool
+		unadmittedWorkloadsObservability bool
+	}{
+		{false, false},
+		{false, true},
+		{true, false},
+		{true, true},
+	}
+
 	for name, tc := range cases {
-		for _, enabled := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
-				fg := map[featuregate.Feature]bool{
-					features.UnadmittedWorkloadsObservability:  false,
-					features.UnadmittedWorkloadsExplicitStatus: false,
-				}
-				for k, v := range tc.featureGates {
-					fg[k] = v
-				}
-				features.SetFeatureGatesDuringTest(t, fg)
+		for _, scenario := range scenarios {
+			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch:%t observability:%t", name, scenario.workloadRequestUseMergePatch, scenario.unadmittedWorkloadsObservability), func(t *testing.T) {
+				features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
+					features.WorkloadRequestUseMergePatch:      scenario.workloadRequestUseMergePatch,
+					features.UnadmittedWorkloadsObservability:  scenario.unadmittedWorkloadsObservability,
+					features.UnadmittedWorkloadsExplicitStatus: scenario.unadmittedWorkloadsObservability,
+				})
+				features.SetFeatureGatesDuringTest(t, tc.featureGates)
 				ctx, log := utiltesting.ContextWithLog(t)
 				testWls := make([]kueue.Workload, 0, len(tc.workloads))
 				for _, wl := range tc.workloads {
 					testWls = append(testWls, *wl.DeepCopy())
+				}
+
+				var wantEvents []utiltesting.EventRecord
+				if len(tc.wantEvents) > 0 {
+					wantEvents = make([]utiltesting.EventRecord, len(tc.wantEvents))
+					copy(wantEvents, tc.wantEvents)
 				}
 
 				clientBuilder := utiltesting.NewClientBuilder().
@@ -3231,7 +3281,35 @@ func TestScheduleForTAS(t *testing.T) {
 				if diff := cmp.Diff(tc.wantInadmissibleLeft, qDumpInadmissible, cmpDump...); diff != "" {
 					t.Errorf("Unexpected elements left in inadmissible workloads (-want,+got):\n%s", diff)
 				}
-				if diff := cmp.Diff(tc.wantEvents, recorder.RecordedEvents, tc.eventCmpOpts...); diff != "" {
+				if features.Enabled(features.UnadmittedWorkloadsObservability) {
+					for i := range wantEvents {
+						ev := wantEvents[i]
+						if ev.Reason == "Pending" {
+							if conds, ok := tc.wantConditionsObservability[ev.Key.Name]; ok {
+								for _, cond := range conds {
+									if cond.Type == kueue.WorkloadQuotaReserved {
+										ev.Reason = cond.Reason
+										break
+									}
+								}
+							} else {
+								for _, gotEv := range recorder.RecordedEvents {
+									if gotEv.Key == ev.Key && gotEv.EventType == ev.EventType {
+										if gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonWaitingForQuota) ||
+											gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonExceedsMaxQuota) ||
+											gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonPendingPreemption) ||
+											gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonNoMatchingFlavor) {
+											ev.Reason = gotEv.Reason
+											break
+										}
+									}
+								}
+							}
+							wantEvents[i] = ev
+						}
+					}
+				}
+				if diff := cmp.Diff(wantEvents, recorder.RecordedEvents, tc.eventCmpOpts...); diff != "" {
 					t.Errorf("unexpected events (-want/+got):\n%s", diff)
 				}
 			})
@@ -3306,7 +3384,8 @@ func TestScheduleForTASPreemption(t *testing.T) {
 		// wantInadmissibleLeft is the workload keys that are left in the inadmissible state after this cycle.
 		wantInadmissibleLeft map[kueue.ClusterQueueReference][]workload.Reference
 		// wantEvents asserts on the events, the comparison options are passed by eventCmpOpts
-		wantEvents []utiltesting.EventRecord
+		wantEvents                  []utiltesting.EventRecord
+		wantConditionsObservability map[string][]metav1.Condition
 		// eventCmpOpts are the comparison options for the events
 		eventCmpOpts cmp.Options
 
@@ -3437,6 +3516,13 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					Message(`couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor tas-default, 5 more needed. Pending the preemption of 1 workload(s)`).
 					Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"foo": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor tas-default, 5 more needed. Pending the preemption of 1 workload(s)",
+					now,
+				),
+			},
 		},
 		// Verifies TAS uses PodSpec memory (4Gi) for preemption fit, not quota-derived values.
 		// Node has 5Gi, incoming workload needs 4Gi, so it must preempt the 2Gi admitted workload.
@@ -3563,6 +3649,13 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "memory": 1. Pending the preemption of 1 workload(s)`).
 					Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"foo": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "memory": 1. Pending the preemption of 1 workload(s)`,
+					now,
+				),
+			},
 		},
 		"only low priority workload is preempted": {
 			// This test case demonstrates the baseline scenario where there
@@ -3681,6 +3774,13 @@ func TestScheduleForTASPreemption(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "foo", "Pending", "Warning").
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1. Pending the preemption of 1 workload(s)`).
 					Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"foo": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1. Pending the preemption of 1 workload(s)`,
+					now,
+				),
 			},
 		},
 		"With pods count usage pressure on nodes: only low priority workload is preempted": {
@@ -3804,6 +3904,13 @@ func TestScheduleForTASPreemption(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "high-priority-waiting", "Pending", "Warning").
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1. Pending the preemption of 1 workload(s)`).
 					Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"high-priority-waiting": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1. Pending the preemption of 1 workload(s)`,
+					now,
+				),
 			},
 		},
 		"low priority workload is preempted, mid-priority workload survives": {
@@ -3963,6 +4070,13 @@ func TestScheduleForTASPreemption(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "foo", "Pending", "Warning").
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1. Pending the preemption of 1 workload(s)`).
 					Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"foo": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1. Pending the preemption of 1 workload(s)`,
+					now,
+				),
 			},
 		},
 		"low priority workload is preempted even though there is enough capacity, but fragmented": {
@@ -4125,6 +4239,13 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s). Pending the preemption of 1 workload(s)`).
 					Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"foo": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s). Pending the preemption of 1 workload(s)`,
+					now,
+				),
+			},
 		},
 		"workload with equal priority awaits for other workloads to complete": {
 			// In this test case the waiting workload cannot preempt the running
@@ -4235,6 +4356,13 @@ func TestScheduleForTASPreemption(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "mid-priority-waiting", "Pending", "Warning").
 					Message(`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s)`).
 					Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"mid-priority-waiting": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s)`,
+					now,
+				),
 			},
 		},
 		"TAS disabled, preemption succeeds even with ResourceFlavor topologyName": {
@@ -4360,6 +4488,13 @@ func TestScheduleForTASPreemption(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "low-priority", "Preempted", "Normal").Obj(),
 				utiltesting.MakeEventRecord("default", "high-priority", "PreemptedWorkload", "Normal").Obj(),
 				utiltesting.MakeEventRecord("default", "high-priority", "Pending", "Warning").Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"high-priority": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					"couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor tas-default, 3 more needed. Pending the preemption of 1 workload(s)",
+					now,
+				),
 			},
 			featureGates: map[featuregate.Feature]bool{
 				features.TopologyAwareScheduling: false,
@@ -4540,19 +4675,58 @@ func TestScheduleForTASPreemption(t *testing.T) {
 				eventIgnoreMessage,
 				cmpopts.SortSlices(utiltesting.SortEvents),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"high-priority": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					"couldn't assign flavors to pod set one: insufficient unused quota for memory in flavor tas-default, 5Gi more needed. Pending the preemption of 2 workload(s)",
+					now,
+				),
+			},
 		},
 	}
+	scenarios := []struct {
+		workloadRequestUseMergePatch     bool
+		unadmittedWorkloadsObservability bool
+	}{
+		{false, false},
+		{false, true},
+		{true, false},
+		{true, true},
+	}
+
 	for name, tc := range cases {
-		for _, enabled := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
-				fg := map[featuregate.Feature]bool{
-					features.UnadmittedWorkloadsObservability:  false,
-					features.UnadmittedWorkloadsExplicitStatus: false,
+		for _, scenario := range scenarios {
+			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch:%t observability:%t", name, scenario.workloadRequestUseMergePatch, scenario.unadmittedWorkloadsObservability), func(t *testing.T) {
+				features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
+					features.WorkloadRequestUseMergePatch:      scenario.workloadRequestUseMergePatch,
+					features.UnadmittedWorkloadsObservability:  scenario.unadmittedWorkloadsObservability,
+					features.UnadmittedWorkloadsExplicitStatus: scenario.unadmittedWorkloadsObservability,
+				})
+				features.SetFeatureGatesDuringTest(t, tc.featureGates)
+
+				wantWorkloads := make([]kueue.Workload, len(tc.wantWorkloads))
+				for i := range tc.wantWorkloads {
+					wantWorkloads[i] = *tc.wantWorkloads[i].DeepCopy()
 				}
-				for k, v := range tc.featureGates {
-					fg[k] = v
+
+				var wantEvents []utiltesting.EventRecord
+				if len(tc.wantEvents) > 0 {
+					wantEvents = make([]utiltesting.EventRecord, len(tc.wantEvents))
+					for i := range tc.wantEvents {
+						ev := tc.wantEvents[i]
+						if features.Enabled(features.UnadmittedWorkloadsObservability) && ev.Reason == "Pending" {
+							if conds, ok := tc.wantConditionsObservability[ev.Key.Name]; ok {
+								for _, cond := range conds {
+									if cond.Type == kueue.WorkloadQuotaReserved {
+										ev.Reason = cond.Reason
+										break
+									}
+								}
+							}
+						}
+						wantEvents[i] = ev
+					}
 				}
-				features.SetFeatureGatesDuringTest(t, fg)
 
 				ctx, log := utiltesting.ContextWithLog(t)
 				testWls := make([]kueue.Workload, 0, len(tc.workloads))
@@ -4635,6 +4809,8 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					t.Fatalf("Unexpected list workloads error: %v", err)
 				}
 
+				utiltestingapi.AdjustWorkloadsConditionsForObservability(wantWorkloads, gotWorkloads.Items, tc.wantConditionsObservability)
+
 				defaultWorkloadCmpOpts := cmp.Options{
 					cmpopts.EquateEmpty(),
 					cmpopts.IgnoreFields(kueue.Workload{}, "ObjectMeta.ResourceVersion"),
@@ -4643,7 +4819,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 					}),
 				}
 
-				if diff := cmp.Diff(tc.wantWorkloads, gotWorkloads.Items, defaultWorkloadCmpOpts); diff != "" {
+				if diff := cmp.Diff(wantWorkloads, gotWorkloads.Items, defaultWorkloadCmpOpts); diff != "" {
 					t.Errorf("Unexpected scheduled workloads (-want,+got):\n%s", diff)
 				}
 
@@ -4674,7 +4850,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 				if diff := cmp.Diff(tc.wantInadmissibleLeft, qDumpInadmissible, cmpDump...); diff != "" {
 					t.Errorf("Unexpected elements left in inadmissible workloads (-want,+got):\n%s", diff)
 				}
-				if diff := cmp.Diff(tc.wantEvents, recorder.RecordedEvents, tc.eventCmpOpts...); diff != "" {
+				if diff := cmp.Diff(wantEvents, recorder.RecordedEvents, tc.eventCmpOpts...); diff != "" {
 					t.Errorf("unexpected events (-want/+got):\n%s", diff)
 				}
 			})
@@ -4761,9 +4937,11 @@ func TestScheduleForTASCohorts(t *testing.T) {
 		// wantInadmissibleLeft is the workload keys that are left in the inadmissible state after this cycle.
 		wantInadmissibleLeft map[kueue.ClusterQueueReference][]workload.Reference
 		// wantEvents asserts on the events, the comparison options are passed by eventCmpOpts
-		wantEvents []utiltesting.EventRecord
+		wantEvents                  []utiltesting.EventRecord
+		wantConditionsObservability map[string][]metav1.Condition
 		// eventCmpOpts are the comparison options for the events
 		eventCmpOpts cmp.Options
+		featureGates map[featuregate.Feature]bool
 	}{
 		"workload with two PodSets exceeds node pods capacity": {
 			nodes: []corev1.Node{
@@ -4833,6 +5011,13 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 			wantEvents: []utiltesting.EventRecord{
 				utiltesting.MakeEventRecord("default", "foo", "Pending", corev1.EventTypeWarning).Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"foo": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					`couldn't assign flavors to pod set two: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "pods": 1`,
+					now,
+				),
 			},
 			eventCmpOpts: cmp.Options{eventIgnoreMessage},
 		},
@@ -5010,6 +5195,13 @@ func TestScheduleForTASCohorts(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "a1-admitted", "Preempted", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "b1", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "a1-admitted", "EvictedDueToPreempted", corev1.EventTypeNormal).Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"b1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor tas-default, 1 more needed. Pending the preemption of 1 workload(s)",
+					now,
+				),
 			},
 		},
 		"reclaim within cohort; single workload is preempted out three candidates": {
@@ -5206,6 +5398,13 @@ func TestScheduleForTASCohorts(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "b1", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "b1", "Pending", corev1.EventTypeWarning).Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"b1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor tas-default, 3 more needed. Pending the preemption of 1 workload(s)",
+					now,
+				),
+			},
 		},
 		"reclaim within cohort; preempting with partial admission": {
 			// The new workload requires 4 units of CPU and memory on a single
@@ -5366,6 +5565,13 @@ func TestScheduleForTASCohorts(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "a2-admitted", "Preempted", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "b1", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "b1", "Pending", corev1.EventTypeWarning).Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"b1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor tas-default, 2 more needed. Pending the preemption of 1 workload(s)",
+					now,
+				),
 			},
 		},
 		"reclaim within cohort; capacity reserved by preempting workload does not allow to schedule last workload": {
@@ -5610,6 +5816,18 @@ func TestScheduleForTASCohorts(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "a3-admitted", "Preempted", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "b1", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "b1", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"b1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 3 pod(s). Total nodes: 2; excluded: resource "cpu": 1. Pending the preemption of 2 workload(s)`,
+					now,
+				),
+				"c1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"Workload no longer fits after processing another workload",
+					now,
+				),
 			},
 		},
 		"two small workloads considered; both get scheduled on different nodes": {
@@ -5948,6 +6166,13 @@ func TestScheduleForTASCohorts(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "a1", "QuotaReserved", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "a1", "Admitted", corev1.EventTypeNormal).Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"b1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"Workload no longer fits after processing another workload",
+					now,
+				),
+			},
 		},
 		"two workloads considered; there is enough space only for the first": {
 			nodes:           defaultTwoNodes,
@@ -6050,6 +6275,13 @@ func TestScheduleForTASCohorts(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "a1", "Admitted", corev1.EventTypeNormal).
 					Message("Admitted by ClusterQueue tas-cq-a, wait time since reservation was 0s").Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"b1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"Workload no longer fits after processing another workload",
+					now,
+				),
+			},
 		},
 		"two workloads considered; both overlapping in the initial flavor assignment": {
 			// Both of the workloads require 2 CPU units which will make them
@@ -6150,6 +6382,13 @@ func TestScheduleForTASCohorts(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "a1", "QuotaReserved", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "a1", "Admitted", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "b1", "Pending", corev1.EventTypeWarning).Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"b1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"Workload no longer fits after processing another workload",
+					now,
+				),
 			},
 		},
 		"preempting workload with targets reserves capacity so that lower priority workload cannot use it": {
@@ -6301,6 +6540,18 @@ func TestScheduleForTASCohorts(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "a1-admitted", "Preempted", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "b1", "Pending", corev1.EventTypeWarning).Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"a2": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s). Pending the preemption of 1 workload(s)`,
+					now,
+				),
+				"b1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"Workload no longer fits after processing another workload",
+					now,
+				),
+			},
 		},
 		"preempting workload without targets reserves capacity so that lower priority workload cannot use it": {
 			nodes:           []corev1.Node{defaultNodeY1},
@@ -6430,6 +6681,18 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			wantEvents: []utiltesting.EventRecord{
 				utiltesting.MakeEventRecord("default", "a2", "Pending", corev1.EventTypeWarning).Obj(),
 				utiltesting.MakeEventRecord("default", "b1", "Pending", corev1.EventTypeWarning).Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"a2": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s)`,
+					now,
+				),
+				"b1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"Workload no longer fits after processing another workload",
+					now,
+				),
 			},
 		},
 		"preempting workload without targets doesn't reserve capacity when it can always reclaim": {
@@ -6583,6 +6846,13 @@ func TestScheduleForTASCohorts(t *testing.T) {
 							Obj()).
 						Obj()).
 					Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"a2": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s)`,
+					now,
+				),
 			},
 		},
 		"preempt in multiple flavors out of which one requires update Fit -> Preempt due to fragmentation": {
@@ -6816,16 +7086,58 @@ func TestScheduleForTASCohorts(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "standard", "Pending", corev1.EventTypeWarning).Obj(),
 			},
 			eventCmpOpts: cmp.Options{eventIgnoreMessage},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"standard": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					"couldn't assign flavors to pod set one: insufficient unused quota for example.com/gpu in flavor tas-default, 8 more needed. Pending the preemption of 2 workload(s)",
+					now,
+				),
+			},
 		},
 	}
+	scenarios := []struct {
+		workloadRequestUseMergePatch     bool
+		unadmittedWorkloadsObservability bool
+	}{
+		{false, false},
+		{false, true},
+		{true, false},
+		{true, true},
+	}
+
 	for name, tc := range cases {
-		for _, enabled := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
+		for _, scenario := range scenarios {
+			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch:%t observability:%t", name, scenario.workloadRequestUseMergePatch, scenario.unadmittedWorkloadsObservability), func(t *testing.T) {
 				features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
-					features.WorkloadRequestUseMergePatch:      enabled,
-					features.UnadmittedWorkloadsObservability:  false,
-					features.UnadmittedWorkloadsExplicitStatus: false,
+					features.WorkloadRequestUseMergePatch:      scenario.workloadRequestUseMergePatch,
+					features.UnadmittedWorkloadsObservability:  scenario.unadmittedWorkloadsObservability,
+					features.UnadmittedWorkloadsExplicitStatus: scenario.unadmittedWorkloadsObservability,
 				})
+				features.SetFeatureGatesDuringTest(t, tc.featureGates)
+
+				wantWorkloads := make([]kueue.Workload, len(tc.wantWorkloads))
+				for i := range tc.wantWorkloads {
+					wantWorkloads[i] = *tc.wantWorkloads[i].DeepCopy()
+				}
+
+				var wantEvents []utiltesting.EventRecord
+				if len(tc.wantEvents) > 0 {
+					wantEvents = make([]utiltesting.EventRecord, len(tc.wantEvents))
+					for i := range tc.wantEvents {
+						ev := tc.wantEvents[i]
+						if features.Enabled(features.UnadmittedWorkloadsObservability) && ev.Reason == "Pending" {
+							if conds, ok := tc.wantConditionsObservability[ev.Key.Name]; ok {
+								for _, cond := range conds {
+									if cond.Type == kueue.WorkloadQuotaReserved {
+										ev.Reason = cond.Reason
+										break
+									}
+								}
+							}
+						}
+						wantEvents[i] = ev
+					}
+				}
 				ctx, log := utiltesting.ContextWithLog(t)
 
 				testWls := make([]kueue.Workload, 0, len(tc.workloads))
@@ -6913,6 +7225,8 @@ func TestScheduleForTASCohorts(t *testing.T) {
 					t.Fatalf("Unexpected list workloads error: %v", err)
 				}
 
+				utiltestingapi.AdjustWorkloadsConditionsForObservability(wantWorkloads, gotWorkloads.Items, tc.wantConditionsObservability)
+
 				defaultWorkloadCmpOpts := cmp.Options{
 					cmpopts.EquateEmpty(),
 					cmpopts.IgnoreFields(kueue.Workload{}, "ObjectMeta.ResourceVersion"),
@@ -6921,7 +7235,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 					}),
 				}
 
-				if diff := cmp.Diff(tc.wantWorkloads, gotWorkloads.Items, defaultWorkloadCmpOpts); diff != "" {
+				if diff := cmp.Diff(wantWorkloads, gotWorkloads.Items, defaultWorkloadCmpOpts); diff != "" {
 					t.Errorf("Unexpected scheduled workloads (-want,+got):\n%s", diff)
 				}
 
@@ -6952,7 +7266,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 				if diff := cmp.Diff(tc.wantInadmissibleLeft, qDumpInadmissible, cmpDump...); diff != "" {
 					t.Errorf("Unexpected elements left in inadmissible workloads (-want,+got):\n%s", diff)
 				}
-				if diff := cmp.Diff(tc.wantEvents, recorder.RecordedEvents, append(tc.eventCmpOpts, cmpopts.SortSlices(utiltesting.SortEvents))...); diff != "" {
+				if diff := cmp.Diff(wantEvents, recorder.RecordedEvents, append(tc.eventCmpOpts, cmpopts.SortSlices(utiltesting.SortEvents))...); diff != "" {
 					t.Errorf("unexpected events (-want/+got):\n%s", diff)
 				}
 			})

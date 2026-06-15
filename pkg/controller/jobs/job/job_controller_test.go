@@ -1360,8 +1360,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getDeactivatedReason(),
-						Message: getDeactivatedMessage("The workload is deactivated"),
+						Reason:  utiltestingapi.GetDeactivatedReason(),
+						Message: utiltestingapi.GetDeactivatedMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1455,8 +1455,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getPendingReason(),
-						Message: getPendingMessage("The workload is deactivated"),
+						Reason:  utiltestingapi.GetPendingReason(),
+						Message: utiltestingapi.GetPendingMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1550,8 +1550,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getDeactivatedReason(),
-						Message: getDeactivatedMessage("The workload is deactivated"),
+						Reason:  utiltestingapi.GetDeactivatedReason(),
+						Message: utiltestingapi.GetDeactivatedMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1642,8 +1642,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getDeactivatedReason(),
-						Message: getDeactivatedMessage("The workload is deactivated"),
+						Reason:  utiltestingapi.GetDeactivatedReason(),
+						Message: utiltestingapi.GetDeactivatedMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1743,8 +1743,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getDeactivatedReason(),
-						Message: getDeactivatedMessage("The workload is deactivated"),
+						Reason:  utiltestingapi.GetDeactivatedReason(),
+						Message: utiltestingapi.GetDeactivatedMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1835,8 +1835,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getDeactivatedReason(),
-						Message: getDeactivatedMessage("The workload is deactivated"),
+						Reason:  utiltestingapi.GetDeactivatedReason(),
+						Message: utiltestingapi.GetDeactivatedMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1914,8 +1914,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getPendingReason(),
-						Message: getPendingMessage("Exceeded the PodsReady timeout"),
+						Reason:  utiltestingapi.GetPendingReason(),
+						Message: utiltestingapi.GetPendingMessage("Exceeded the PodsReady timeout"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1987,8 +1987,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getPendingReason(),
-						Message: getPendingMessage("At least one admission check is false"),
+						Reason:  utiltestingapi.GetPendingReason(),
+						Message: utiltestingapi.GetPendingMessage("At least one admission check is false"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -2072,8 +2072,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getPendingReason(),
-						Message: getPendingMessage("The ClusterQueue is stopped"),
+						Reason:  utiltestingapi.GetPendingReason(),
+						Message: utiltestingapi.GetPendingMessage("The ClusterQueue is stopped"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -2157,8 +2157,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getPendingReason(),
-						Message: getPendingMessage("The LocalQueue is stopped"),
+						Reason:  utiltestingapi.GetPendingReason(),
+						Message: utiltestingapi.GetPendingMessage("The LocalQueue is stopped"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -2242,8 +2242,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getPendingReason(),
-						Message: getPendingMessage("Preempted"),
+						Reason:  utiltestingapi.GetPendingReason(),
+						Message: utiltestingapi.GetPendingMessage("Preempted"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -4537,32 +4537,4 @@ func TestCleanLabels(t *testing.T) {
 			}
 		})
 	}
-}
-
-func getPendingReason() string {
-	if features.Enabled(features.UnadmittedWorkloadsObservability) {
-		return string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
-	}
-	return "Pending"
-}
-
-func getDeactivatedReason() string {
-	if features.Enabled(features.UnadmittedWorkloadsObservability) {
-		return kueue.WorkloadQuotaReservedReasonDeactivated
-	}
-	return "Pending"
-}
-
-func getPendingMessage(message string) string {
-	if features.Enabled(features.UnadmittedWorkloadsObservability) {
-		return "The workload is pending evaluation"
-	}
-	return message
-}
-
-func getDeactivatedMessage(message string) string {
-	if features.Enabled(features.UnadmittedWorkloadsObservability) {
-		return "The workload is deactivated"
-	}
-	return message
 }

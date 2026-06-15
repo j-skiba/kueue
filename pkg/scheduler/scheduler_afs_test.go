@@ -78,10 +78,11 @@ func TestScheduleForAFS(t *testing.T) {
 	}
 
 	cases := map[string]struct {
-		featureGates  map[featuregate.Feature]bool
-		initialUsage  map[string]corev1.ResourceList
-		workloads     []kueue.Workload
-		wantWorkloads []kueue.Workload
+		featureGates                map[featuregate.Feature]bool
+		initialUsage                map[string]corev1.ResourceList
+		workloads                   []kueue.Workload
+		wantWorkloads               []kueue.Workload
+		wantConditionsObservability map[string][]metav1.Condition
 	}{
 		"admits workload from less active localqueue": {
 			featureGates: map[featuregate.Feature]bool{features.AdmissionFairSharing: true},
@@ -158,6 +159,13 @@ func TestScheduleForAFS(t *testing.T) {
 					).
 					Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"wl-a1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor default, 8 more needed",
+					now,
+				),
+			},
 		},
 		"without AFS: classic admission decision ignores queue usage": {
 			featureGates: map[featuregate.Feature]bool{features.AdmissionFairSharing: false},
@@ -233,6 +241,13 @@ func TestScheduleForAFS(t *testing.T) {
 						},
 					}).
 					Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"wl-b1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor default, 8 more needed",
+					now,
+				),
 			},
 		},
 		"admits one workload from each localqueue when quota is limited": {
@@ -363,6 +378,13 @@ func TestScheduleForAFS(t *testing.T) {
 						Obj()).
 					Creation(now.Add(3 * time.Second)).
 					Obj(),
+			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"wl-a2": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor default, 4 more needed",
+					now,
+				),
 			},
 		},
 		"schedules normally when queues have equal usage": {
@@ -559,20 +581,40 @@ func TestScheduleForAFS(t *testing.T) {
 					).
 					Obj(),
 			},
+			wantConditionsObservability: map[string][]metav1.Condition{
+				"wl-a1": utiltestingapi.GetObservabilityConditions(
+					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor default, 8 more needed",
+					now,
+				),
+			},
 		},
 	}
 
+	scenarios := []struct {
+		workloadRequestUseMergePatch     bool
+		unadmittedWorkloadsObservability bool
+	}{
+		{false, false},
+		{false, true},
+		{true, false},
+		{true, true},
+	}
+
 	for name, tc := range cases {
-		for _, enabled := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
-				fg := map[featuregate.Feature]bool{
-					features.UnadmittedWorkloadsObservability:  false,
-					features.UnadmittedWorkloadsExplicitStatus: false,
+		for _, scenario := range scenarios {
+			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch:%t observability:%t", name, scenario.workloadRequestUseMergePatch, scenario.unadmittedWorkloadsObservability), func(t *testing.T) {
+				features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
+					features.WorkloadRequestUseMergePatch:      scenario.workloadRequestUseMergePatch,
+					features.UnadmittedWorkloadsObservability:  scenario.unadmittedWorkloadsObservability,
+					features.UnadmittedWorkloadsExplicitStatus: scenario.unadmittedWorkloadsObservability,
+				})
+				features.SetFeatureGatesDuringTest(t, tc.featureGates)
+
+				wantWorkloads := make([]kueue.Workload, len(tc.wantWorkloads))
+				for i := range tc.wantWorkloads {
+					wantWorkloads[i] = *tc.wantWorkloads[i].DeepCopy()
 				}
-				for k, v := range tc.featureGates {
-					fg[k] = v
-				}
-				features.SetFeatureGatesDuringTest(t, fg)
 
 				clientBuilder := utiltesting.NewClientBuilder().
 					WithLists(
@@ -641,13 +683,15 @@ func TestScheduleForAFS(t *testing.T) {
 					t.Fatalf("Unexpected list workloads error: %v", err)
 				}
 
+				utiltestingapi.AdjustWorkloadsConditionsForObservability(wantWorkloads, gotWorkloads.Items, tc.wantConditionsObservability)
+
 				defaultWorkloadCmpOpts := cmp.Options{
 					cmpopts.EquateEmpty(),
 					cmpopts.IgnoreFields(kueue.AdmissionCheckState{}, "LastTransitionTime"),
 					cmpopts.IgnoreFields(kueue.Workload{}, "ObjectMeta.ResourceVersion"),
 				}
 
-				if diff := cmp.Diff(tc.wantWorkloads, gotWorkloads.Items, defaultWorkloadCmpOpts); diff != "" {
+				if diff := cmp.Diff(wantWorkloads, gotWorkloads.Items, defaultWorkloadCmpOpts); diff != "" {
 					t.Errorf("Unexpected workloads (-want,+got):\n%s", diff)
 				}
 			})
