@@ -3031,8 +3031,8 @@ var _ = ginkgo.Describe("Job controller interacting with Workload controller whe
 					gomega.BeComparableTo(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: fmt.Sprintf("Exceeded the PodsReady timeout %s", wlKey.String()),
+						Reason:  getPendingReason(),
+						Message: getPendingMessage(wlKey.String()),
 					}, util.IgnoreConditionTimestampsAndObservedGeneration),
 					gomega.BeComparableTo(metav1.Condition{
 						Type:    kueue.WorkloadEvicted,
@@ -4669,7 +4669,7 @@ func getPendingReason() string {
 
 func getDeactivatedReason() string {
 	if features.Enabled(features.UnadmittedWorkloadsObservability) {
-		return string(kueue.WorkloadQuotaReservedReasonDeactivated)
+		return kueue.WorkloadQuotaReservedReasonDeactivated
 	}
 	return "Pending"
 }

@@ -3049,7 +3049,7 @@ func getPendingReason() string {
 
 func getDeactivatedReason() string {
 	if features.Enabled(features.UnadmittedWorkloadsObservability) {
-		return string(kueue.WorkloadQuotaReservedReasonDeactivated)
+		return kueue.WorkloadQuotaReservedReasonDeactivated
 	}
 	return "Pending"
 }

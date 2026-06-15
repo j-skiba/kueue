@@ -2241,69 +2241,29 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 		t.Fatalf("Failed adding queue: %v", err)
 	}
 
-	expectUnadmitted := func(cq, reason, cause, team string, want float64) {
-		t.Helper()
-		dps := testingmetrics.CollectFilteredGaugeVec(metrics.UnadmittedWorkloads, map[string]string{
-			"cluster_queue":    cq,
-			"reason":           reason,
-			"underlying_cause": cause,
-			"custom_team":      team,
-		})
-		if want == 0 {
-			if len(dps) != 0 {
-				t.Fatalf("Expected metric to be deleted (0 series), but got %d series: %v", len(dps), dps)
-			}
-			return
-		}
-		if len(dps) != 1 || dps[0].Value != want {
-			t.Fatalf("Expected exactly 1 metric series with value %v, got %v", want, dps)
-		}
-	}
-
-	expectLQUnadmitted := func(name, namespace, cq, reason, cause, team string, want float64) {
-		t.Helper()
-		dps := testingmetrics.CollectFilteredGaugeVec(metrics.LocalQueueUnadmittedWorkloads, map[string]string{
-			"name":             name,
-			"namespace":        namespace,
-			"cluster_queue":    cq,
-			"reason":           reason,
-			"underlying_cause": cause,
-			"custom_team":      team,
-		})
-		if want == 0 {
-			if len(dps) != 0 {
-				t.Fatalf("Expected metric to be deleted (0 series), but got %d series: %v", len(dps), dps)
-			}
-			return
-		}
-		if len(dps) != 1 || dps[0].Value != want {
-			t.Fatalf("Expected exactly 1 metric series with value %v, got %v", want, dps)
-		}
-	}
-
 	t.Run("lifecycle (add, increment, decrement, prune)", func(t *testing.T) {
 		// 1. Add pendingWl1 -> Pending evaluation (represented as NoReservation/PendingEvaluation)
 		manager.UpdateUnadmittedWorkload(ctx, pendingWl1)
-		expectUnadmitted("cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
-		expectLQUnadmitted("foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectUnadmitted(t, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
 
 		// 2. Add misconfiguredWl -> Inadmissible misconfigured
 		manager.UpdateUnadmittedWorkload(ctx, misconfiguredWl)
-		expectUnadmitted("cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
-		expectLQUnadmitted("foo", defaultNamespace, "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
+		expectUnadmitted(t, "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
 
 		// 3. Add pendingWl2 -> Pending evaluation (increments to 2)
 		manager.UpdateUnadmittedWorkload(ctx, pendingWl2)
-		expectUnadmitted("cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 2)
+		expectUnadmitted(t, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 2)
 
 		// 4. Remove pendingWl1 (decrements to 1)
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(pendingWl1))
-		expectUnadmitted("cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectUnadmitted(t, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
 
 		// 5. Remove pendingWl2 (decrements to 0 -> series is deleted/pruned)
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(pendingWl2))
-		expectUnadmitted("cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
-		expectLQUnadmitted("foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
+		expectUnadmitted(t, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
 
 		// Clean up misconfiguredWl for the next subtest
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(misconfiguredWl))
@@ -2312,16 +2272,7 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 	t.Run("admission transition (cleans up unadmitted metrics upon admission)", func(t *testing.T) {
 		// 1. Workload starts as Inadmissible/Misconfigured
 		manager.UpdateUnadmittedWorkload(ctx, misconfiguredWl)
-
-		dps := testingmetrics.CollectFilteredGaugeVec(metrics.UnadmittedWorkloads, map[string]string{
-			"cluster_queue":    "cq1",
-			"reason":           "Inadmissible",
-			"underlying_cause": kueue.WorkloadQuotaReservedReasonMisconfigured,
-			"custom_team":      "alpha",
-		})
-		if len(dps) != 1 || dps[0].Value != 1 {
-			t.Fatalf("Expected exactly 1 metric series with value 1, got %v", dps)
-		}
+		expectUnadmitted(t, "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
 
 		// 2. Workload becomes admitted -> cleans up unadmitted metrics
 		wlAdmitted := misconfiguredWl.DeepCopy()
@@ -2334,28 +2285,19 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 			},
 		}
 		manager.UpdateUnadmittedWorkload(ctx, wlAdmitted)
-
-		dps = testingmetrics.CollectFilteredGaugeVec(metrics.UnadmittedWorkloads, map[string]string{
-			"cluster_queue":    "cq1",
-			"reason":           "Inadmissible",
-			"underlying_cause": kueue.WorkloadQuotaReservedReasonMisconfigured,
-			"custom_team":      "alpha",
-		})
-		if len(dps) != 0 {
-			t.Fatalf("Expected metric series to be deleted after admission, but got %d series: %v", len(dps), dps)
-		}
+		expectUnadmitted(t, "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 0)
 	})
 
 	t.Run("missing LocalQueue fallback (gracefully handle non-existent queues)", func(t *testing.T) {
 		// 1. Add wlWithMissingQueue on missing local queue -> fallback empty string for ClusterQueue and custom labels
 		manager.UpdateUnadmittedWorkload(ctx, wlWithMissingQueue)
-		expectUnadmitted("", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 1)
-		expectLQUnadmitted("non-existent-lq", defaultNamespace, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 1)
+		expectUnadmitted(t, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 1)
+		expectLQUnadmitted(t, "non-existent-lq", defaultNamespace, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 1)
 
 		// 2. Remove wlWithMissingQueue -> deletes/prunes fallback series
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlWithMissingQueue))
-		expectUnadmitted("", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
-		expectLQUnadmitted("non-existent-lq", defaultNamespace, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
+		expectUnadmitted(t, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
+		expectLQUnadmitted(t, "non-existent-lq", defaultNamespace, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
 	})
 
 	t.Run("queue transition (moving pending workload between local queues updates metrics)", func(t *testing.T) {
@@ -2367,8 +2309,8 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 
 		// 1. Workload starts on queue "foo"
 		manager.UpdateUnadmittedWorkload(ctx, pendingWl1)
-		expectLQUnadmitted("foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
-		expectLQUnadmitted("bar", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 0)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectLQUnadmitted(t, "bar", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 0)
 
 		// 2. Move workload to queue "bar"
 		wlMoved := pendingWl1.DeepCopy()
@@ -2376,11 +2318,47 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 		manager.UpdateUnadmittedWorkload(ctx, wlMoved)
 
 		// Old queue series must be deleted/pruned, new queue series must be registered/incremented
-		expectLQUnadmitted("foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
-		expectLQUnadmitted("bar", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 1)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
+		expectLQUnadmitted(t, "bar", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 1)
 
 		// Clean up for other tests
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlMoved))
-		expectLQUnadmitted("bar", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 0)
+		expectLQUnadmitted(t, "bar", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 0)
 	})
+}
+
+func expectUnadmitted(t *testing.T, cq, reason, cause, team string, want float64) {
+	t.Helper()
+	expectMetricValue(t, metrics.UnadmittedWorkloads, map[string]string{
+		"cluster_queue":    cq,
+		"reason":           reason,
+		"underlying_cause": cause,
+		"custom_team":      team,
+	}, want)
+}
+
+func expectLQUnadmitted(t *testing.T, name, namespace, cq, reason, cause, team string, want float64) {
+	t.Helper()
+	expectMetricValue(t, metrics.LocalQueueUnadmittedWorkloads, map[string]string{
+		"name":             name,
+		"namespace":        namespace,
+		"cluster_queue":    cq,
+		"reason":           reason,
+		"underlying_cause": cause,
+		"custom_team":      team,
+	}, want)
+}
+
+func expectMetricValue(t *testing.T, collector prometheus.Collector, labels map[string]string, want float64) {
+	t.Helper()
+	dps := testingmetrics.CollectFilteredGaugeVec(collector, labels)
+	if want == 0 {
+		if len(dps) != 0 {
+			t.Fatalf("Expected metric to be deleted (0 series), but got %d series: %v", len(dps), dps)
+		}
+		return
+	}
+	if len(dps) != 1 || dps[0].Value != want {
+		t.Fatalf("Expected exactly 1 metric series with value %v, got %v", want, dps)
+	}
 }

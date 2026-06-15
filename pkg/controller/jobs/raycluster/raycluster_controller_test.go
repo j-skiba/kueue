@@ -537,8 +537,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:               kueue.WorkloadQuotaReserved,
 						Status:             metav1.ConditionFalse,
-						Reason:             "Pending",
-						Message:            "The workload was deactivated",
+						Reason:             getPendingReason(),
+						Message:            getPendingMessage("The workload was deactivated"),
 						ObservedGeneration: 1,
 					}).
 					AdmittedAt(true, now).
@@ -761,4 +761,18 @@ func TestReconciler(t *testing.T) {
 			})
 		}
 	}
+}
+
+func getPendingReason() string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
+	}
+	return "Pending"
+}
+
+func getPendingMessage(message string) string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return "The workload is pending evaluation"
+	}
+	return message
 }

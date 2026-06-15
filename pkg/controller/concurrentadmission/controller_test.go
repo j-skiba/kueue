@@ -415,8 +415,8 @@ func TestReconcile(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "Evicted by preemption",
+						Reason:  getPendingReason(),
+						Message: getPendingMessage("Evicted by preemption"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadAdmitted,
@@ -1533,4 +1533,18 @@ func TestReconcile(t *testing.T) {
 			}
 		})
 	}
+}
+
+func getPendingReason() string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
+	}
+	return "Pending"
+}
+
+func getPendingMessage(message string) string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return "The workload is pending evaluation"
+	}
+	return message
 }

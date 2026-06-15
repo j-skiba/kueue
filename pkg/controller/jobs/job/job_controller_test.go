@@ -1360,8 +1360,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "The workload is deactivated",
+						Reason:  getDeactivatedReason(),
+						Message: getDeactivatedMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1455,8 +1455,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "The workload is deactivated",
+						Reason:  getPendingReason(),
+						Message: getPendingMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1550,8 +1550,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "The workload is deactivated",
+						Reason:  getDeactivatedReason(),
+						Message: getDeactivatedMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1642,8 +1642,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "The workload is deactivated",
+						Reason:  getDeactivatedReason(),
+						Message: getDeactivatedMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1743,8 +1743,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "The workload is deactivated",
+						Reason:  getDeactivatedReason(),
+						Message: getDeactivatedMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1835,8 +1835,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "The workload is deactivated",
+						Reason:  getDeactivatedReason(),
+						Message: getDeactivatedMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1914,8 +1914,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "Exceeded the PodsReady timeout",
+						Reason:  getPendingReason(),
+						Message: getPendingMessage("Exceeded the PodsReady timeout"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1987,8 +1987,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "At least one admission check is false",
+						Reason:  getPendingReason(),
+						Message: getPendingMessage("At least one admission check is false"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -2072,8 +2072,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "The ClusterQueue is stopped",
+						Reason:  getPendingReason(),
+						Message: getPendingMessage("The ClusterQueue is stopped"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -2157,8 +2157,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "The LocalQueue is stopped",
+						Reason:  getPendingReason(),
+						Message: getPendingMessage("The LocalQueue is stopped"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -2242,8 +2242,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "Preempted",
+						Reason:  getPendingReason(),
+						Message: getPendingMessage("Preempted"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -4537,4 +4537,32 @@ func TestCleanLabels(t *testing.T) {
 			}
 		})
 	}
+}
+
+func getPendingReason() string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
+	}
+	return "Pending"
+}
+
+func getDeactivatedReason() string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return kueue.WorkloadQuotaReservedReasonDeactivated
+	}
+	return "Pending"
+}
+
+func getPendingMessage(message string) string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return "The workload is pending evaluation"
+	}
+	return message
+}
+
+func getDeactivatedMessage(message string) string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return "The workload is deactivated"
+	}
+	return message
 }

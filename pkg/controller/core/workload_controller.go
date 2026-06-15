@@ -963,7 +963,8 @@ func (r *WorkloadReconciler) getUnadmittedQuotaReservedReason(
 	if !lqExists {
 		return kueue.WorkloadQuotaReservedReasonMisconfigured, fmt.Sprintf("LocalQueue %s doesn't exist", wl.Spec.QueueName)
 	}
-	if !cqOk {
+	lqStopped := ptr.Deref(lq.Spec.StopPolicy, kueue.None) != kueue.None
+	if !cqOk && !lqStopped {
 		cqName, _ := r.queues.ClusterQueueForWorkload(wl)
 		if cqName == "" && lq != nil {
 			cqName = lq.Spec.ClusterQueue
@@ -992,7 +993,7 @@ func (r *WorkloadReconciler) getUnadmittedQuotaReservedReason(
 	}
 
 	// 4. Suspended
-	if ptr.Deref(lq.Spec.StopPolicy, kueue.None) != kueue.None {
+	if lqStopped {
 		return kueue.WorkloadQuotaReservedReasonSuspended, fmt.Sprintf("LocalQueue %s is inactive", wl.Spec.QueueName)
 	}
 	if isSuspendedByCQ {
@@ -1010,7 +1011,8 @@ func (r *WorkloadReconciler) getUnadmittedQuotaReservedReason(
 		if r != kueue.WorkloadQuotaReservedReasonDeactivated &&
 			r != kueue.WorkloadQuotaReservedReasonMisconfigured &&
 			r != kueue.WorkloadQuotaReservedReasonSuspended &&
-			r != kueue.WorkloadQuotaReservedReasonAdmissionGated {
+			r != kueue.WorkloadQuotaReservedReasonAdmissionGated &&
+			r != "Pending" {
 			return quotaReservedCond.Reason, quotaReservedCond.Message
 		}
 	}
@@ -1165,7 +1167,11 @@ func (r *WorkloadReconciler) mayUpdateConditionForAdmissionGatedBy(ctx context.C
 		// This previously gated workload is becoming admissible because its AdmissionGatedBy annotation is cleared
 		err := workload.PatchAdmissionStatus(ctx, r.client, wl, r.clock, func(wl *kueue.Workload) (bool, error) {
 			// Update the condition to indicate the gate is cleared, rather than removing it
-			return workload.UnsetQuotaReservationWithCondition(wl, "Pending", "AdmissionGatedBy cleared, waiting for quota reservation", r.clock.Now()), nil
+			reason := "Pending"
+			if features.Enabled(features.UnadmittedWorkloadsObservability) {
+				reason = string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
+			}
+			return workload.UnsetQuotaReservationWithCondition(wl, reason, "AdmissionGatedBy cleared, waiting for quota reservation", r.clock.Now()), nil
 		})
 		if err != nil {
 			return false, err

@@ -2472,8 +2472,8 @@ func TestReconciler(t *testing.T) {
 						Type:               kueue.WorkloadQuotaReserved,
 						Status:             metav1.ConditionFalse,
 						LastTransitionTime: metav1.NewTime(now),
-						Reason:             "Pending",
-						Message:            "Preempted to accommodate a higher priority Workload",
+						Reason:             getPendingReason(),
+						Message:            getPendingMessage("Preempted to accommodate a higher priority Workload"),
 					}).
 					Condition(metav1.Condition{
 						Type:               kueue.WorkloadRequeued,
@@ -6016,8 +6016,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  "Pending",
-						Message: "The workload is deactivated",
+						Reason:  getDeactivatedReason(),
+						Message: getDeactivatedMessage("The workload is deactivated"),
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -6770,4 +6770,32 @@ func TestStop(t *testing.T) {
 			}
 		})
 	}
+}
+
+func getPendingReason() string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
+	}
+	return "Pending"
+}
+
+func getDeactivatedReason() string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return kueue.WorkloadQuotaReservedReasonDeactivated
+	}
+	return "Pending"
+}
+
+func getPendingMessage(message string) string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return "The workload is pending evaluation"
+	}
+	return message
+}
+
+func getDeactivatedMessage(message string) string {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return "The workload is deactivated"
+	}
+	return message
 }

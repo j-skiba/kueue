@@ -471,6 +471,18 @@
     lockToDefault: false
     preRelease: Beta
     version: "0.14"
+- name: UnadmittedWorkloadsExplicitStatus
+  versionedSpecs:
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "0.19"
+- name: UnadmittedWorkloadsObservability
+  versionedSpecs:
+  - default: true
+    lockToDefault: false
+    preRelease: Beta
+    version: "0.19"
 - name: VisibilityOnDemand
   versionedSpecs:
   - default: false

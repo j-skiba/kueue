@@ -45,6 +45,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/controller/constants"
 	"sigs.k8s.io/kueue/pkg/controller/core/indexer"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
+	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	"sigs.k8s.io/kueue/pkg/workload"
 	"sigs.k8s.io/kueue/pkg/workload/concurrentadmission"
@@ -330,7 +331,13 @@ func (r *variantReconciler) clearWorkloadAdmission(ctx context.Context, wl *kueu
 		setRequeued := (evCond.Reason == kueue.WorkloadEvictedByPreemption) ||
 			(evCond.Reason == kueue.WorkloadEvictedDueToNodeFailures)
 		updated := workload.SetRequeuedCondition(w, evCond.Reason, evCond.Message, setRequeued)
-		if workload.UnsetQuotaReservationWithCondition(w, "Pending", evCond.Message, r.clock.Now()) {
+		reason := "Pending"
+		message := evCond.Message
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
+			reason = string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
+			message = "The workload is pending evaluation"
+		}
+		if workload.UnsetQuotaReservationWithCondition(w, reason, message, r.clock.Now()) {
 			updated = true
 		}
 		return updated, nil

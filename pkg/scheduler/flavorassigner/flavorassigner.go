@@ -268,7 +268,7 @@ type Status struct {
 	Reason  string
 }
 
-func (s *Status) MarkStructuralMismatch() *Status {
+func (s *Status) MarkNoMatchingFlavor() *Status {
 	if s != nil {
 		s.Reason = kueue.WorkloadQuotaReservedReasonNoMatchingFlavor
 	}
@@ -929,15 +929,12 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 		attemptedFlavorIdx = idx
 		fName := resourceGroup.Flavors[idx]
 		if features.Enabled(features.ConcurrentAdmission) && !concurrentadmission.IsFlavorAllowedForVariant(a.wl.Obj, fName) {
-			msg := fmt.Sprintf("skipping flavor %s due to WorkloadAllowedResourceFlavorAnnotation annotation", fName)
-			status.appendf("%s", msg)
-			skipStatus := NewStatus(msg).MarkStructuralMismatch()
-			consideredFlavors.AddNoFitFlavorAttempt(fName, skipStatus)
+			status.appendf("skipping flavor %s due to WorkloadAllowedResourceFlavorAnnotation annotation", fName)
 			continue
 		}
 
 		if flavorStatus := a.checkFlavorForPodSets(log, fName, psIDs, podSets, selectors, resourceGroup); !flavorStatus.IsFit() {
-			flavorStatus.MarkStructuralMismatch()
+			flavorStatus.MarkNoMatchingFlavor()
 			status.reasons = append(status.reasons, flavorStatus.reasons...)
 			consideredFlavors.AddNoFitFlavorAttempt(fName, flavorStatus)
 			if flavorStatus.err != nil {

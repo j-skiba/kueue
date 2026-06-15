@@ -422,8 +422,8 @@ func TestReconcile(t *testing.T) {
 		wantDRAResourceTotal        *int64
 		wantWorkloadsInQueue        *int
 		wantWorkload                *kueue.Workload
-		wantWorkloadUseMergePatch   *kueue.Workload // workload version to compensate for the difference between use of Apply and Merge patch in FakeClient
-		wantConditionsObservability []metav1.Condition
+		wantWorkloadUseMergePatch   *kueue.Workload    // workload version to compensate for the difference between use of Apply and Merge patch in FakeClient
+		wantConditionsObservability []metav1.Condition // checked when the observability feature gates are enabled (UnadmittedWorkloadsObservability and UnadmittedWorkloadsExplicitStatus)
 		wantError                   error
 		wantErrorMsg                string
 		wantEvents                  []utiltesting.EventRecord
@@ -3453,6 +3453,12 @@ func TestReconcile(t *testing.T) {
 				}).
 				Obj(),
 			wantConditionsObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  string(kueue.WorkloadQuotaReservedReasonPendingEvaluation),
+					Message: "AdmissionGatedBy cleared, waiting for quota reservation",
+				},
 				{
 					Type:    kueue.WorkloadAdmitted,
 					Status:  metav1.ConditionFalse,
