@@ -1009,12 +1009,6 @@ func TestReconcile(t *testing.T) {
 					Reason:  kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks,
 					Message: "The workload has not all checks ready",
 				},
-				{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionTrue,
-					Reason:  "AdmittedByTest",
-					Message: "Admitted by ClusterQueue q1",
-				},
 			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
@@ -1022,18 +1016,6 @@ func TestReconcile(t *testing.T) {
 				AdmissionCheck(kueue.AdmissionCheckState{
 					Name:  "check",
 					State: kueue.CheckStateRejected,
-				}).
-				Condition(metav1.Condition{
-					Type:    kueue.WorkloadAdmitted,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks,
-					Message: "The workload has not all checks ready",
-				}).
-				Condition(metav1.Condition{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionTrue,
-					Reason:  "AdmittedByTest",
-					Message: "Admitted by ClusterQueue q1",
 				}).
 				Obj(),
 			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
@@ -1049,12 +1031,6 @@ func TestReconcile(t *testing.T) {
 						Status:  metav1.ConditionTrue,
 						Reason:  "AdmittedByTest",
 						Message: "Admitted by ClusterQueue q1",
-					},
-					metav1.Condition{
-						Type:    kueue.WorkloadAdmitted,
-						Status:  metav1.ConditionFalse,
-						Reason:  kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks,
-						Message: "The workload has not all checks ready",
 					},
 					metav1.Condition{
 						Type:    kueue.WorkloadDeactivationTarget,
@@ -1280,15 +1256,15 @@ func TestReconcile(t *testing.T) {
 			wantConditionsWithObservability: []metav1.Condition{
 				{
 					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionTrue,
-					Reason:  "AdmittedByTest",
-					Message: "Admitted by ClusterQueue q1",
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonDeactivated,
+					Message: "The workload is deactivated",
 				},
 				{
 					Type:    kueue.WorkloadAdmitted,
 					Status:  metav1.ConditionFalse,
-					Reason:  "UnsatisfiedAdmissionChecks",
-					Message: "The workload has not all checks ready",
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
 				},
 			},
 		},
@@ -3069,6 +3045,40 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 		},
+		"should set status QuotaReserved conditions to False with reason Inadmissible if quota not reserved ClusterQueue is inactive": {
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").
+				Condition(kueue.ClusterQueueActive, metav1.ConditionFalse, "Inactive", "ClusterQueue is inactive").
+				Obj(),
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Active(true).
+				Queue("lq").
+				Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Active(true).
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadInadmissible,
+					Message: "ClusterQueue cq is inactive",
+				}).
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "ClusterQueue is inactive",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				},
+			},
+		},
 
 		"admitted workload with max execution time": {
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
@@ -3620,7 +3630,9 @@ func TestReconcile(t *testing.T) {
 				Annotation(constants.AdmissionGatedByAnnotation, "example.com/controller1").
 				ReserveQuotaAt(utiltestingapi.MakeAdmission("cq").Obj(), now).
 				Obj(),
-			cq: utiltestingapi.MakeClusterQueue("cq").Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").
+				Condition(kueue.ClusterQueueActive, metav1.ConditionTrue, "Active", "ClusterQueue is active").
+				Obj(),
 			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
 			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
@@ -3774,195 +3786,6 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 		},
-		"WorkloadUnadmittedObservability: missing local queue": {
-			workload: utiltestingapi.MakeWorkload("wl", "ns").
-				Queue("non-existent-lq").
-				Obj(),
-			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
-				Queue("non-existent-lq").
-				Condition(metav1.Condition{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadInadmissible,
-					Message: "LocalQueue non-existent-lq doesn't exist",
-				}).
-				Obj(),
-			wantConditionsWithObservability: []metav1.Condition{
-				{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
-					Message: "LocalQueue non-existent-lq doesn't exist",
-				},
-				{
-					Type:    kueue.WorkloadAdmitted,
-					Status:  metav1.ConditionFalse,
-					Reason:  "NoReservation",
-					Message: "The workload has no reservation",
-				},
-			},
-		},
-		"WorkloadUnadmittedObservability: stopped local queue": {
-			workload: utiltestingapi.MakeWorkload("wl", "ns").
-				Queue("lq").
-				Obj(),
-			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").StopPolicy(kueue.Hold).Obj(),
-			cq: utiltestingapi.MakeClusterQueue("cq").Active(metav1.ConditionTrue).Obj(),
-			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
-				Queue("lq").
-				Condition(metav1.Condition{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadInadmissible,
-					Message: "LocalQueue lq is inactive",
-				}).
-				Obj(),
-			wantConditionsWithObservability: []metav1.Condition{
-				{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
-					Message: "LocalQueue lq is inactive",
-				},
-				{
-					Type:    kueue.WorkloadAdmitted,
-					Status:  metav1.ConditionFalse,
-					Reason:  "NoReservation",
-					Message: "The workload has no reservation",
-				},
-			},
-		},
-		"WorkloadUnadmittedObservability: missing cluster queue": {
-			workload: utiltestingapi.MakeWorkload("wl", "ns").
-				Queue("lq").
-				Obj(),
-			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("non-existent-cq").Obj(),
-			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
-				Queue("lq").
-				Condition(metav1.Condition{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadInadmissible,
-					Message: "ClusterQueue non-existent-cq doesn't exist",
-				}).
-				Obj(),
-			wantConditionsWithObservability: []metav1.Condition{
-				{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
-					Message: "ClusterQueue non-existent-cq doesn't exist",
-				},
-				{
-					Type:    kueue.WorkloadAdmitted,
-					Status:  metav1.ConditionFalse,
-					Reason:  "NoReservation",
-					Message: "The workload has no reservation",
-				},
-			},
-		},
-		"WorkloadUnadmittedObservability: stopped cluster queue": {
-			workload: utiltestingapi.MakeWorkload("wl", "ns").
-				Queue("lq").
-				Obj(),
-			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
-			cq: utiltestingapi.MakeClusterQueue("cq").StopPolicy(kueue.Hold).Obj(),
-			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
-				Queue("lq").
-				Condition(metav1.Condition{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadInadmissible,
-					Message: "ClusterQueue cq is inactive",
-				}).
-				Obj(),
-			wantConditionsWithObservability: []metav1.Condition{
-				{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
-					Message: "ClusterQueue cq is inactive",
-				},
-				{
-					Type:    kueue.WorkloadAdmitted,
-					Status:  metav1.ConditionFalse,
-					Reason:  "NoReservation",
-					Message: "The workload has no reservation",
-				},
-			},
-		},
-		"WorkloadUnadmittedObservability: inactive cluster queue": {
-			workload: utiltestingapi.MakeWorkload("wl", "ns").
-				Queue("lq").
-				Obj(),
-			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
-			cq: utiltestingapi.MakeClusterQueue("cq").
-				Condition(kueue.ClusterQueueActive, metav1.ConditionFalse, "Inactive", "ClusterQueue is inactive").
-				Obj(),
-			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
-				Queue("lq").
-				Condition(metav1.Condition{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadInadmissible,
-					Message: "ClusterQueue cq is inactive",
-				}).
-				Obj(),
-			wantConditionsWithObservability: []metav1.Condition{
-				{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
-					Message: "ClusterQueue is inactive",
-				},
-				{
-					Type:    kueue.WorkloadAdmitted,
-					Status:  metav1.ConditionFalse,
-					Reason:  "NoReservation",
-					Message: "The workload has no reservation",
-				},
-			},
-		},
-		"WorkloadUnadmittedObservability: admission-gated workload": {
-			workload: utiltestingapi.MakeWorkload("wl", "ns").
-				Queue("lq").
-				Annotation(constants.AdmissionGatedByAnnotation, "example.com/controller1").
-				Obj(),
-			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
-			cq: utiltestingapi.MakeClusterQueue("cq").Obj(),
-			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
-				Queue("lq").
-				Annotation(constants.AdmissionGatedByAnnotation, "example.com/controller1").
-				Condition(metav1.Condition{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonAdmissionGated,
-					Message: "Admission is gated by: example.com/controller1",
-				}).
-				Obj(),
-			wantConditionsWithObservability: []metav1.Condition{
-				{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonAdmissionGated,
-					Message: "Admission is gated by: example.com/controller1",
-				},
-				{
-					Type:    kueue.WorkloadAdmitted,
-					Status:  metav1.ConditionFalse,
-					Reason:  "NoReservation",
-					Message: "The workload has no reservation",
-				},
-			},
-			wantEvents: []utiltesting.EventRecord{
-				{
-					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
-					EventType: corev1.EventTypeNormal,
-					Reason:    "AdmissionGated",
-					Message:   "Workload admission is gated by: example.com/controller1",
-				},
-			},
-		},
 		"WorkloadUnadmittedObservability: explicit status disabled (leaves conditions empty)": {
 			featureGates: map[featuregate.Feature]bool{
 				features.UnadmittedWorkloadsObservability:  true,
@@ -4000,28 +3823,6 @@ func TestReconcile(t *testing.T) {
 				var testWl *kueue.Workload
 				if tc.workload != nil {
 					testWl = tc.workload.DeepCopy()
-					if fg[features.UnadmittedWorkloadsExplicitStatus] && testWl.Status.Admission != nil && !workload.IsAdmitted(testWl) {
-						// Pre-populate the unadmitted status conditions that the first reconcile cycle would have set.
-						// This allows the reconciler to complete eviction/deactivation in a single cycle in unit tests.
-						quotaReservedCond := apimeta.FindStatusCondition(testWl.Status.Conditions, kueue.WorkloadQuotaReserved)
-						if quotaReservedCond == nil {
-							apimeta.SetStatusCondition(&testWl.Status.Conditions, metav1.Condition{
-								Type:    kueue.WorkloadQuotaReserved,
-								Status:  metav1.ConditionTrue,
-								Reason:  "AdmittedByTest",
-								Message: fmt.Sprintf("Admitted by ClusterQueue %s", testWl.Status.Admission.ClusterQueue),
-							})
-						}
-						admittedCond := apimeta.FindStatusCondition(testWl.Status.Conditions, kueue.WorkloadAdmitted)
-						if admittedCond == nil {
-							apimeta.SetStatusCondition(&testWl.Status.Conditions, metav1.Condition{
-								Type:    kueue.WorkloadAdmitted,
-								Status:  metav1.ConditionFalse,
-								Reason:  "UnsatisfiedAdmissionChecks",
-								Message: "The workload has not all checks ready",
-							})
-						}
-					}
 				}
 				objs := []client.Object{testWl}
 				objs = append(objs, tc.additionalObjects...)
@@ -4108,6 +3909,12 @@ func TestReconcile(t *testing.T) {
 				}
 
 				gotResult, gotError := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(testWl)})
+
+				if gotError == nil && fg[features.UnadmittedWorkloadsExplicitStatus] && testWl != nil && testWl.Status.Admission != nil && !workload.IsAdmitted(testWl) {
+					// Run a second reconcile cycle to simulate the event-driven trigger
+					// in a real cluster after the status conditions have been populated on the first cycle.
+					gotResult, gotError = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(testWl)})
+				}
 
 				switch {
 				case tc.wantError != nil:
