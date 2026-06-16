@@ -111,9 +111,9 @@ var _ = ginkgo.Describe("AppWrapper controller", ginkgo.Ordered, ginkgo.Continue
 		})
 
 		ginkgo.AfterEach(func() {
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue, true)
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, onDemandFlavor, true)
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, spotFlavor, true)
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue, true)
 		})
 
 		ginkgo.It("Should reconcile AppWrappers", func() {
@@ -355,9 +355,9 @@ var _ = ginkgo.Describe("AppWrapper controller", ginkgo.Ordered, ginkgo.Continue
 
 		ginkgo.AfterEach(func() {
 			gomega.Expect(util.DeleteObject(ctx, k8sClient, admissionCheck)).To(gomega.Succeed())
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueueAc, true)
 			util.ExpectObjectToBeDeleted(ctx, k8sClient, testFlavor, true)
 			gomega.Expect(util.DeleteNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueueAc, true)
 		})
 
 		ginkgo.It("labels and annotations should be propagated from admission check to job", func() {

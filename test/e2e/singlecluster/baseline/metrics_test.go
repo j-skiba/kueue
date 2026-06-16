@@ -25,6 +25,8 @@ import (
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/controller/jobs/job"
@@ -562,6 +564,80 @@ var _ = ginkgo.Describe("Metrics", ginkgo.Label("area:singlecluster", "feature:m
 
 			ginkgo.By("checking that eviction and preemption metrics are no longer available", func() {
 				util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, metrics)
+			})
+		})
+	})
+
+	ginkgo.When("workloads are unadmitted", func() {
+		var (
+			clusterQueue *kueue.ClusterQueue
+			localQueue   *kueue.LocalQueue
+			workload     *kueue.Workload
+		)
+
+		ginkgo.BeforeEach(func() {
+			clusterQueue = utiltestingapi.MakeClusterQueue("cq-unadmitted").
+				ResourceGroup(
+					*utiltestingapi.MakeFlavorQuotas(resourceFlavor.Name).
+						Resource(corev1.ResourceCPU, "1").
+						Obj(),
+				).
+				StopPolicy(kueue.Hold).
+				Obj()
+			util.CreateClusterQueuesAndWaitForActive(ctx, k8sClient, clusterQueue)
+
+			localQueue = utiltestingapi.MakeLocalQueue("lq-unadmitted", ns.Name).
+				ClusterQueue(clusterQueue.Name).
+				Obj()
+			util.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, localQueue)
+
+			workload = utiltestingapi.MakeWorkload("wl-unadmitted", ns.Name).
+				Queue(kueue.LocalQueueName(localQueue.Name)).
+				Request(corev1.ResourceCPU, "1").
+				Obj()
+			util.MustCreate(ctx, k8sClient, workload)
+		})
+
+		ginkgo.AfterEach(func() {
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, workload, true)
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, localQueue, true)
+			util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue, true)
+		})
+
+		ginkgo.It("should export unadmitted workloads metrics and update status conditions", func() {
+			workloadKey := client.ObjectKeyFromObject(workload)
+
+			ginkgo.By("verifying workload status conditions are updated to unadmitted", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					g.Expect(k8sClient.Get(ctx, workloadKey, workload)).To(gomega.Succeed())
+					g.Expect(workload.Status.Conditions).To(utiltesting.HaveConditionStatusFalseAndReason(kueue.WorkloadQuotaReserved, kueue.WorkloadQuotaReservedReasonSuspended))
+					g.Expect(workload.Status.Conditions).To(utiltesting.HaveConditionStatusFalseAndReason(kueue.WorkloadAdmitted, "NoReservation"))
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+			})
+
+			unadmittedMetrics := [][]string{
+				{"kueue_unadmitted_workloads", "NoReservation", "Suspended", clusterQueue.Name},
+				{"kueue_local_queue_unadmitted_workloads", "NoReservation", "Suspended", ns.Name, localQueue.Name, clusterQueue.Name},
+			}
+
+			ginkgo.By("checking that unadmitted workloads metrics are available", func() {
+				util.ExpectMetricsToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, unadmittedMetrics)
+			})
+
+			ginkgo.By("starting the cluster queue to admit the workload", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(clusterQueue), clusterQueue)).To(gomega.Succeed())
+					clusterQueue.Spec.StopPolicy = ptr.To(kueue.None)
+					g.Expect(k8sClient.Update(ctx, clusterQueue)).To(gomega.Succeed())
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+			})
+
+			ginkgo.By("verifying the workload is admitted", func() {
+				util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, workload)
+			})
+
+			ginkgo.By("checking that unadmitted workloads metrics are no longer available after admission", func() {
+				util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, unadmittedMetrics)
 			})
 		})
 	})

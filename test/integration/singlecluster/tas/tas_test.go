@@ -5179,7 +5179,7 @@ var _ = ginkgo.Describe("Topology Aware Scheduling", ginkgo.Ordered, func() {
 						cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
 						g.Expect(cond).ToNot(gomega.BeNil())
 						g.Expect(cond.Status).To(gomega.Equal(metav1.ConditionFalse))
-						g.Expect(cond.Reason).To(gomega.Equal(getReason(kueue.WorkloadQuotaReservedReasonExceedsMaxQuota)))
+						g.Expect(cond.Reason).To(gomega.Equal(kueue.WorkloadQuotaReservedReasonExceedsMaxQuota))
 						// With this CQ, no single flavor fits both CPU and GPU, so flavor assigner fails with "couldn't assign flavors".
 						g.Expect(cond.Message).To(gomega.ContainSubstring("couldn't assign flavors"))
 					}, util.Timeout, util.Interval).Should(gomega.Succeed())
@@ -6817,10 +6817,3 @@ var _ = ginkgo.Describe("Topology Aware Scheduling – WaitForPodsReady with Unh
 		})
 	})
 })
-
-func getReason(observabilityReason string) string {
-	if features.Enabled(features.UnadmittedWorkloadsObservability) {
-		return observabilityReason
-	}
-	return "Pending"
-}

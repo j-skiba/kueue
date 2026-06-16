@@ -2705,7 +2705,7 @@ var _ = ginkgo.Describe("Scheduler", func() {
 					gomega.BeComparableTo(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getReason(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 						Message: "couldn't assign flavors to pod set main: insufficient unused quota for memory in flavor on-demand, 1Gi more needed",
 					}, util.IgnoreConditionTimestampsAndObservedGeneration),
 				))
@@ -2747,7 +2747,7 @@ var _ = ginkgo.Describe("Scheduler", func() {
 					gomega.BeComparableTo(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  getReason(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 						Message: "couldn't assign flavors to pod set main: insufficient unused quota for memory in flavor on-demand, 1Gi more needed",
 					}, util.IgnoreConditionTimestampsAndObservedGeneration),
 				))
@@ -3336,10 +3336,3 @@ var _ = ginkgo.Describe("Scheduler with AdmissionGatedBy", ginkgo.Label("admissi
 		util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wl)
 	})
 })
-
-func getReason(observabilityReason string) string {
-	if features.Enabled(features.UnadmittedWorkloadsObservability) {
-		return observabilityReason
-	}
-	return "Pending"
-}

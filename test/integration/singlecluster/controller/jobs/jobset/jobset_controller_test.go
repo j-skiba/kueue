@@ -58,7 +58,7 @@ const (
 
 var _ = ginkgo.Describe("JobSet controller", ginkgo.Label("job:jobset", "area:jobs"), ginkgo.Ordered, ginkgo.ContinueOnFailure, ginkgo.ContinueOnFailure, func() {
 	ginkgo.BeforeAll(func() {
-		fwk.StartManager(ctx, cfg, managerAndWorkloadControllerSetup(jobframework.WithManageJobsWithoutQueueName(true),
+		fwk.StartManager(ctx, cfg, managerSetup(jobframework.WithManageJobsWithoutQueueName(true),
 			jobframework.WithManagedJobsNamespaceSelector(util.NewNamespaceSelectorExcluding("unmanaged-ns"))))
 		unmanagedNamespace := utiltesting.MakeNamespace("unmanaged-ns")
 		util.MustCreate(ctx, k8sClient, unmanagedNamespace)
