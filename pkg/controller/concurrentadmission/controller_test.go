@@ -103,7 +103,7 @@ func TestReconcile(t *testing.T) {
 		variantWorkloads                []kueue.Workload
 		wantParentWorkload              *kueue.Workload
 		wantVariantWorkloads            []kueue.Workload
-		wantConditionsWithObservability map[string][]metav1.Condition
+		wantConditionsWithObservability map[string][]metav1.Condition // workload conditions to override when the UnadmittedWorkloadsExplicitStatus and UnadmittedWorkloadsObservability feature gate is enabled, keyed by workload name
 		wantEvents                      []utiltesting.EventRecord
 		req                             reconcile.Request
 	}{

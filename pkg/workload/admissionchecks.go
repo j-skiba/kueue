@@ -80,7 +80,7 @@ func SyncAdmittedCondition(w *kueue.Workload, now time.Time) bool {
 		newCondition.Message = "The workload has no reservation"
 	case !hasAllChecksReady:
 		newCondition.Status = metav1.ConditionFalse
-		newCondition.Reason = kueue.WorkloadAdmittedReasonUnsatisfiedChecks
+		newCondition.Reason = kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks
 		newCondition.Message = "The workload has not all checks ready"
 	case !hasAllTopologyAssignmentsReady:
 		newCondition.Status = metav1.ConditionFalse

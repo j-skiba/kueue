@@ -936,7 +936,7 @@ const (
 	WorkloadBlockedOnPreemptionGates = "BlockedOnPreemptionGates"
 
 	// Reasons for the WorkloadAdmitted condition.
-	WorkloadAdmittedReasonUnsatisfiedChecks              = "UnsatisfiedChecks"
+	WorkloadAdmittedReasonUnsatisfiedAdmissionChecks     = "UnsatisfiedAdmissionChecks"
 	WorkloadAdmittedReasonNoReservationUnsatisfiedChecks = "NoReservationUnsatisfiedChecks"
 	WorkloadAdmittedReasonPendingDelayedTopologyRequests = "PendingDelayedTopologyRequests"
 
@@ -953,7 +953,6 @@ const (
 	WorkloadQuotaReservedReasonWaitingForQuota         = "WaitingForQuota"
 	WorkloadQuotaReservedReasonPendingEvaluation       = "PendingEvaluation"
 	WorkloadQuotaReservedReasonExceedsMaxQuota         = "ExceedsMaxQuota"
-	WorkloadQuotaReservedReasonBorrowingLimitReached   = "BorrowingLimitReached"
 	WorkloadQuotaReservedReasonTopologyPlacementFailed = "TopologyPlacementFailed"
 	WorkloadQuotaReservedReasonPendingPreemption       = "PendingPreemption"
 

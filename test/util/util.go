@@ -489,7 +489,6 @@ func ExpectWorkloadsToBePendingByKeys(ctx context.Context, k8sClient client.Clie
 						cond.Reason == kueue.WorkloadQuotaReservedReasonWaitingForQuota ||
 						cond.Reason == kueue.WorkloadQuotaReservedReasonPendingPreemption ||
 						cond.Reason == kueue.WorkloadQuotaReservedReasonExceedsMaxQuota ||
-						cond.Reason == kueue.WorkloadQuotaReservedReasonBorrowingLimitReached ||
 						cond.Reason == kueue.WorkloadQuotaReservedReasonTopologyPlacementFailed ||
 						cond.Reason == kueue.WorkloadQuotaReservedReasonWaitingForPodsReady ||
 						cond.Reason == kueue.WorkloadQuotaReservedReasonAdmissionGated

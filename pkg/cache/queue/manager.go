@@ -1045,10 +1045,10 @@ func (m *Manager) UpdateUnadmittedWorkload(ctx context.Context, wl *kueue.Worklo
 	var underlyingCause string
 	quotaReservedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
 	switch {
-	case reason == kueue.WorkloadAdmittedReasonUnsatisfiedChecks:
-		underlyingCause = kueue.WorkloadAdmittedReasonUnsatisfiedChecks
+	case reason == kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks:
+		underlyingCause = "ChecksNotReady"
 	case reason == kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests:
-		underlyingCause = kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests
+		underlyingCause = "PendingTopology"
 	case quotaReservedCond != nil && quotaReservedCond.Status == metav1.ConditionFalse:
 		underlyingCause = quotaReservedCond.Reason
 	default:

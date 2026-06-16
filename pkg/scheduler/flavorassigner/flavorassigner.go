@@ -256,9 +256,6 @@ func MergeReason(a, b string) string {
 	if a == kueue.WorkloadQuotaReservedReasonExceedsMaxQuota || b == kueue.WorkloadQuotaReservedReasonExceedsMaxQuota {
 		return kueue.WorkloadQuotaReservedReasonExceedsMaxQuota
 	}
-	if a == kueue.WorkloadQuotaReservedReasonBorrowingLimitReached || b == kueue.WorkloadQuotaReservedReasonBorrowingLimitReached {
-		return kueue.WorkloadQuotaReservedReasonBorrowingLimitReached
-	}
 	return ""
 }
 
@@ -278,13 +275,6 @@ func (s *Status) MarkNoMatchingFlavor() *Status {
 func (s *Status) MarkExceedsMaxQuota() *Status {
 	if s != nil {
 		s.Reason = kueue.WorkloadQuotaReservedReasonExceedsMaxQuota
-	}
-	return s
-}
-
-func (s *Status) MarkBorrowingLimitReached() *Status {
-	if s != nil {
-		s.Reason = kueue.WorkloadQuotaReservedReasonBorrowingLimitReached
 	}
 	return s
 }
@@ -827,22 +817,15 @@ func (a *Assignment) resolveNoFitDueToCapacity() {
 	overallReason := kueue.WorkloadQuotaReservedReasonWaitingForQuota
 	for _, ps := range a.PodSets {
 		hasCapacityCandidate := false
-		hasBorrowingLimitCandidate := false
 		for _, att := range ps.FlavorAssignmentAttempts {
-			switch att.Reason {
-			case "": // An empty reason means the attempt fits (or only lacks capacity/quota).
+			if att.Reason == "" {
 				hasCapacityCandidate = true
-			case kueue.WorkloadQuotaReservedReasonBorrowingLimitReached:
-				hasBorrowingLimitCandidate = true
+				break
 			}
 		}
 		if !hasCapacityCandidate {
-			if hasBorrowingLimitCandidate {
-				overallReason = kueue.WorkloadQuotaReservedReasonBorrowingLimitReached
-			} else {
-				overallReason = kueue.WorkloadQuotaReservedReasonExceedsMaxQuota
-				break
-			}
+			overallReason = kueue.WorkloadQuotaReservedReasonExceedsMaxQuota
+			break
 		}
 	}
 	a.NoFitReason = overallReason
@@ -978,16 +961,7 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 			fr := resources.FlavorResource{Flavor: fName, Resource: rName}
 
 			if features.Enabled(features.UnadmittedWorkloadsObservability) && val > a.cq.PotentialAvailable(fr) {
-				if a.cq.HasParent() {
-					cohortQuota := a.cq.Parent().ResourceNode.SubtreeQuota[fr]
-					if val > cohortQuota {
-						flavorReason = MergeReason(flavorReason, kueue.WorkloadQuotaReservedReasonExceedsMaxQuota)
-					} else {
-						flavorReason = MergeReason(flavorReason, kueue.WorkloadQuotaReservedReasonBorrowingLimitReached)
-					}
-				} else {
-					flavorReason = MergeReason(flavorReason, kueue.WorkloadQuotaReservedReasonExceedsMaxQuota)
-				}
+				flavorReason = MergeReason(flavorReason, kueue.WorkloadQuotaReservedReasonExceedsMaxQuota)
 			}
 
 			preemptionMode, borrow, s := a.fitsResourceQuota(log, fr, assignmentUsage[fr], val, resQuota)
@@ -1188,16 +1162,7 @@ func (a *FlavorAssigner) fitsResourceQuota(log logr.Logger, fr resources.FlavorR
 			resources.ResourceQuantityString(fr.Resource, maxCapacity),
 		)
 		if features.Enabled(features.UnadmittedWorkloadsObservability) {
-			if a.cq.HasParent() {
-				cohortQuota := a.cq.Parent().ResourceNode.SubtreeQuota[fr]
-				if val > cohortQuota {
-					status.MarkExceedsMaxQuota()
-				} else {
-					status.MarkBorrowingLimitReached()
-				}
-			} else {
-				status.MarkExceedsMaxQuota()
-			}
+			status.MarkExceedsMaxQuota()
 		}
 		return noFit, 0, &status
 	}

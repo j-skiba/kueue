@@ -53,6 +53,7 @@ import (
 	utilqueue "sigs.k8s.io/kueue/pkg/util/queue"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
+	workload "sigs.k8s.io/kueue/pkg/workload"
 	"sigs.k8s.io/kueue/test/util"
 )
 
@@ -405,11 +406,6 @@ func TestReconcile(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	fakeClock := testingclock.NewFakeClock(now)
 
-	enabledObservabilityGates := map[featuregate.Feature]bool{
-		features.UnadmittedWorkloadsObservability:  true,
-		features.UnadmittedWorkloadsExplicitStatus: true,
-	}
-
 	cases := map[string]struct {
 		featureGates map[featuregate.Feature]bool
 
@@ -422,8 +418,8 @@ func TestReconcile(t *testing.T) {
 		wantDRAResourceTotal            *int64
 		wantWorkloadsInQueue            *int
 		wantWorkload                    *kueue.Workload
-		wantWorkloadUseMergePatch       *kueue.Workload // workload version to compensate for the difference between use of Apply and Merge patch in FakeClient
-		wantConditionsWithObservability []metav1.Condition
+		wantWorkloadUseMergePatch       *kueue.Workload    // workload version to compensate for the difference between use of Apply and Merge patch in FakeClient
+		wantConditionsWithObservability []metav1.Condition // workload conditions to override when the UnadmittedWorkloadsExplicitStatus or UnadmittedWorkloadsObservability feature gate is enabled
 		wantError                       error
 		wantErrorMsg                    string
 		wantEvents                      []utiltesting.EventRecord
@@ -431,20 +427,23 @@ func TestReconcile(t *testing.T) {
 		reconcilerOpts                  []Option
 	}{
 		"initialize unadmitted workload status on first reconcile cycle": {
-			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Request(corev1.ResourceCPU, "1").
 				Obj(),
 			cq: utiltestingapi.MakeClusterQueue("cq").
 				Active(metav1.ConditionTrue).
-				ResourceGroup(
-					*utiltestingapi.MakeFlavorQuotas("flavor1").Resource("cpu", "5").Obj(),
-				).Obj(),
+				Obj(),
 			lq: utiltestingapi.MakeLocalQueue("lq", "ns").Active(metav1.ConditionTrue).ClusterQueue("cq").Obj(),
 			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Request(corev1.ResourceCPU, "1").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadInadmissible,
+					Message: "ClusterQueue cq is inactive",
+				}).
 				Obj(),
 			wantConditionsWithObservability: []metav1.Condition{
 				{
@@ -489,16 +488,16 @@ func TestReconcile(t *testing.T) {
 					ResourceClaim("gpu", "rc1").
 					Obj()).
 				Condition(metav1.Condition{
-					Type:    kueue.WorkloadRequeued,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadInadmissible,
-					Message: "DRA resource claims not supported",
-				}).
-				Condition(metav1.Condition{
 					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadInadmissible,
 					Message: "KueueDRAIntegration feature does not support use of resource claims",
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadRequeued,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadInadmissible,
+					Message: "DRA resource claims not supported",
 				}).
 				Obj(),
 			wantConditionsWithObservability: []metav1.Condition{
@@ -541,13 +540,13 @@ func TestReconcile(t *testing.T) {
 					ResourceClaimTemplate("gpu", "gpu-template").
 					Obj()).
 				Condition(metav1.Condition{
-					Type:    kueue.WorkloadRequeued,
+					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadInadmissible,
 					Message: "Workload uses DRA resources but the KueueDRAIntegration feature gate is not enabled",
 				}).
 				Condition(metav1.Condition{
-					Type:    kueue.WorkloadQuotaReserved,
+					Type:    kueue.WorkloadRequeued,
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadInadmissible,
 					Message: "Workload uses DRA resources but the KueueDRAIntegration feature gate is not enabled",
@@ -593,13 +592,13 @@ func TestReconcile(t *testing.T) {
 					ResourceClaim("gpu", "rc1").
 					Obj()).
 				Condition(metav1.Condition{
-					Type:    kueue.WorkloadRequeued,
+					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadInadmissible,
 					Message: "Workload uses DRA resources but the KueueDRAIntegration feature gate is not enabled",
 				}).
 				Condition(metav1.Condition{
-					Type:    kueue.WorkloadQuotaReserved,
+					Type:    kueue.WorkloadRequeued,
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadInadmissible,
 					Message: "Workload uses DRA resources but the KueueDRAIntegration feature gate is not enabled",
@@ -880,7 +879,7 @@ func TestReconcile(t *testing.T) {
 				{
 					Type:    kueue.WorkloadAdmitted,
 					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadAdmittedReasonUnsatisfiedChecks,
+					Reason:  kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks,
 					Message: "The workload has not all checks ready",
 				},
 			},
@@ -920,7 +919,7 @@ func TestReconcile(t *testing.T) {
 				{
 					Type:    kueue.WorkloadAdmitted,
 					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadAdmittedReasonUnsatisfiedChecks,
+					Reason:  kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks,
 					Message: "The workload has not all checks ready",
 				},
 			},
@@ -1003,9 +1002,19 @@ func TestReconcile(t *testing.T) {
 				Obj(),
 		},
 		"unadmitted workload with rejected checks gets deactivated": {
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsExplicitStatus: false,
-				features.UnadmittedWorkloadsObservability:  false,
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks,
+					Message: "The workload has not all checks ready",
+				},
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionTrue,
+					Reason:  "AdmittedByTest",
+					Message: "Admitted by ClusterQueue q1",
+				},
 			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
@@ -1013,6 +1022,18 @@ func TestReconcile(t *testing.T) {
 				AdmissionCheck(kueue.AdmissionCheckState{
 					Name:  "check",
 					State: kueue.CheckStateRejected,
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks,
+					Message: "The workload has not all checks ready",
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionTrue,
+					Reason:  "AdmittedByTest",
+					Message: "Admitted by ClusterQueue q1",
 				}).
 				Obj(),
 			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
@@ -1028,6 +1049,12 @@ func TestReconcile(t *testing.T) {
 						Status:  metav1.ConditionTrue,
 						Reason:  "AdmittedByTest",
 						Message: "Admitted by ClusterQueue q1",
+					},
+					metav1.Condition{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks,
+						Message: "The workload has not all checks ready",
 					},
 					metav1.Condition{
 						Type:    kueue.WorkloadDeactivationTarget,
@@ -1250,12 +1277,22 @@ func TestReconcile(t *testing.T) {
 					Message:   `The workload is deactivated due to AdmissionCheck in Rejected state: "check-1"`,
 				},
 			},
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionTrue,
+					Reason:  "AdmittedByTest",
+					Message: "Admitted by ClusterQueue q1",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "UnsatisfiedAdmissionChecks",
+					Message: "The workload has not all checks ready",
+				},
+			},
 		},
 		"workload with retry checks should be evicted and checks should be pending": {
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsExplicitStatus: false,
-				features.UnadmittedWorkloadsObservability:  false,
-			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
 				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
@@ -1299,6 +1336,20 @@ func TestReconcile(t *testing.T) {
 					EventType: "Normal",
 					Reason:    "EvictedDueToAdmissionCheck",
 					Message:   `Evicted due to AdmissionCheck in Retry state: "check-1"`,
+				},
+			},
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionTrue,
+					Reason:  "AdmittedByTest",
+					Message: "Admitted by ClusterQueue q1",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "UnsatisfiedAdmissionChecks",
+					Message: "The workload has not all checks ready",
 				},
 			},
 		},
@@ -1402,10 +1453,6 @@ func TestReconcile(t *testing.T) {
 			},
 		},
 		"workload with retry checks should be evicted and checks should be pending, with message": {
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsExplicitStatus: false,
-				features.UnadmittedWorkloadsObservability:  false,
-			},
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				ReserveQuotaAt(utiltestingapi.MakeAdmission("q1").Obj(), now).
 				ControllerReference(batchv1.SchemeGroupVersion.WithKind("Job"), "ownername", "owneruid").
@@ -1459,6 +1506,20 @@ func TestReconcile(t *testing.T) {
 					EventType: "Normal",
 					Reason:    "EvictedDueToAdmissionCheck",
 					Message:   `Evicted due to AdmissionChecks in Retry state: "check-1" (infrastructure not prepared); "check-3" (budget exhausted)`,
+				},
+			},
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionTrue,
+					Reason:  "AdmittedByTest",
+					Message: "Admitted by ClusterQueue q1",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "UnsatisfiedAdmissionChecks",
+					Message: "The workload has not all checks ready",
 				},
 			},
 		},
@@ -2591,7 +2652,7 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 		},
-		"should set the Inadmissible reason on QuotaReservation condition when the LocalQueue was deleted": {
+		"should set the appropriate reason on QuotaReservation condition when the LocalQueue was deleted": {
 			cq: utiltestingapi.MakeClusterQueue("cq").
 				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor1").Obj()).
 				AdmissionChecks("check").Obj(),
@@ -2641,12 +2702,22 @@ func TestReconcile(t *testing.T) {
 					Message: "LocalQueue lq is terminating or missing",
 				}).
 				Obj(),
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsExplicitStatus: false,
-				features.UnadmittedWorkloadsObservability:  false,
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "LocalQueue lq is terminating or missing",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				},
 			},
 		},
-		"should set the Inadmissible reason on QuotaReservation condition when the LocalQueue was Hold": {
+		"should set the appropriate reason on QuotaReservation condition when the LocalQueue was Hold": {
 			cq: utiltestingapi.MakeClusterQueue("cq").
 				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor1").Obj()).
 				AdmissionChecks("check").Obj(),
@@ -2697,12 +2768,22 @@ func TestReconcile(t *testing.T) {
 					Message: "LocalQueue lq is stopped",
 				}).
 				Obj(),
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsExplicitStatus: false,
-				features.UnadmittedWorkloadsObservability:  false,
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
+					Message: "LocalQueue lq is stopped",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				},
 			},
 		},
-		"should set the Inadmissible reason on QuotaReservation condition when the ClusterQueue was deleted": {
+		"should set the appropriate reason on QuotaReservation condition when the ClusterQueue was deleted": {
 			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Active(true).
@@ -2750,12 +2831,22 @@ func TestReconcile(t *testing.T) {
 					Message: "ClusterQueue cq is terminating or missing",
 				}).
 				Obj(),
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsExplicitStatus: false,
-				features.UnadmittedWorkloadsObservability:  false,
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "ClusterQueue cq is terminating or missing",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				},
 			},
 		},
-		"should set the Inadmissible reason on QuotaReservation condition when the ClusterQueue was Hold": {
+		"should set the appropriate reason on QuotaReservation condition when the ClusterQueue was Hold": {
 			cq: utiltestingapi.MakeClusterQueue("cq").
 				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor1").Obj()).
 				AdmissionChecks("check").StopPolicy(kueue.Hold).Obj(),
@@ -2806,9 +2897,19 @@ func TestReconcile(t *testing.T) {
 					Message: "ClusterQueue cq is stopped",
 				}).
 				Obj(),
-			featureGates: map[featuregate.Feature]bool{
-				features.UnadmittedWorkloadsExplicitStatus: false,
-				features.UnadmittedWorkloadsObservability:  false,
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
+					Message: "ClusterQueue cq is stopped",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				},
 			},
 		},
 		"should set status QuotaReserved conditions to False with reason Inadmissible if quota not reserved LocalQueue is not created": {
@@ -3632,7 +3733,6 @@ func TestReconcile(t *testing.T) {
 			},
 		},
 		"WorkloadUnadmittedObservability: deactivated workload": {
-			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Active(false).
 				Condition(metav1.Condition{
@@ -3652,22 +3752,29 @@ func TestReconcile(t *testing.T) {
 					Message: "The workload is deactivated",
 				}).
 				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadInadmissible,
+					Message: "LocalQueue  doesn't exist",
+				}).
+				SchedulingStatsEviction(kueue.WorkloadSchedulingStatsEviction{Reason: "Deactivated", Count: 1}).
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
 					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadQuotaReservedReasonDeactivated,
 					Message: "The workload is deactivated",
-				}).
-				Condition(metav1.Condition{
+				},
+				{
 					Type:    kueue.WorkloadAdmitted,
 					Status:  metav1.ConditionFalse,
 					Reason:  "NoReservation",
 					Message: "The workload has no reservation",
-				}).
-				SchedulingStatsEviction(kueue.WorkloadSchedulingStatsEviction{Reason: "Deactivated", Count: 1}).
-				Obj(),
+				},
+			},
 		},
 		"WorkloadUnadmittedObservability: missing local queue": {
-			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("non-existent-lq").
 				Obj(),
@@ -3676,19 +3783,26 @@ func TestReconcile(t *testing.T) {
 				Condition(metav1.Condition{
 					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Reason:  kueue.WorkloadInadmissible,
 					Message: "LocalQueue non-existent-lq doesn't exist",
 				}).
-				Condition(metav1.Condition{
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "LocalQueue non-existent-lq doesn't exist",
+				},
+				{
 					Type:    kueue.WorkloadAdmitted,
 					Status:  metav1.ConditionFalse,
 					Reason:  "NoReservation",
 					Message: "The workload has no reservation",
-				}).
-				Obj(),
+				},
+			},
 		},
 		"WorkloadUnadmittedObservability: stopped local queue": {
-			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Obj(),
@@ -3699,19 +3813,26 @@ func TestReconcile(t *testing.T) {
 				Condition(metav1.Condition{
 					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
+					Reason:  kueue.WorkloadInadmissible,
 					Message: "LocalQueue lq is inactive",
 				}).
-				Condition(metav1.Condition{
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
+					Message: "LocalQueue lq is inactive",
+				},
+				{
 					Type:    kueue.WorkloadAdmitted,
 					Status:  metav1.ConditionFalse,
 					Reason:  "NoReservation",
 					Message: "The workload has no reservation",
-				}).
-				Obj(),
+				},
+			},
 		},
 		"WorkloadUnadmittedObservability: missing cluster queue": {
-			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Obj(),
@@ -3721,19 +3842,26 @@ func TestReconcile(t *testing.T) {
 				Condition(metav1.Condition{
 					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Reason:  kueue.WorkloadInadmissible,
 					Message: "ClusterQueue non-existent-cq doesn't exist",
 				}).
-				Condition(metav1.Condition{
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "ClusterQueue non-existent-cq doesn't exist",
+				},
+				{
 					Type:    kueue.WorkloadAdmitted,
 					Status:  metav1.ConditionFalse,
 					Reason:  "NoReservation",
 					Message: "The workload has no reservation",
-				}).
-				Obj(),
+				},
+			},
 		},
 		"WorkloadUnadmittedObservability: stopped cluster queue": {
-			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Obj(),
@@ -3744,19 +3872,26 @@ func TestReconcile(t *testing.T) {
 				Condition(metav1.Condition{
 					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
+					Reason:  kueue.WorkloadInadmissible,
 					Message: "ClusterQueue cq is inactive",
 				}).
-				Condition(metav1.Condition{
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
+					Message: "ClusterQueue cq is inactive",
+				},
+				{
 					Type:    kueue.WorkloadAdmitted,
 					Status:  metav1.ConditionFalse,
 					Reason:  "NoReservation",
 					Message: "The workload has no reservation",
-				}).
-				Obj(),
+				},
+			},
 		},
 		"WorkloadUnadmittedObservability: inactive cluster queue": {
-			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Obj(),
@@ -3769,19 +3904,26 @@ func TestReconcile(t *testing.T) {
 				Condition(metav1.Condition{
 					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadInadmissible,
+					Message: "ClusterQueue cq is inactive",
+				}).
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
 					Message: "ClusterQueue is inactive",
-				}).
-				Condition(metav1.Condition{
+				},
+				{
 					Type:    kueue.WorkloadAdmitted,
 					Status:  metav1.ConditionFalse,
 					Reason:  "NoReservation",
 					Message: "The workload has no reservation",
-				}).
-				Obj(),
+				},
+			},
 		},
 		"WorkloadUnadmittedObservability: admission-gated workload": {
-			featureGates: enabledObservabilityGates,
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Annotation(constants.AdmissionGatedByAnnotation, "example.com/controller1").
@@ -3797,13 +3939,21 @@ func TestReconcile(t *testing.T) {
 					Reason:  kueue.WorkloadQuotaReservedReasonAdmissionGated,
 					Message: "Admission is gated by: example.com/controller1",
 				}).
-				Condition(metav1.Condition{
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonAdmissionGated,
+					Message: "Admission is gated by: example.com/controller1",
+				},
+				{
 					Type:    kueue.WorkloadAdmitted,
 					Status:  metav1.ConditionFalse,
 					Reason:  "NoReservation",
 					Message: "The workload has no reservation",
-				}).
-				Obj(),
+				},
+			},
 			wantEvents: []utiltesting.EventRecord{
 				{
 					Key:       types.NamespacedName{Namespace: "ns", Name: "wl"},
@@ -3850,6 +4000,28 @@ func TestReconcile(t *testing.T) {
 				var testWl *kueue.Workload
 				if tc.workload != nil {
 					testWl = tc.workload.DeepCopy()
+					if fg[features.UnadmittedWorkloadsExplicitStatus] && testWl.Status.Admission != nil && !workload.IsAdmitted(testWl) {
+						// Pre-populate the unadmitted status conditions that the first reconcile cycle would have set.
+						// This allows the reconciler to complete eviction/deactivation in a single cycle in unit tests.
+						quotaReservedCond := apimeta.FindStatusCondition(testWl.Status.Conditions, kueue.WorkloadQuotaReserved)
+						if quotaReservedCond == nil {
+							apimeta.SetStatusCondition(&testWl.Status.Conditions, metav1.Condition{
+								Type:    kueue.WorkloadQuotaReserved,
+								Status:  metav1.ConditionTrue,
+								Reason:  "AdmittedByTest",
+								Message: fmt.Sprintf("Admitted by ClusterQueue %s", testWl.Status.Admission.ClusterQueue),
+							})
+						}
+						admittedCond := apimeta.FindStatusCondition(testWl.Status.Conditions, kueue.WorkloadAdmitted)
+						if admittedCond == nil {
+							apimeta.SetStatusCondition(&testWl.Status.Conditions, metav1.Condition{
+								Type:    kueue.WorkloadAdmitted,
+								Status:  metav1.ConditionFalse,
+								Reason:  "UnsatisfiedAdmissionChecks",
+								Message: "The workload has not all checks ready",
+							})
+						}
+					}
 				}
 				objs := []client.Object{testWl}
 				objs = append(objs, tc.additionalObjects...)

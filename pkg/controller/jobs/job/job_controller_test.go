@@ -608,7 +608,7 @@ func TestReconciler(t *testing.T) {
 		wantWorkloads                   []kueue.Workload
 		wantEvents                      []utiltesting.EventRecord
 		wantErr                         error
-		wantConditionsWithObservability map[string][]metav1.Condition
+		wantConditionsWithObservability map[string][]metav1.Condition // workload conditions to override when the UnadmittedWorkloadsExplicitStatus and UnadmittedWorkloadsObservability feature gate is enabled, keyed by workload name
 	}{
 		"job is not found with FinishOrphanedWorkloads disabled": {
 			featureGates: map[featuregate.Feature]bool{features.FinishOrphanedWorkloads: false},

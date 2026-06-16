@@ -346,7 +346,7 @@ func TestReconciler(t *testing.T) {
 		wantEvents                      []utiltesting.EventRecord
 		reconcilerOptions               []jobframework.Option
 		featureGates                    map[featuregate.Feature]bool
-		wantConditionsWithObservability map[string][]metav1.Condition
+		wantConditionsWithObservability map[string][]metav1.Condition // workload conditions to override when the UnadmittedWorkloadsExplicitStatus feature gate is enabled, keyed by workload name
 	}{
 		"scheduling gate is removed and node selector is added if workload is admitted": {
 			featureGates: map[featuregate.Feature]bool{features.WorkloadIdentifierAnnotations: false},

@@ -1957,18 +1957,16 @@ func GetQuotaReservedReasonPriority(reason string) int {
 	// These blockers apply to the selected nominated flavor assignment.
 	case kueue.WorkloadQuotaReservedReasonExceedsMaxQuota:
 		return 6
-	case kueue.WorkloadQuotaReservedReasonBorrowingLimitReached:
-		return 5
 	case kueue.WorkloadQuotaReservedReasonWaitingForQuota:
-		return 4
+		return 5
 	case kueue.WorkloadQuotaReservedReasonTopologyPlacementFailed:
-		return 3
+		return 4
 	case kueue.WorkloadQuotaReservedReasonPendingPreemption:
-		return 2
+		return 3
 	// --- Pending Evaluation ---
 	// Lowest precedence state for active workloads awaiting evaluation.
 	case kueue.WorkloadQuotaReservedReasonPendingEvaluation:
-		return 1
+		return 2
 	default:
 		return 0
 	}

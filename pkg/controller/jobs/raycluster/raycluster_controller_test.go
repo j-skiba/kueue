@@ -321,7 +321,7 @@ func TestReconciler(t *testing.T) {
 		priorityClasses                 []client.Object
 		wantJob                         rayv1.RayCluster
 		wantWorkloads                   []kueue.Workload
-		wantConditionsWithObservability map[string][]metav1.Condition
+		wantConditionsWithObservability map[string][]metav1.Condition // workload conditions to override when the UnadmittedWorkloadsExplicitStatus feature gate is enabled, keyed by workload name
 		runInfo                         []podset.PodSetInfo
 		wantErr                         error
 	}{

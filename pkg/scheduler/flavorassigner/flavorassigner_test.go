@@ -4852,7 +4852,7 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 						*utiltestingapi.MakeFlavorQuotas("flavor-b").Resource(corev1.ResourceCPU, "5", "5").Obj(),
 					).Obj(),
 			},
-			wantNoFitReason: "BorrowingLimitReached",
+			wantNoFitReason: "ExceedsMaxQuota",
 		},
 	}
 
