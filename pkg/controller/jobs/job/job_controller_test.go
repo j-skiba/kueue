@@ -598,16 +598,17 @@ func TestReconciler(t *testing.T) {
 	cases := map[string]struct {
 		featureGates map[featuregate.Feature]bool
 
-		reconcilerOptions []jobframework.Option
-		reconcileKey      *types.NamespacedName
-		job               *batchv1.Job
-		workloads         []kueue.Workload
-		otherJobs         []batchv1.Job
-		priorityClasses   []client.Object
-		wantJob           batchv1.Job
-		wantWorkloads     []kueue.Workload
-		wantEvents        []utiltesting.EventRecord
-		wantErr           error
+		reconcilerOptions               []jobframework.Option
+		reconcileKey                    *types.NamespacedName
+		job                             *batchv1.Job
+		workloads                       []kueue.Workload
+		otherJobs                       []batchv1.Job
+		priorityClasses                 []client.Object
+		wantJob                         batchv1.Job
+		wantWorkloads                   []kueue.Workload
+		wantEvents                      []utiltesting.EventRecord
+		wantErr                         error
+		wantConditionsWithObservability map[string][]metav1.Condition
 	}{
 		"job is not found with FinishOrphanedWorkloads disabled": {
 			featureGates: map[featuregate.Feature]bool{features.FinishOrphanedWorkloads: false},
@@ -1360,8 +1361,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  utiltestingapi.GetDeactivatedReason(),
-						Message: utiltestingapi.GetDeactivatedMessage("The workload is deactivated"),
+						Reason:  "Pending",
+						Message: "The workload is deactivated",
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1395,6 +1396,22 @@ func TestReconciler(t *testing.T) {
 					EventType: "Normal",
 					Reason:    "Stopped",
 					Message:   "The workload is deactivated",
+				},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonDeactivated,
+						Message: "The workload is deactivated",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
 				},
 			},
 		},
@@ -1455,8 +1472,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  utiltestingapi.GetPendingReason(),
-						Message: utiltestingapi.GetPendingMessage("The workload is deactivated"),
+						Reason:  "Pending",
+						Message: "The workload is deactivated",
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1490,6 +1507,22 @@ func TestReconciler(t *testing.T) {
 					EventType: "Normal",
 					Reason:    "Stopped",
 					Message:   "The workload is deactivated",
+				},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+						Message: "The workload is pending evaluation",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
 				},
 			},
 		},
@@ -1550,8 +1583,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  utiltestingapi.GetDeactivatedReason(),
-						Message: utiltestingapi.GetDeactivatedMessage("The workload is deactivated"),
+						Reason:  "Pending",
+						Message: "The workload is deactivated",
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1585,6 +1618,22 @@ func TestReconciler(t *testing.T) {
 					EventType: "Normal",
 					Reason:    "Stopped",
 					Message:   "The workload is deactivated",
+				},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonDeactivated,
+						Message: "The workload is deactivated",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
 				},
 			},
 		},
@@ -1642,8 +1691,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  utiltestingapi.GetDeactivatedReason(),
-						Message: utiltestingapi.GetDeactivatedMessage("The workload is deactivated"),
+						Reason:  "Pending",
+						Message: "The workload is deactivated",
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1683,6 +1732,22 @@ func TestReconciler(t *testing.T) {
 					EventType: "Normal",
 					Reason:    "Deleted",
 					Message:   "Deleted job: deactivation retention period expired",
+				},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonDeactivated,
+						Message: "The workload is deactivated",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
 				},
 			},
 		},
@@ -1743,8 +1808,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  utiltestingapi.GetDeactivatedReason(),
-						Message: utiltestingapi.GetDeactivatedMessage("The workload is deactivated"),
+						Reason:  "Pending",
+						Message: "The workload is deactivated",
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1778,6 +1843,22 @@ func TestReconciler(t *testing.T) {
 					EventType: "Normal",
 					Reason:    "Stopped",
 					Message:   "The workload is deactivated",
+				},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonDeactivated,
+						Message: "The workload is deactivated",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
 				},
 			},
 		},
@@ -1835,8 +1916,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  utiltestingapi.GetDeactivatedReason(),
-						Message: utiltestingapi.GetDeactivatedMessage("The workload is deactivated"),
+						Reason:  "Pending",
+						Message: "The workload is deactivated",
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1878,6 +1959,22 @@ func TestReconciler(t *testing.T) {
 					Message:   "Deleted job: deactivation retention period expired",
 				},
 			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonDeactivated,
+						Message: "The workload is deactivated",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
+			},
 		},
 		"when workload is evicted due to pods ready timeout, job gets suspended and quota is unset": {
 			featureGates: map[featuregate.Feature]bool{
@@ -1914,8 +2011,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  utiltestingapi.GetPendingReason(),
-						Message: utiltestingapi.GetPendingMessage("Exceeded the PodsReady timeout"),
+						Reason:  "Pending",
+						Message: "Exceeded the PodsReady timeout",
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -1937,6 +2034,22 @@ func TestReconciler(t *testing.T) {
 					EventType: "Normal",
 					Reason:    "Stopped",
 					Message:   "Exceeded the PodsReady timeout",
+				},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+						Message: "The workload is pending evaluation",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
 				},
 			},
 		},
@@ -1987,8 +2100,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  utiltestingapi.GetPendingReason(),
-						Message: utiltestingapi.GetPendingMessage("At least one admission check is false"),
+						Reason:  "Pending",
+						Message: "At least one admission check is false",
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -2022,6 +2135,22 @@ func TestReconciler(t *testing.T) {
 					EventType: "Normal",
 					Reason:    "Stopped",
 					Message:   "At least one admission check is false",
+				},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+						Message: "The workload is pending evaluation",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
 				},
 			},
 		},
@@ -2072,8 +2201,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  utiltestingapi.GetPendingReason(),
-						Message: utiltestingapi.GetPendingMessage("The ClusterQueue is stopped"),
+						Reason:  "Pending",
+						Message: "The ClusterQueue is stopped",
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -2107,6 +2236,22 @@ func TestReconciler(t *testing.T) {
 					EventType: "Normal",
 					Reason:    "Stopped",
 					Message:   "The ClusterQueue is stopped",
+				},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+						Message: "The workload is pending evaluation",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
 				},
 			},
 		},
@@ -2157,8 +2302,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  utiltestingapi.GetPendingReason(),
-						Message: utiltestingapi.GetPendingMessage("The LocalQueue is stopped"),
+						Reason:  "Pending",
+						Message: "The LocalQueue is stopped",
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -2192,6 +2337,22 @@ func TestReconciler(t *testing.T) {
 					EventType: "Normal",
 					Reason:    "Stopped",
 					Message:   "The LocalQueue is stopped",
+				},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+						Message: "The workload is pending evaluation",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
 				},
 			},
 		},
@@ -2242,8 +2403,8 @@ func TestReconciler(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  utiltestingapi.GetPendingReason(),
-						Message: utiltestingapi.GetPendingMessage("Preempted"),
+						Reason:  "Pending",
+						Message: "Preempted",
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadRequeued,
@@ -2277,6 +2438,22 @@ func TestReconciler(t *testing.T) {
 					EventType: "Normal",
 					Reason:    "Stopped",
 					Message:   "Preempted",
+				},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+						Message: "The workload is pending evaluation",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
 				},
 			},
 		},
@@ -4404,11 +4581,25 @@ func TestReconciler(t *testing.T) {
 			},
 		},
 	}
+	scenarios := []struct {
+		workloadRequestUseMergePatch     bool
+		unadmittedWorkloadsObservability bool
+	}{
+		{false, false},
+		{false, true},
+		{true, false},
+		{true, true},
+	}
 	for name, tc := range cases {
-		for _, enabled := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
+		for _, scenario := range scenarios {
+			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch:%t observability:%t", name, scenario.workloadRequestUseMergePatch, scenario.unadmittedWorkloadsObservability), func(t *testing.T) {
+				fg := map[featuregate.Feature]bool{
+					features.UnadmittedWorkloadsObservability:  scenario.unadmittedWorkloadsObservability,
+					features.UnadmittedWorkloadsExplicitStatus: scenario.unadmittedWorkloadsObservability,
+				}
+				features.SetFeatureGatesDuringTest(t, fg)
 				features.SetFeatureGatesDuringTest(t, tc.featureGates)
-				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
+				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, scenario.workloadRequestUseMergePatch)
 
 				ctx, _ := utiltesting.ContextWithLog(t)
 				clientBuilder := utiltesting.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{SubResourcePatch: utiltesting.TreatSSAAsStrategicMerge})
@@ -4439,7 +4630,14 @@ func TestReconciler(t *testing.T) {
 					prebuiltWorkload = jobframework.PrebuiltWorkloadNameFor(tc.job)
 				}
 
-				for _, testWl := range tc.workloads {
+				var workloads []kueue.Workload
+				if tc.workloads != nil {
+					workloads = make([]kueue.Workload, len(tc.workloads))
+					for i := range tc.workloads {
+						workloads[i] = *tc.workloads[i].DeepCopy()
+					}
+				}
+				for _, testWl := range workloads {
 					controller := metav1.GetControllerOfNoCopy(&testWl)
 					if prebuiltWorkload == "" && controller == nil {
 						if err := ctrl.SetControllerReference(tc.job, &testWl, kClient.Scheme()); err != nil {
@@ -4480,19 +4678,32 @@ func TestReconciler(t *testing.T) {
 					t.Fatalf("Could not get Workloads after reconcile: %v", err)
 				}
 
-				wlCheckOpts := workloadCmpOpts
+				var wlCheckOpts cmp.Options
 				if prebuiltWorkload != "" {
-					wlCheckOpts = workloadCmpOptsWithOwner
+					wlCheckOpts = append(cmp.Options{}, workloadCmpOptsWithOwner...)
+				} else {
+					wlCheckOpts = append(cmp.Options{}, workloadCmpOpts...)
 				}
 
 				// The fake client with patch.Apply cannot reset the Admission field (patch.Merge can).
 				// However, other important Status fields (e.g. Conditions) still reflect the change,
 				// so we deliberately ignore the Admission field here.
-				if features.Enabled(features.WorkloadRequestUseMergePatch) {
+				if scenario.workloadRequestUseMergePatch {
 					wlCheckOpts = append(wlCheckOpts, cmpopts.IgnoreFields(kueue.WorkloadStatus{}, "Admission"))
 				}
 
-				if diff := cmp.Diff(tc.wantWorkloads, gotWorkloads.Items, wlCheckOpts...); diff != "" {
+				var wantWorkloads []kueue.Workload
+				if tc.wantWorkloads != nil {
+					wantWorkloads = make([]kueue.Workload, len(tc.wantWorkloads))
+					for i := range tc.wantWorkloads {
+						wantWorkloads[i] = *tc.wantWorkloads[i].DeepCopy()
+					}
+					if scenario.unadmittedWorkloadsObservability {
+						utiltestingapi.AdjustWorkloadsConditions(wantWorkloads, tc.wantConditionsWithObservability)
+					}
+				}
+
+				if diff := cmp.Diff(wantWorkloads, gotWorkloads.Items, wlCheckOpts...); diff != "" {
 					t.Errorf("Workloads after reconcile (-want,+got):\n%s", diff)
 				}
 

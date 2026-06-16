@@ -963,6 +963,9 @@ func (r *WorkloadReconciler) getUnadmittedQuotaReservedReason(
 	if !lqExists {
 		return kueue.WorkloadQuotaReservedReasonMisconfigured, fmt.Sprintf("LocalQueue %s doesn't exist", wl.Spec.QueueName)
 	}
+	if !lq.DeletionTimestamp.IsZero() {
+		return kueue.WorkloadQuotaReservedReasonMisconfigured, fmt.Sprintf("LocalQueue %s is terminating", wl.Spec.QueueName)
+	}
 	lqStopped := ptr.Deref(lq.Spec.StopPolicy, kueue.None) != kueue.None
 	if !cqOk && !lqStopped {
 		cqName, _ := r.queues.ClusterQueueForWorkload(wl)

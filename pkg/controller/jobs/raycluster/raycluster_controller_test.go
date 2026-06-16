@@ -314,15 +314,16 @@ func TestReconciler(t *testing.T) {
 		RequestWorkerGroup(corev1.ResourceCPU, "10")
 
 	cases := map[string]struct {
-		reconcilerOptions []jobframework.Option
-		job               rayv1.RayCluster
-		initObjects       []client.Object
-		workloads         []kueue.Workload
-		priorityClasses   []client.Object
-		wantJob           rayv1.RayCluster
-		wantWorkloads     []kueue.Workload
-		runInfo           []podset.PodSetInfo
-		wantErr           error
+		reconcilerOptions               []jobframework.Option
+		job                             rayv1.RayCluster
+		initObjects                     []client.Object
+		workloads                       []kueue.Workload
+		priorityClasses                 []client.Object
+		wantJob                         rayv1.RayCluster
+		wantWorkloads                   []kueue.Workload
+		wantConditionsWithObservability map[string][]metav1.Condition
+		runInfo                         []podset.PodSetInfo
+		wantErr                         error
 	}{
 		"when workload is admitted, cluster is unsuspended": {
 			initObjects: []client.Object{
@@ -534,19 +535,19 @@ func TestReconciler(t *testing.T) {
 						Message:            "The workload was deactivated",
 						ObservedGeneration: 1,
 					}).
-					Condition(metav1.Condition{
-						Type:               kueue.WorkloadQuotaReserved,
-						Status:             metav1.ConditionFalse,
-						Reason:             utiltestingapi.GetPendingReason(),
-						Message:            utiltestingapi.GetPendingMessage("The workload was deactivated"),
-						ObservedGeneration: 1,
-					}).
 					AdmittedAt(true, now).
 					Condition(metav1.Condition{
 						Type:               kueue.WorkloadAdmitted,
 						Status:             metav1.ConditionFalse,
 						Reason:             "NoReservation",
 						Message:            "The workload has no reservation",
+						ObservedGeneration: 1,
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             "Pending",
+						Message:            "The workload was deactivated",
 						ObservedGeneration: 1,
 					}).
 					Condition(metav1.Condition{
@@ -557,6 +558,24 @@ func TestReconciler(t *testing.T) {
 						ObservedGeneration: 1,
 					}).
 					Obj(),
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"a": {
+					{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+						Message:            "The workload is pending evaluation",
+						ObservedGeneration: 1,
+					},
+					{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionFalse,
+						Reason:             "NoReservation",
+						Message:            "The workload has no reservation",
+						ObservedGeneration: 1,
+					},
+				},
 			},
 		},
 		"RayCluster with NumOfHosts > 1": {
@@ -691,10 +710,24 @@ func TestReconciler(t *testing.T) {
 			},
 		},
 	}
+	scenarios := []struct {
+		workloadRequestUseMergePatch     bool
+		unadmittedWorkloadsObservability bool
+	}{
+		{false, false},
+		{false, true},
+		{true, false},
+		{true, true},
+	}
 	for name, tc := range cases {
-		for _, enabled := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch enabled: %t", name, enabled), func(t *testing.T) {
-				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, enabled)
+		for _, scenario := range scenarios {
+			t.Run(fmt.Sprintf("%s WorkloadRequestUseMergePatch:%t observability:%t", name, scenario.workloadRequestUseMergePatch, scenario.unadmittedWorkloadsObservability), func(t *testing.T) {
+				fg := map[featuregate.Feature]bool{
+					features.UnadmittedWorkloadsObservability:  scenario.unadmittedWorkloadsObservability,
+					features.UnadmittedWorkloadsExplicitStatus: scenario.unadmittedWorkloadsObservability,
+				}
+				features.SetFeatureGatesDuringTest(t, fg)
+				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, scenario.workloadRequestUseMergePatch)
 				ctx, _ := utiltesting.ContextWithLog(t)
 				clientBuilder := utiltesting.NewClientBuilder(rayv1.AddToScheme).WithInterceptorFuncs(interceptor.Funcs{SubResourcePatch: utiltesting.TreatSSAAsStrategicMerge})
 				indexer := utiltesting.AsIndexer(clientBuilder)
@@ -714,7 +747,14 @@ func TestReconciler(t *testing.T) {
 				kcBuilder = clientBuilder.WithObjects(tc.initObjects...)
 
 				kClient := kcBuilder.Build()
-				for _, testWl := range tc.workloads {
+				var workloads []kueue.Workload
+				if tc.workloads != nil {
+					workloads = make([]kueue.Workload, len(tc.workloads))
+					for i := range tc.workloads {
+						workloads[i] = *tc.workloads[i].DeepCopy()
+					}
+				}
+				for _, testWl := range workloads {
 					if err := ctrl.SetControllerReference(&tc.job, &testWl, kClient.Scheme()); err != nil {
 						t.Fatalf("Could not setup owner reference in Workloads: %v", err)
 					}
@@ -751,11 +791,21 @@ func TestReconciler(t *testing.T) {
 				// However, other important Status fields (e.g. Conditions) still reflect the change,
 				// so we deliberately ignore the Admission field here.
 				wlCheckOpts := workloadCmpOpts
-				if features.Enabled(features.WorkloadRequestUseMergePatch) {
+				if scenario.workloadRequestUseMergePatch {
 					wlCheckOpts = append(wlCheckOpts, cmpopts.IgnoreFields(kueue.WorkloadStatus{}, "Admission"))
 				}
 
-				if diff := cmp.Diff(tc.wantWorkloads, gotWorkloads.Items, wlCheckOpts...); diff != "" {
+				var wantWorkloads []kueue.Workload
+				if tc.wantWorkloads != nil {
+					wantWorkloads = make([]kueue.Workload, len(tc.wantWorkloads))
+					for i := range tc.wantWorkloads {
+						wantWorkloads[i] = *tc.wantWorkloads[i].DeepCopy()
+					}
+					if scenario.unadmittedWorkloadsObservability {
+						utiltestingapi.AdjustWorkloadsConditions(wantWorkloads, tc.wantConditionsWithObservability)
+					}
+				}
+				if diff := cmp.Diff(wantWorkloads, gotWorkloads.Items, wlCheckOpts...); diff != "" {
 					t.Errorf("Workloads after reconcile (-want,+got):\n%s", diff)
 				}
 			})

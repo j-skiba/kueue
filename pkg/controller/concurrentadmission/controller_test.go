@@ -17,7 +17,10 @@ limitations under the License.
 package concurrentadmission
 
 import (
+	"fmt"
 	"testing"
+
+	"k8s.io/component-base/featuregate"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -96,12 +99,13 @@ func TestReconcile(t *testing.T) {
 	retainFirstAdmissionLQ := utiltestingapi.MakeLocalQueue("lq-hold", "default").ClusterQueue("cq-hold").Obj()
 
 	testCases := map[string]struct {
-		parentWorkload       *kueue.Workload
-		variantWorkloads     []kueue.Workload
-		wantParentWorkload   *kueue.Workload
-		wantVariantWorkloads []kueue.Workload
-		wantEvents           []utiltesting.EventRecord
-		req                  reconcile.Request
+		parentWorkload                  *kueue.Workload
+		variantWorkloads                []kueue.Workload
+		wantParentWorkload              *kueue.Workload
+		wantVariantWorkloads            []kueue.Workload
+		wantConditionsWithObservability map[string][]metav1.Condition
+		wantEvents                      []utiltesting.EventRecord
+		req                             reconcile.Request
 	}{
 		"workload not found": {
 			req: reconcile.Request{
@@ -415,8 +419,8 @@ func TestReconcile(t *testing.T) {
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  utiltestingapi.GetPendingReason(),
-						Message: utiltestingapi.GetPendingMessage("Evicted by preemption"),
+						Reason:  "Pending",
+						Message: "Evicted by preemption",
 					}).
 					Condition(metav1.Condition{
 						Type:    kueue.WorkloadAdmitted,
@@ -445,6 +449,16 @@ func TestReconcile(t *testing.T) {
 					Request(corev1.ResourceCPU, "1").
 					Active(true).
 					Obj(),
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl-variant-spot": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  string(kueue.WorkloadQuotaReservedReasonPendingEvaluation),
+						Message: "The workload is pending evaluation",
+					},
+				},
 			},
 			wantEvents: []utiltesting.EventRecord{
 				{
@@ -1427,110 +1441,124 @@ func TestReconcile(t *testing.T) {
 	}
 
 	for name, tc := range testCases {
-		t.Run(name, func(t *testing.T) {
-			features.SetFeatureGateDuringTest(t, features.ConcurrentAdmission, true)
-			var objects []client.Object
-			if tc.parentWorkload != nil {
-				objects = append(objects, tc.parentWorkload)
-			}
-			for i := range tc.variantWorkloads {
-				objects = append(objects, &tc.variantWorkloads[i])
-			}
-			cl := utiltesting.NewClientBuilder().
-				WithObjects(objects...).
-				WithStatusSubresource(objects...).
-				Build()
-			preemptionExpectations := preemptexpectations.New()
-			qManager := qcache.NewManagerForUnitTests(cl, nil, qcache.WithPreemptionExpectations(preemptionExpectations))
-			roleTracker := roletracker.NewFakeRoleTracker(roletracker.RoleLeader)
-
-			cqs := []*kueue.ClusterQueue{defaultCQ.DeepCopy(), migrationCQ.DeepCopy(), migrationCQNoConstraint.DeepCopy(), retainFirstAdmissionCQ.DeepCopy()}
-			lqs := []*kueue.LocalQueue{defaultLQ.DeepCopy(), migrationLQ.DeepCopy(), migrationLQNoConstraint.DeepCopy(), retainFirstAdmissionLQ.DeepCopy()}
-
-			for _, cq := range cqs {
-				if err := cl.Create(t.Context(), cq); err != nil {
-					t.Fatal(err)
+		for _, obsEnabled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s observability:%t", name, obsEnabled), func(t *testing.T) {
+				features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
+					features.ConcurrentAdmission:               true,
+					features.UnadmittedWorkloadsObservability:  obsEnabled,
+					features.UnadmittedWorkloadsExplicitStatus: obsEnabled,
+				})
+				var objects []client.Object
+				if tc.parentWorkload != nil {
+					objects = append(objects, tc.parentWorkload)
 				}
-				if err := qManager.AddClusterQueue(t.Context(), cq); err != nil {
-					t.Fatal(err)
+				for i := range tc.variantWorkloads {
+					objects = append(objects, &tc.variantWorkloads[i])
 				}
-			}
+				cl := utiltesting.NewClientBuilder().
+					WithObjects(objects...).
+					WithStatusSubresource(objects...).
+					Build()
+				preemptionExpectations := preemptexpectations.New()
+				qManager := qcache.NewManagerForUnitTests(cl, nil, qcache.WithPreemptionExpectations(preemptionExpectations))
+				roleTracker := roletracker.NewFakeRoleTracker(roletracker.RoleLeader)
 
-			for _, lq := range lqs {
-				if err := cl.Create(t.Context(), lq); err != nil {
-					t.Fatal(err)
-				}
-				if err := qManager.AddLocalQueue(t.Context(), lq); err != nil {
-					t.Fatal(err)
-				}
-			}
+				cqs := []*kueue.ClusterQueue{defaultCQ.DeepCopy(), migrationCQ.DeepCopy(), migrationCQNoConstraint.DeepCopy(), retainFirstAdmissionCQ.DeepCopy()}
+				lqs := []*kueue.LocalQueue{defaultLQ.DeepCopy(), migrationLQ.DeepCopy(), migrationLQNoConstraint.DeepCopy(), retainFirstAdmissionLQ.DeepCopy()}
 
-			for i := range tc.variantWorkloads {
-				if workload.IsAdmissible(&tc.variantWorkloads[i]) {
-					if err := qManager.AddOrUpdateWorkload(ctrl.Log, tc.variantWorkloads[i].DeepCopy()); err != nil {
-						t.Fatalf("Failed to add workload to qManager: %v", err)
+				for _, cq := range cqs {
+					if err := cl.Create(t.Context(), cq); err != nil {
+						t.Fatal(err)
+					}
+					if err := qManager.AddClusterQueue(t.Context(), cq); err != nil {
+						t.Fatal(err)
 					}
 				}
-			}
 
-			r := &variantReconciler{
-				logName:     ConcurrentAdmissionController,
-				client:      cl,
-				queues:      qManager,
-				roleTracker: roleTracker,
-				clock:       testingclock.NewFakeClock(metav1.Now().Time),
-				recorder:    &utiltesting.EventRecorder{},
-			}
-
-			req := tc.req
-			if req.Name == "" && tc.parentWorkload != nil {
-				req = reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Namespace: tc.parentWorkload.Namespace,
-						Name:      tc.parentWorkload.Name,
-					},
+				for _, lq := range lqs {
+					if err := cl.Create(t.Context(), lq); err != nil {
+						t.Fatal(err)
+					}
+					if err := qManager.AddLocalQueue(t.Context(), lq); err != nil {
+						t.Fatal(err)
+					}
 				}
-			}
 
-			got, err := r.Reconcile(t.Context(), req)
-			if err != nil {
-				t.Fatalf("Reconcile() unexpected error: %v", err)
-			}
-			if !cmp.Equal(got, reconcile.Result{}) {
-				t.Errorf("Reconcile() got = %v, want empty result", got)
-			}
+				for i := range tc.variantWorkloads {
+					if workload.IsAdmissible(&tc.variantWorkloads[i]) {
+						if err := qManager.AddOrUpdateWorkload(ctrl.Log, tc.variantWorkloads[i].DeepCopy()); err != nil {
+							t.Fatalf("Failed to add workload to qManager: %v", err)
+						}
+					}
+				}
 
-			if tc.wantParentWorkload != nil {
-				var gotParent kueue.Workload
-				err := cl.Get(t.Context(), types.NamespacedName{Namespace: tc.wantParentWorkload.Namespace, Name: tc.wantParentWorkload.Name}, &gotParent)
+				r := &variantReconciler{
+					logName:     ConcurrentAdmissionController,
+					client:      cl,
+					queues:      qManager,
+					roleTracker: roleTracker,
+					clock:       testingclock.NewFakeClock(metav1.Now().Time),
+					recorder:    &utiltesting.EventRecorder{},
+				}
+
+				req := tc.req
+				if req.Name == "" && tc.parentWorkload != nil {
+					req = reconcile.Request{
+						NamespacedName: types.NamespacedName{
+							Namespace: tc.parentWorkload.Namespace,
+							Name:      tc.parentWorkload.Name,
+						},
+					}
+				}
+
+				got, err := r.Reconcile(t.Context(), req)
 				if err != nil {
+					t.Fatalf("Reconcile() unexpected error: %v", err)
+				}
+				if !cmp.Equal(got, reconcile.Result{}) {
+					t.Errorf("Reconcile() got = %v, want empty result", got)
+				}
+
+				if tc.wantParentWorkload != nil {
+					var gotParent kueue.Workload
+					err := cl.Get(t.Context(), types.NamespacedName{Namespace: tc.wantParentWorkload.Namespace, Name: tc.wantParentWorkload.Name}, &gotParent)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if diff := cmp.Diff(tc.wantParentWorkload, &gotParent, workloadCmpOpts); diff != "" {
+						t.Errorf("Unexpected parent workload (-want +got):\n%s", diff)
+					}
+				}
+
+				var allWorkloads kueue.WorkloadList
+				if err := cl.List(t.Context(), &allWorkloads, client.InNamespace(tc.req.Namespace)); err != nil {
 					t.Fatal(err)
 				}
-				if diff := cmp.Diff(tc.wantParentWorkload, &gotParent, workloadCmpOpts); diff != "" {
-					t.Errorf("Unexpected parent workload (-want +got):\n%s", diff)
+
+				var gotVariants []kueue.Workload
+				for _, wl := range allWorkloads.Items {
+					if concurrentadmission.IsVariant(&wl) {
+						gotVariants = append(gotVariants, wl)
+					}
 				}
-			}
 
-			var allWorkloads kueue.WorkloadList
-			if err := cl.List(t.Context(), &allWorkloads, client.InNamespace(tc.req.Namespace)); err != nil {
-				t.Fatal(err)
-			}
-
-			var gotVariants []kueue.Workload
-			for _, wl := range allWorkloads.Items {
-				if concurrentadmission.IsVariant(&wl) {
-					gotVariants = append(gotVariants, wl)
+				wantVariantWorkloads := make([]kueue.Workload, len(tc.wantVariantWorkloads))
+				for i := range tc.wantVariantWorkloads {
+					wantVariantWorkloads[i] = *tc.wantVariantWorkloads[i].DeepCopy()
 				}
-			}
+				if obsEnabled {
+					utiltestingapi.AdjustWorkloadsConditions(wantVariantWorkloads, tc.wantConditionsWithObservability)
+				}
 
-			if diff := cmp.Diff(tc.wantVariantWorkloads, gotVariants, workloadCmpOpts); diff != "" {
-				t.Errorf("Unexpected variant workloads (-want +got):\n%s", diff)
-			}
+				if diff := cmp.Diff(wantVariantWorkloads, gotVariants, workloadCmpOpts); diff != "" {
+					t.Errorf("Unexpected variant workloads (-want +got):\n%s", diff)
+				}
 
-			gotEvents := r.recorder.(*utiltesting.EventRecorder).RecordedEvents
-			if diff := cmp.Diff(tc.wantEvents, gotEvents, cmpopts.SortSlices(utiltesting.SortEvents)); diff != "" {
-				t.Errorf("Unexpected events (-want +got):\n%s", diff)
-			}
-		})
+				gotEvents := r.recorder.(*utiltesting.EventRecorder).RecordedEvents
+				if diff := cmp.Diff(tc.wantEvents, gotEvents, cmpopts.SortSlices(utiltesting.SortEvents)); diff != "" {
+					t.Errorf("Unexpected events (-want +got):\n%s", diff)
+				}
+			})
+		}
 	}
 }

@@ -170,8 +170,8 @@ func TestScheduleForFairSharing(t *testing.T) {
 		// wantAssignments is a summary of all the admissions in the cache after this cycle.
 		wantAssignments map[workload.Reference]kueue.Admission
 		// wantWorkloads is the subset of workloads that got admitted in this cycle.
-		wantWorkloads               []kueue.Workload
-		wantConditionsObservability map[string][]metav1.Condition
+		wantWorkloads                   []kueue.Workload
+		wantConditionsWithObservability map[string][]metav1.Condition
 		// wantLeft is the workload keys that are left in the queues after this cycle.
 		wantLeft map[kueue.ClusterQueueReference][]workload.Reference
 		// wantInadmissibleLeft is the workload keys that are left in the inadmissible state after this cycle.
@@ -301,6 +301,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 			},
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"eng-beta": {"eng-beta/older_new"},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"older_new": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
 			},
 		},
 		"with fair sharing: nominal-first ordering admits workload fitting within nominal despite higher CQ DRS": {
@@ -450,6 +466,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"fs-nom-b": {"eng-beta/borrow-wl"},
 			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"borrow-wl": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
+			},
 		},
 		//               ROOT
 		//           /            \
@@ -591,6 +623,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 			},
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"cq-b": {"eng-alpha/wl-b"},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl-b": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
 			},
 		},
 		//                 ROOT
@@ -736,6 +784,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 			},
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"cq-b": {"eng-alpha/wl-b"},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl-b": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
 			},
 		},
 		//                  ROOT
@@ -914,6 +978,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"cq-b": {"eng-alpha/wl-b"},
 			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"wl-b": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
+			},
 		},
 		//                     ROOT
 		//            /                    \
@@ -1086,9 +1166,9 @@ func TestScheduleForFairSharing(t *testing.T) {
 				"eng-alpha/od-admitted":   *utiltestingapi.MakeAdmission("cq-b").PodSets(utiltestingapi.MakePodSetAssignment("one").Assignment(corev1.ResourceCPU, "on-demand", "8").Obj()).Obj(),
 				"eng-alpha/wl-a":          *utiltestingapi.MakeAdmission("cq-a").PodSets(utiltestingapi.MakePodSetAssignment("one").Assignment(corev1.ResourceCPU, "on-demand", "4").Count(1).Obj()).Obj(),
 			},
-			wantConditionsObservability: map[string][]metav1.Condition{
+			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"wl-b": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					"Workload no longer fits after processing another workload",
 					now,
 				),
@@ -1378,6 +1458,50 @@ func TestScheduleForFairSharing(t *testing.T) {
 				"g": {"eng-alpha/g1"},
 				"f": {"eng-alpha/f1"},
 			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"e1": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
+				"f1": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
+				"g1": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
+			},
 		},
 		// b0 is already admitted, using 10 capacity.
 		// b1 - 50 capacity, and c1 - 75 capacity are pending.
@@ -1512,6 +1636,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 			},
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"c": {"eng-alpha/c1"},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"c1": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
 			},
 		},
 		// b0 is admitted, using 4 capacity.
@@ -1664,6 +1804,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"b": {"eng-alpha/b1"},
 			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"b1": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
+			},
 		},
 		// b0 is admitted, using 4 capacity.
 		// b1 and c1 are pending.
@@ -1812,6 +1968,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 			},
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"b": {"eng-alpha/b1"},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"b1": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
 			},
 		},
 		// Cohort A has Clusterqueue a, and capacity is
@@ -2100,6 +2272,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"b": {"eng-alpha/b1"},
 			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"b1": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
+			},
 		},
 		"fair sharing schedule earliest timestamp first": {
 			enableFairSharing: true,
@@ -2211,6 +2399,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 			},
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"b": {"eng-alpha/b1"},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"b1": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload no longer fits after processing another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
 			},
 		},
 		"with fair sharing: preempt workload from CQ with the highest share": {
@@ -2388,6 +2592,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 						Assignment(corev1.ResourceCPU, "on-demand", "20").
 						Obj()).
 					Obj(),
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"preemptor": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonPendingPreemption,
+						Message: "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor on-demand, 30 more needed, insufficient unused quota for cpu in flavor spot, 30 more needed. Pending the preemption of 2 workload(s)",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
 			},
 		},
 		"multiple preemptions within cq when fair sharing": {
@@ -2642,6 +2862,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 				"other-beta":  0,
 				"other-gamma": 0,
 			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"preemptor": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonPendingPreemption,
+						Message: "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 3 more needed. Pending the preemption of 1 workload(s)",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
+			},
 		},
 		"multiple preemptions skip overlapping preemption targets": {
 			// Gamma cq is using more than fair share of CPU.
@@ -2865,6 +3101,36 @@ func TestScheduleForFairSharing(t *testing.T) {
 				"other-beta":  1,
 				"other-gamma": 0,
 			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"preemptor": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonPendingPreemption,
+						Message: "couldn't assign flavors to pod set main: insufficient unused quota for alpha-resource in flavor default, 1 more needed, insufficient unused quota for cpu in flavor default, 3 more needed. Pending the preemption of 2 workload(s)",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
+				"pretending-preemptor": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+						Message: "Workload has overlapping preemption targets with another workload",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
+			},
 		},
 		"not enough resources with fair sharing enabled": {
 			enableFairSharing: true,
@@ -2899,6 +3165,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 			},
 			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
 				"sales": {"sales/new"},
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"new": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonExceedsMaxQuota,
+						Message: "couldn't assign flavors to pod set one: insufficient quota for cpu in flavor default, previously considered podsets requests (0) + current podset request (100) > maximum capacity (50)",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
 			},
 		},
 		"with fair sharing: prefer reclamation over cq priority based preemption; with preemption while borrowing": {
@@ -3016,6 +3298,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 						Assignment("gpu", "spot", "5").
 						Obj()).
 					Obj(),
+			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"preemptor": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonPendingPreemption,
+						Message: "couldn't assign flavors to pod set main: insufficient unused quota for gpu in flavor on-demand, 3 more needed, insufficient unused quota for gpu in flavor spot, 3 more needed. Pending the preemption of 1 workload(s)",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
 			},
 		},
 		"prefer flavor with most local capacity": {
@@ -3345,6 +3643,22 @@ func TestScheduleForFairSharing(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "nc-high", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "nc-high", "Pending", corev1.EventTypeWarning).Obj(),
 			},
+			wantConditionsWithObservability: map[string][]metav1.Condition{
+				"nc-high": {
+					{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonPendingPreemption,
+						Message: "couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor default, 4 more needed. Pending the preemption of 1 workload(s)",
+					},
+					{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  "NoReservation",
+						Message: "The workload has no reservation",
+					},
+				},
+			},
 		},
 		"PreemptionOverBorrowing with fair sharing: preempt in first flavor instead of borrowing in second": {
 			enableFairSharing: true,
@@ -3464,9 +3778,9 @@ func TestScheduleForFairSharing(t *testing.T) {
 				utiltesting.MakeEventRecord("default", "fs-high-pob", "PreemptedWorkload", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "fs-high-pob", "Pending", corev1.EventTypeWarning).Obj(),
 			},
-			wantConditionsObservability: map[string][]metav1.Condition{
+			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"fs-high-pob": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					"couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor on-demand, 5 more needed. Pending the preemption of 1 workload(s)",
 					now,
 				),
@@ -3602,11 +3916,14 @@ func TestScheduleForFairSharing(t *testing.T) {
 					t.Fatalf("Unexpected list workloads error: %v", err)
 				}
 
-				utiltestingapi.AdjustWorkloadsConditionsForObservability(wantWorkloads, gotWorkloads.Items, tc.wantConditionsObservability)
+				if scenario.unadmittedWorkloadsObservability {
+					utiltestingapi.AdjustWorkloadsConditions(wantWorkloads, tc.wantConditionsWithObservability)
+				}
 
 				defaultWorkloadCmpOpts := cmp.Options{
 					cmpopts.EquateEmpty(),
 					cmpopts.IgnoreFields(kueue.AdmissionCheckState{}, "LastTransitionTime"),
+					cmpopts.IgnoreFields(metav1.Condition{}, "LastTransitionTime"),
 					cmpopts.IgnoreFields(kueue.Workload{}, "ObjectMeta.ResourceVersion", "ObjectMeta.CreationTimestamp"),
 					cmpopts.SortSlices(func(a, b metav1.Condition) bool { return a.Type < b.Type }),
 				}
@@ -3635,7 +3952,7 @@ func TestScheduleForFairSharing(t *testing.T) {
 					for i := range wantEvents {
 						ev := wantEvents[i]
 						if ev.Reason == "Pending" {
-							if conds, ok := tc.wantConditionsObservability[ev.Key.Name]; ok {
+							if conds, ok := tc.wantConditionsWithObservability[ev.Key.Name]; ok {
 								for _, cond := range conds {
 									if cond.Type == kueue.WorkloadQuotaReserved {
 										ev.Reason = cond.Reason
@@ -3645,10 +3962,10 @@ func TestScheduleForFairSharing(t *testing.T) {
 							} else {
 								for _, gotEv := range recorder.RecordedEvents {
 									if gotEv.Key == ev.Key && gotEv.EventType == ev.EventType {
-										if gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonWaitingForQuota) ||
-											gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonExceedsMaxQuota) ||
-											gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonPendingPreemption) ||
-											gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonNoMatchingFlavor) {
+										if gotEv.Reason == kueue.WorkloadQuotaReservedReasonWaitingForQuota ||
+											gotEv.Reason == kueue.WorkloadQuotaReservedReasonExceedsMaxQuota ||
+											gotEv.Reason == kueue.WorkloadQuotaReservedReasonPendingPreemption ||
+											gotEv.Reason == kueue.WorkloadQuotaReservedReasonNoMatchingFlavor {
 											ev.Reason = gotEv.Reason
 											break
 										}

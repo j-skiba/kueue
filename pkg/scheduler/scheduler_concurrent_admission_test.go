@@ -82,10 +82,10 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 		additionalClusterQueues []kueue.ClusterQueue
 		additionalLocalQueues   []kueue.LocalQueue
 
-		wantAssignments             map[workload.Reference]kueue.Admission
-		wantWorkloads               []kueue.Workload
-		wantConditionsObservability map[string][]metav1.Condition
-		wantLeft                    map[kueue.ClusterQueueReference][]workload.Reference
+		wantAssignments                 map[workload.Reference]kueue.Admission
+		wantWorkloads                   []kueue.Workload
+		wantConditionsWithObservability map[string][]metav1.Condition
+		wantLeft                        map[kueue.ClusterQueueReference][]workload.Reference
 	}{
 		"concurrent admission: more favorable variant evicts less favorable sibling": {
 			workloads: []kueue.Workload{
@@ -163,7 +163,7 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 						Obj()).
 					Obj(),
 			},
-			wantConditionsObservability: map[string][]metav1.Condition{
+			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"candidate-more-favorable": utiltestingapi.GetObservabilityConditions(
 					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
 					". Pending the migration of 1 workload(s)",
@@ -240,7 +240,7 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 						Obj()).
 					Obj(),
 			},
-			wantConditionsObservability: map[string][]metav1.Condition{
+			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"candidate-less-favorable": utiltestingapi.GetObservabilityConditions(
 					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
 					"A more favorable variant is already admitted",
@@ -340,7 +340,7 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 						Obj()).
 					Obj(),
 			},
-			wantConditionsObservability: map[string][]metav1.Condition{
+			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"candidate-more-favorable": utiltestingapi.GetObservabilityConditions(
 					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
 					"Target flavor is below LastAcceptableFlavorName",
@@ -457,7 +457,9 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 					t.Fatalf("Unexpected list workloads error: %v", err)
 				}
 
-				utiltestingapi.AdjustWorkloadsConditionsForObservability(wantWorkloads, gotWorkloads.Items, tc.wantConditionsObservability)
+				if scenario.unadmittedWorkloadsObservability {
+					utiltestingapi.AdjustWorkloadsConditions(wantWorkloads, tc.wantConditionsWithObservability)
+				}
 
 				defaultWorkloadCmpOpts := cmp.Options{
 					cmpopts.EquateEmpty(),
