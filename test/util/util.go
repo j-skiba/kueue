@@ -485,14 +485,14 @@ func ExpectWorkloadsToBePendingByKeys(ctx context.Context, k8sClient client.Clie
 			isPendingReason := false
 			if cond != nil && cond.Status == metav1.ConditionFalse {
 				if features.Enabled(features.UnadmittedWorkloadsObservability) {
-					isPendingReason = cond.Reason == string(kueue.WorkloadQuotaReservedReasonPendingEvaluation) ||
-						cond.Reason == string(kueue.WorkloadQuotaReservedReasonWaitingForQuota) ||
-						cond.Reason == string(kueue.WorkloadQuotaReservedReasonPendingPreemption) ||
-						cond.Reason == string(kueue.WorkloadQuotaReservedReasonExceedsMaxQuota) ||
-						cond.Reason == string(kueue.WorkloadQuotaReservedReasonBorrowingLimitReached) ||
-						cond.Reason == string(kueue.WorkloadQuotaReservedReasonTopologyPlacementFailed) ||
-						cond.Reason == string(kueue.WorkloadQuotaReservedReasonWaitingForPodsReady) ||
-						cond.Reason == string(kueue.WorkloadQuotaReservedReasonAdmissionGated)
+					isPendingReason = cond.Reason == kueue.WorkloadQuotaReservedReasonPendingEvaluation ||
+						cond.Reason == kueue.WorkloadQuotaReservedReasonWaitingForQuota ||
+						cond.Reason == kueue.WorkloadQuotaReservedReasonPendingPreemption ||
+						cond.Reason == kueue.WorkloadQuotaReservedReasonExceedsMaxQuota ||
+						cond.Reason == kueue.WorkloadQuotaReservedReasonBorrowingLimitReached ||
+						cond.Reason == kueue.WorkloadQuotaReservedReasonTopologyPlacementFailed ||
+						cond.Reason == kueue.WorkloadQuotaReservedReasonWaitingForPodsReady ||
+						cond.Reason == kueue.WorkloadQuotaReservedReasonAdmissionGated
 				} else {
 					isPendingReason = cond.Reason == "Pending"
 				}
@@ -525,8 +525,8 @@ func ExpectWorkloadsToBeInadmissibleByKeys(ctx context.Context, k8sClient client
 			isInadmissible := false
 			if cond != nil && cond.Status == metav1.ConditionFalse {
 				if features.Enabled(features.UnadmittedWorkloadsObservability) {
-					isInadmissible = cond.Reason == string(kueue.WorkloadQuotaReservedReasonMisconfigured) ||
-						cond.Reason == string(kueue.WorkloadQuotaReservedReasonSuspended)
+					isInadmissible = cond.Reason == kueue.WorkloadQuotaReservedReasonMisconfigured ||
+						cond.Reason == kueue.WorkloadQuotaReservedReasonSuspended
 				} else {
 					isInadmissible = cond.Reason == "Inadmissible"
 				}
@@ -752,7 +752,7 @@ func ExpectWorkloadsToBeFrozen(ctx context.Context, k8sClient client.Client, cq 
 			isFrozen := false
 			if cond != nil && cond.Status == metav1.ConditionFalse {
 				if features.Enabled(features.UnadmittedWorkloadsObservability) {
-					isFrozen = cond.Reason == string(kueue.WorkloadQuotaReservedReasonMisconfigured)
+					isFrozen = cond.Reason == kueue.WorkloadQuotaReservedReasonMisconfigured
 				} else {
 					isFrozen = cond.Reason == "Inadmissible" && cond.Message == fmt.Sprintf("ClusterQueue %s is inactive", cq)
 				}

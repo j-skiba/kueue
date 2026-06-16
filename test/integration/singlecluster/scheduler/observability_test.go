@@ -386,7 +386,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			metric := metrics.UnadmittedWorkloads.WithLabelValues(
 				cq.Name,
 				"NoReservation",
-				string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+				kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 				roletracker.RoleStandalone,
 			)
 			v, err := testutil.GetGaugeMetricValue(metric)
@@ -398,7 +398,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 				ns.Name,
 				cq.Name,
 				"NoReservation",
-				string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+				kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 				roletracker.RoleStandalone,
 			)
 			vLQ, errLQ := testutil.GetGaugeMetricValue(metricLQ)
@@ -414,7 +414,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			g.Expect(testingmetrics.CollectFilteredGaugeVec(metrics.UnadmittedWorkloads, map[string]string{
 				"cluster_queue":    cq.Name,
 				"reason":           "NoReservation",
-				"underlying_cause": string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+				"underlying_cause": kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 			})).To(gomega.BeEmpty())
 
 			g.Expect(testingmetrics.CollectFilteredGaugeVec(metrics.LocalQueueUnadmittedWorkloads, map[string]string{
@@ -422,7 +422,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 				"namespace":        ns.Name,
 				"cluster_queue":    cq.Name,
 				"reason":           "NoReservation",
-				"underlying_cause": string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+				"underlying_cause": kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 			})).To(gomega.BeEmpty())
 		}, util.Timeout, util.Interval).Should(gomega.Succeed())
 	})
@@ -446,7 +446,7 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status Logic", func()
 			metric := metrics.UnadmittedWorkloads.WithLabelValues(
 				"",
 				"NoReservation",
-				string(kueue.WorkloadQuotaReservedReasonPendingEvaluation),
+				kueue.WorkloadQuotaReservedReasonPendingEvaluation,
 				roletracker.RoleStandalone,
 			)
 			v, err := testutil.GetGaugeMetricValue(metric)

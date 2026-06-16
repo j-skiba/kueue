@@ -161,7 +161,7 @@ func TestScheduleForAFS(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"wl-a1": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor default, 8 more needed",
 					now,
 				),
@@ -244,7 +244,7 @@ func TestScheduleForAFS(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"wl-b1": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor default, 8 more needed",
 					now,
 				),
@@ -381,7 +381,7 @@ func TestScheduleForAFS(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"wl-a2": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor default, 4 more needed",
 					now,
 				),

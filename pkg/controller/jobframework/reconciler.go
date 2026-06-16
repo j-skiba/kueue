@@ -560,10 +560,10 @@ func (r *JobReconciler) ReconcileGenericJob(ctx context.Context, req ctrl.Reques
 					message := evCond.Message
 					if features.Enabled(features.UnadmittedWorkloadsObservability) {
 						if wl.Spec.Active != nil && !*wl.Spec.Active {
-							reason = string(kueue.WorkloadQuotaReservedReasonDeactivated)
+							reason = kueue.WorkloadQuotaReservedReasonDeactivated
 							message = "The workload is deactivated"
 						} else {
-							reason = string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
+							reason = kueue.WorkloadQuotaReservedReasonPendingEvaluation
 							message = "The workload is pending evaluation"
 						}
 					}

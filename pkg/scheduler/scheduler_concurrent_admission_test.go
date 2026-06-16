@@ -165,7 +165,7 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"candidate-more-favorable": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					". Pending the migration of 1 workload(s)",
 					now,
 				),
@@ -242,7 +242,7 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"candidate-less-favorable": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					"A more favorable variant is already admitted",
 					now,
 				),
@@ -342,7 +342,7 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"candidate-more-favorable": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					"Target flavor is below LastAcceptableFlavorName",
 					now,
 				),

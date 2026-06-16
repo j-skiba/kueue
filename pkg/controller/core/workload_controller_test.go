@@ -3465,7 +3465,7 @@ func TestReconcile(t *testing.T) {
 				{
 					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
-					Reason:  string(kueue.WorkloadQuotaReservedReasonPendingEvaluation),
+					Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
 					Message: "AdmissionGatedBy cleared, waiting for quota reservation",
 				},
 				{

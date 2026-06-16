@@ -1998,7 +1998,7 @@ func TestScheduleForTAS(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"foo": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s)`,
 					now,
 				),
@@ -2046,7 +2046,7 @@ func TestScheduleForTAS(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"foo": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1`,
 					now,
 				),
@@ -2082,7 +2082,7 @@ func TestScheduleForTAS(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"foo": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1`,
 					now,
 				),
@@ -2561,7 +2561,7 @@ func TestScheduleForTAS(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"foo": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "pods": 1`,
 					now,
 				),
@@ -3118,7 +3118,7 @@ func TestScheduleForTAS(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"foo": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					`couldn't assign flavors to pod set one: topology "tas-three-level" doesn't allow to fit; 0/1 slice(s) fit on level cloud.provider.com/rack; 2/3 slice(s) fit on level kubernetes.io/hostname`,
 					now,
 				),
@@ -3295,10 +3295,10 @@ func TestScheduleForTAS(t *testing.T) {
 							} else {
 								for _, gotEv := range recorder.RecordedEvents {
 									if gotEv.Key == ev.Key && gotEv.EventType == ev.EventType {
-										if gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonWaitingForQuota) ||
-											gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonExceedsMaxQuota) ||
-											gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonPendingPreemption) ||
-											gotEv.Reason == string(kueue.WorkloadQuotaReservedReasonNoMatchingFlavor) {
+										if gotEv.Reason == kueue.WorkloadQuotaReservedReasonWaitingForQuota ||
+											gotEv.Reason == kueue.WorkloadQuotaReservedReasonExceedsMaxQuota ||
+											gotEv.Reason == kueue.WorkloadQuotaReservedReasonPendingPreemption ||
+											gotEv.Reason == kueue.WorkloadQuotaReservedReasonNoMatchingFlavor {
 											ev.Reason = gotEv.Reason
 											break
 										}
@@ -3518,7 +3518,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"foo": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor tas-default, 5 more needed. Pending the preemption of 1 workload(s)",
 					now,
 				),
@@ -3651,7 +3651,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"foo": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "memory": 1. Pending the preemption of 1 workload(s)`,
 					now,
 				),
@@ -3777,7 +3777,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"foo": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1. Pending the preemption of 1 workload(s)`,
 					now,
 				),
@@ -3907,7 +3907,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"high-priority-waiting": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1. Pending the preemption of 1 workload(s)`,
 					now,
 				),
@@ -4073,7 +4073,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"foo": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "cpu": 1. Pending the preemption of 1 workload(s)`,
 					now,
 				),
@@ -4241,7 +4241,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"foo": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s). Pending the preemption of 1 workload(s)`,
 					now,
 				),
@@ -4359,7 +4359,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"mid-priority-waiting": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 2 pod(s)`,
 					now,
 				),
@@ -4491,7 +4491,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"high-priority": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					"couldn't assign flavors to pod set main: insufficient unused quota for cpu in flavor tas-default, 3 more needed. Pending the preemption of 1 workload(s)",
 					now,
 				),
@@ -4677,7 +4677,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"high-priority": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					"couldn't assign flavors to pod set one: insufficient unused quota for memory in flavor tas-default, 5Gi more needed. Pending the preemption of 2 workload(s)",
 					now,
 				),
@@ -5016,7 +5016,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"foo": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					`couldn't assign flavors to pod set two: topology "tas-single-level" doesn't allow to fit any of 1 pod(s). Total nodes: 1; excluded: resource "pods": 1`,
 					now,
 				),
@@ -5200,7 +5200,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"b1": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor tas-default, 1 more needed. Pending the preemption of 1 workload(s)",
 					now,
 				),
@@ -5402,7 +5402,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"b1": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor tas-default, 3 more needed. Pending the preemption of 1 workload(s)",
 					now,
 				),
@@ -5570,7 +5570,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"b1": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					"couldn't assign flavors to pod set one: insufficient unused quota for cpu in flavor tas-default, 2 more needed. Pending the preemption of 1 workload(s)",
 					now,
 				),
@@ -5821,12 +5821,12 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"b1": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 1 out of 3 pod(s). Total nodes: 2; excluded: resource "cpu": 1. Pending the preemption of 2 workload(s)`,
 					now,
 				),
 				"c1": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					"Workload no longer fits after processing another workload",
 					now,
 				),
@@ -6170,7 +6170,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"b1": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					"Workload no longer fits after processing another workload",
 					now,
 				),
@@ -6279,7 +6279,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"b1": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					"Workload no longer fits after processing another workload",
 					now,
 				),
@@ -6387,7 +6387,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"b1": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					"Workload no longer fits after processing another workload",
 					now,
 				),
@@ -6544,12 +6544,12 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"a2": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s). Pending the preemption of 1 workload(s)`,
 					now,
 				),
 				"b1": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					"Workload no longer fits after processing another workload",
 					now,
 				),
@@ -6686,12 +6686,12 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"a2": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s)`,
 					now,
 				),
 				"b1": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					"Workload no longer fits after processing another workload",
 					now,
 				),
@@ -6851,7 +6851,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"a2": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonWaitingForQuota),
+					kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 					`couldn't assign flavors to pod set one: topology "tas-single-level" allows to fit only 3 out of 4 pod(s)`,
 					now,
 				),
@@ -7090,7 +7090,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 			eventCmpOpts: cmp.Options{eventIgnoreMessage},
 			wantConditionsWithObservability: map[string][]metav1.Condition{
 				"standard": utiltestingapi.GetObservabilityConditions(
-					string(kueue.WorkloadQuotaReservedReasonPendingPreemption),
+					kueue.WorkloadQuotaReservedReasonPendingPreemption,
 					"couldn't assign flavors to pod set one: insufficient unused quota for example.com/gpu in flavor tas-default, 8 more needed. Pending the preemption of 2 workload(s)",
 					now,
 				),

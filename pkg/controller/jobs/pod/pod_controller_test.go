@@ -2498,7 +2498,7 @@ func TestReconciler(t *testing.T) {
 					{
 						Type:    kueue.WorkloadQuotaReserved,
 						Status:  metav1.ConditionFalse,
-						Reason:  string(kueue.WorkloadQuotaReservedReasonPendingEvaluation),
+						Reason:  kueue.WorkloadQuotaReservedReasonPendingEvaluation,
 						Message: "The workload is pending evaluation",
 					},
 				},

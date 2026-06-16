@@ -3042,7 +3042,7 @@ var _ = ginkgo.Describe("Pod controller with deployment-owned pods and waitForPo
 
 func getPendingReason() string {
 	if features.Enabled(features.UnadmittedWorkloadsObservability) {
-		return string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
+		return kueue.WorkloadQuotaReservedReasonPendingEvaluation
 	}
 	return "Pending"
 }

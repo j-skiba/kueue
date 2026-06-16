@@ -334,7 +334,7 @@ func (r *variantReconciler) clearWorkloadAdmission(ctx context.Context, wl *kueu
 		reason := "Pending"
 		message := evCond.Message
 		if features.Enabled(features.UnadmittedWorkloadsObservability) {
-			reason = string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
+			reason = kueue.WorkloadQuotaReservedReasonPendingEvaluation
 			message = "The workload is pending evaluation"
 		}
 		if workload.UnsetQuotaReservationWithCondition(w, reason, message, r.clock.Now()) {

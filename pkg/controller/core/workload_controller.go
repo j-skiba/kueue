@@ -1172,7 +1172,7 @@ func (r *WorkloadReconciler) mayUpdateConditionForAdmissionGatedBy(ctx context.C
 			// Update the condition to indicate the gate is cleared, rather than removing it
 			reason := "Pending"
 			if features.Enabled(features.UnadmittedWorkloadsObservability) {
-				reason = string(kueue.WorkloadQuotaReservedReasonPendingEvaluation)
+				reason = kueue.WorkloadQuotaReservedReasonPendingEvaluation
 			}
 			return workload.UnsetQuotaReservationWithCondition(wl, reason, "AdmissionGatedBy cleared, waiting for quota reservation", r.clock.Now()), nil
 		})
