@@ -6123,14 +6123,7 @@ func TestReconciler(t *testing.T) {
 				}
 
 				kClient := kcBuilder.Build()
-				var workloads []kueue.Workload
-				if tc.workloads != nil {
-					workloads = make([]kueue.Workload, len(tc.workloads))
-					for i := range tc.workloads {
-						workloads[i] = *tc.workloads[i].DeepCopy()
-					}
-				}
-				for _, testWl := range workloads {
+				for _, testWl := range tc.workloads {
 					if err := kClient.Create(ctx, &testWl); err != nil {
 						t.Fatalf("Could not create workload: %v", err)
 					}

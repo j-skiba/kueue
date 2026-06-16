@@ -535,19 +535,19 @@ func TestReconciler(t *testing.T) {
 						Message:            "The workload was deactivated",
 						ObservedGeneration: 1,
 					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionFalse,
+						Reason:             "Pending",
+						Message:            "The workload was deactivated",
+						ObservedGeneration: 1,
+					}).
 					AdmittedAt(true, now).
 					Condition(metav1.Condition{
 						Type:               kueue.WorkloadAdmitted,
 						Status:             metav1.ConditionFalse,
 						Reason:             "NoReservation",
 						Message:            "The workload has no reservation",
-						ObservedGeneration: 1,
-					}).
-					Condition(metav1.Condition{
-						Type:               kueue.WorkloadQuotaReserved,
-						Status:             metav1.ConditionFalse,
-						Reason:             "Pending",
-						Message:            "The workload was deactivated",
 						ObservedGeneration: 1,
 					}).
 					Condition(metav1.Condition{
@@ -747,14 +747,7 @@ func TestReconciler(t *testing.T) {
 				kcBuilder = clientBuilder.WithObjects(tc.initObjects...)
 
 				kClient := kcBuilder.Build()
-				var workloads []kueue.Workload
-				if tc.workloads != nil {
-					workloads = make([]kueue.Workload, len(tc.workloads))
-					for i := range tc.workloads {
-						workloads[i] = *tc.workloads[i].DeepCopy()
-					}
-				}
-				for _, testWl := range workloads {
+				for _, testWl := range tc.workloads {
 					if err := ctrl.SetControllerReference(&tc.job, &testWl, kClient.Scheme()); err != nil {
 						t.Fatalf("Could not setup owner reference in Workloads: %v", err)
 					}

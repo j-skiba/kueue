@@ -4630,14 +4630,7 @@ func TestReconciler(t *testing.T) {
 					prebuiltWorkload = jobframework.PrebuiltWorkloadNameFor(tc.job)
 				}
 
-				var workloads []kueue.Workload
-				if tc.workloads != nil {
-					workloads = make([]kueue.Workload, len(tc.workloads))
-					for i := range tc.workloads {
-						workloads[i] = *tc.workloads[i].DeepCopy()
-					}
-				}
-				for _, testWl := range workloads {
+				for _, testWl := range tc.workloads {
 					controller := metav1.GetControllerOfNoCopy(&testWl)
 					if prebuiltWorkload == "" && controller == nil {
 						if err := ctrl.SetControllerReference(tc.job, &testWl, kClient.Scheme()); err != nil {

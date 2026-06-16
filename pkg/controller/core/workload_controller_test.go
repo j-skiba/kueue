@@ -413,23 +413,22 @@ func TestReconcile(t *testing.T) {
 	cases := map[string]struct {
 		featureGates map[featuregate.Feature]bool
 
-		workload                           *kueue.Workload
-		additionalObjects                  []client.Object
-		cq                                 *kueue.ClusterQueue
-		lq                                 *kueue.LocalQueue
-		resourceClaims                     []*resourcev1.ResourceClaim
-		resourceClaimTemplates             []*resourcev1.ResourceClaimTemplate
-		wantDRAResourceTotal               *int64
-		wantWorkloadsInQueue               *int
-		wantWorkload                       *kueue.Workload
-		wantWorkloadUseMergePatch          *kueue.Workload // workload version to compensate for the difference between use of Apply and Merge patch in FakeClient
-		wantConditionsWithObservability    []metav1.Condition
-		wantConditionsWithoutObservability []metav1.Condition
-		wantError                          error
-		wantErrorMsg                       string
-		wantEvents                         []utiltesting.EventRecord
-		wantResult                         reconcile.Result
-		reconcilerOpts                     []Option
+		workload                        *kueue.Workload
+		additionalObjects               []client.Object
+		cq                              *kueue.ClusterQueue
+		lq                              *kueue.LocalQueue
+		resourceClaims                  []*resourcev1.ResourceClaim
+		resourceClaimTemplates          []*resourcev1.ResourceClaimTemplate
+		wantDRAResourceTotal            *int64
+		wantWorkloadsInQueue            *int
+		wantWorkload                    *kueue.Workload
+		wantWorkloadUseMergePatch       *kueue.Workload // workload version to compensate for the difference between use of Apply and Merge patch in FakeClient
+		wantConditionsWithObservability []metav1.Condition
+		wantError                       error
+		wantErrorMsg                    string
+		wantEvents                      []utiltesting.EventRecord
+		wantResult                      reconcile.Result
+		reconcilerOpts                  []Option
 	}{
 		"initialize unadmitted workload status on first reconcile cycle": {
 			featureGates: enabledObservabilityGates,
@@ -495,15 +494,13 @@ func TestReconcile(t *testing.T) {
 					Reason:  kueue.WorkloadInadmissible,
 					Message: "DRA resource claims not supported",
 				}).
-				Obj(),
-			wantConditionsWithoutObservability: []metav1.Condition{
-				{
+				Condition(metav1.Condition{
 					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadInadmissible,
 					Message: "KueueDRAIntegration feature does not support use of resource claims",
-				},
-			},
+				}).
+				Obj(),
 			wantConditionsWithObservability: []metav1.Condition{
 				{
 					Type:    kueue.WorkloadQuotaReserved,
@@ -549,15 +546,13 @@ func TestReconcile(t *testing.T) {
 					Reason:  kueue.WorkloadInadmissible,
 					Message: "Workload uses DRA resources but the KueueDRAIntegration feature gate is not enabled",
 				}).
-				Obj(),
-			wantConditionsWithoutObservability: []metav1.Condition{
-				{
+				Condition(metav1.Condition{
 					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadInadmissible,
 					Message: "Workload uses DRA resources but the KueueDRAIntegration feature gate is not enabled",
-				},
-			},
+				}).
+				Obj(),
 			wantConditionsWithObservability: []metav1.Condition{
 				{
 					Type:    kueue.WorkloadQuotaReserved,
@@ -603,15 +598,13 @@ func TestReconcile(t *testing.T) {
 					Reason:  kueue.WorkloadInadmissible,
 					Message: "Workload uses DRA resources but the KueueDRAIntegration feature gate is not enabled",
 				}).
-				Obj(),
-			wantConditionsWithoutObservability: []metav1.Condition{
-				{
+				Condition(metav1.Condition{
 					Type:    kueue.WorkloadQuotaReserved,
 					Status:  metav1.ConditionFalse,
 					Reason:  kueue.WorkloadInadmissible,
 					Message: "Workload uses DRA resources but the KueueDRAIntegration feature gate is not enabled",
-				},
-			},
+				}).
+				Obj(),
 			wantConditionsWithObservability: []metav1.Condition{
 				{
 					Type:    kueue.WorkloadQuotaReserved,
@@ -3980,10 +3973,6 @@ func TestReconcile(t *testing.T) {
 					wantWl = wantWl.DeepCopy()
 					if fg[features.UnadmittedWorkloadsExplicitStatus] && len(tc.wantConditionsWithObservability) > 0 {
 						for _, cond := range tc.wantConditionsWithObservability {
-							apimeta.SetStatusCondition(&wantWl.Status.Conditions, cond)
-						}
-					} else if len(tc.wantConditionsWithoutObservability) > 0 {
-						for _, cond := range tc.wantConditionsWithoutObservability {
 							apimeta.SetStatusCondition(&wantWl.Status.Conditions, cond)
 						}
 					}
