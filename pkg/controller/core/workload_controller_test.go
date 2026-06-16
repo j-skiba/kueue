@@ -3820,11 +3820,7 @@ func TestReconcile(t *testing.T) {
 				features.SetFeatureGateDuringTest(t, features.WorkloadRequestUseMergePatch, scenario.workloadRequestUseMergePatch)
 				features.SetFeatureGateDuringTest(t, features.AdmissionGatedBy, true)
 
-				var testWl *kueue.Workload
-				if tc.workload != nil {
-					testWl = tc.workload.DeepCopy()
-				}
-				objs := []client.Object{testWl}
+				objs := []client.Object{tc.workload}
 				objs = append(objs, tc.additionalObjects...)
 				for _, rc := range tc.resourceClaims {
 					objs = append(objs, rc)
@@ -3838,11 +3834,11 @@ func TestReconcile(t *testing.T) {
 				// check does not incorrectly mark them as orphaned. Skip when
 				// the test explicitly enables the feature gate (those tests
 				// provide their own additionalObjects to control ownership).
-				if ref := metav1.GetControllerOf(testWl); ref != nil && !tc.featureGates[features.FinishOrphanedWorkloads] {
+				if ref := metav1.GetControllerOf(tc.workload); ref != nil && !tc.featureGates[features.FinishOrphanedWorkloads] {
 					objs = append(objs, &batchv1.Job{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      ref.Name,
-							Namespace: testWl.Namespace,
+							Namespace: tc.workload.Namespace,
 							UID:       ref.UID,
 						},
 					})
@@ -3889,9 +3885,9 @@ func TestReconcile(t *testing.T) {
 					}
 				}
 
-				if testWl != nil && testWl.Namespace == "ns" &&
-					len(testWl.Spec.PodSets) > 0 &&
-					len(testWl.Spec.PodSets[0].Template.Spec.ResourceClaims) > 0 {
+				if tc.workload != nil && tc.workload.Namespace == "ns" &&
+					len(tc.workload.Spec.PodSets) > 0 &&
+					len(tc.workload.Spec.PodSets[0].Template.Spec.ResourceClaims) > 0 {
 					draConfig := []configapi.DeviceClassMapping{
 						{
 							Name:             corev1.ResourceName("foo"),
@@ -3908,12 +3904,12 @@ func TestReconcile(t *testing.T) {
 					}
 				}
 
-				gotResult, gotError := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(testWl)})
+				gotResult, gotError := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(tc.workload)})
 
-				if gotError == nil && fg[features.UnadmittedWorkloadsExplicitStatus] && testWl != nil && testWl.Status.Admission != nil && !workload.IsAdmitted(testWl) {
+				if gotError == nil && fg[features.UnadmittedWorkloadsExplicitStatus] && tc.workload != nil && tc.workload.Status.Admission != nil && !workload.IsAdmitted(tc.workload) {
 					// Run a second reconcile cycle to simulate the event-driven trigger
 					// in a real cluster after the status conditions have been populated on the first cycle.
-					gotResult, gotError = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(testWl)})
+					gotResult, gotError = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(tc.workload)})
 				}
 
 				switch {
@@ -3939,7 +3935,7 @@ func TestReconcile(t *testing.T) {
 
 				if tc.wantWorkload != nil {
 					gotWorkload := &kueue.Workload{}
-					if err := cl.Get(ctx, client.ObjectKeyFromObject(testWl), gotWorkload); err != nil {
+					if err := cl.Get(ctx, client.ObjectKeyFromObject(tc.workload), gotWorkload); err != nil {
 						if !errors.IsNotFound(err) {
 							t.Fatalf("Could not get Workloads after reconcile: %v", err)
 						}
@@ -3964,12 +3960,12 @@ func TestReconcile(t *testing.T) {
 				}
 
 				// For DRA tests, verify that workloads are properly queued/cached
-				if tc.featureGates[features.KueueDRAIntegration] && testWl != nil &&
-					len(testWl.Spec.PodSets) > 0 &&
-					len(testWl.Spec.PodSets[0].Template.Spec.ResourceClaims) > 0 {
-					workloadKey := client.ObjectKeyFromObject(testWl)
+				if tc.featureGates[features.KueueDRAIntegration] && tc.workload != nil &&
+					len(tc.workload.Spec.PodSets) > 0 &&
+					len(tc.workload.Spec.PodSets[0].Template.Spec.ResourceClaims) > 0 {
+					workloadKey := client.ObjectKeyFromObject(tc.workload)
 
-					if cqName, found := qManager.ClusterQueueFromLocalQueue(utilqueue.KeyFromWorkload(testWl)); found {
+					if cqName, found := qManager.ClusterQueueFromLocalQueue(utilqueue.KeyFromWorkload(tc.workload)); found {
 						pendingWorkloads := qManager.PendingWorkloadsInfo(cqName)
 
 						if tc.wantWorkloadsInQueue != nil {
