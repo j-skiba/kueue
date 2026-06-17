@@ -1547,7 +1547,7 @@ func TestReconcile(t *testing.T) {
 					wantVariantWorkloads[i] = *tc.wantVariantWorkloads[i].DeepCopy()
 				}
 				if obsEnabled {
-					utiltestingapi.AdjustWorkloadsConditions(wantVariantWorkloads, tc.wantConditionsWithObservability)
+					utiltestingapi.ApplyStatusConditions(wantVariantWorkloads, tc.wantConditionsWithObservability)
 				}
 
 				if diff := cmp.Diff(wantVariantWorkloads, gotVariants, workloadCmpOpts); diff != "" {

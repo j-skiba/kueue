@@ -6189,7 +6189,7 @@ func TestReconciler(t *testing.T) {
 						wantWorkloads[i] = *tc.wantWorkloads[i].DeepCopy()
 					}
 					if scenario.unadmittedWorkloadsObservability {
-						utiltestingapi.AdjustWorkloadsConditions(wantWorkloads, tc.wantConditionsWithObservability)
+						utiltestingapi.ApplyStatusConditions(wantWorkloads, tc.wantConditionsWithObservability)
 					}
 				}
 

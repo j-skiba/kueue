@@ -4810,7 +4810,7 @@ func TestScheduleForTASPreemption(t *testing.T) {
 				}
 
 				if scenario.unadmittedWorkloadsObservability {
-					utiltestingapi.AdjustWorkloadsConditions(wantWorkloads, tc.wantConditionsWithObservability)
+					utiltestingapi.ApplyStatusConditions(wantWorkloads, tc.wantConditionsWithObservability)
 				}
 
 				defaultWorkloadCmpOpts := cmp.Options{
@@ -7228,7 +7228,7 @@ func TestScheduleForTASCohorts(t *testing.T) {
 				}
 
 				if scenario.unadmittedWorkloadsObservability {
-					utiltestingapi.AdjustWorkloadsConditions(wantWorkloads, tc.wantConditionsWithObservability)
+					utiltestingapi.ApplyStatusConditions(wantWorkloads, tc.wantConditionsWithObservability)
 				}
 
 				defaultWorkloadCmpOpts := cmp.Options{

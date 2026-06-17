@@ -45,8 +45,8 @@ func GetObservabilityConditions(reason, message string, now time.Time) []metav1.
 	}
 }
 
-// AdjustWorkloadsConditions applies the given conditions to the workloads with matching names.
-func AdjustWorkloadsConditions(
+// ApplyStatusConditions applies the given conditions to the workloads with matching names.
+func ApplyStatusConditions(
 	workloads []kueue.Workload,
 	conditions map[string][]metav1.Condition,
 ) {
