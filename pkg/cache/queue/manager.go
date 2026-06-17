@@ -1040,7 +1040,7 @@ func (m *Manager) UpdateUnadmittedWorkload(ctx context.Context, wl *kueue.Worklo
 	if admittedCond != nil {
 		reason = admittedCond.Reason
 	} else {
-		reason = "NoReservation"
+		reason = kueue.WorkloadAdmittedReasonNoReservation
 	}
 	var underlyingCause string
 	quotaReservedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)

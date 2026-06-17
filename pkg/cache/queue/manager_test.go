@@ -2177,7 +2177,7 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 		Condition(metav1.Condition{
 			Type:    kueue.WorkloadAdmitted,
 			Status:  metav1.ConditionFalse,
-			Reason:  "NoReservation",
+			Reason:  kueue.WorkloadAdmittedReasonNoReservation,
 			Message: "The workload has no reservation",
 		}).
 		Condition(metav1.Condition{
@@ -2191,7 +2191,7 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 		Condition(metav1.Condition{
 			Type:    kueue.WorkloadAdmitted,
 			Status:  metav1.ConditionFalse,
-			Reason:  "NoReservation",
+			Reason:  kueue.WorkloadAdmittedReasonNoReservation,
 			Message: "The workload has no reservation",
 		}).
 		Condition(metav1.Condition{
@@ -2229,6 +2229,24 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 			Message: "LocalQueue non-existent-lq doesn't exist",
 		}).Obj()
 
+	wlNoConditions := utiltestingapi.MakeWorkload("wl-no-conditions", defaultNamespace).Queue("foo").Obj()
+
+	wlChecksPending := utiltestingapi.MakeWorkload("wl-checks-pending", defaultNamespace).Queue("foo").
+		Condition(metav1.Condition{
+			Type:    kueue.WorkloadAdmitted,
+			Status:  metav1.ConditionFalse,
+			Reason:  kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks,
+			Message: "Checks are pending",
+		}).Obj()
+
+	wlTopologyPending := utiltestingapi.MakeWorkload("wl-topology-pending", defaultNamespace).Queue("foo").
+		Condition(metav1.Condition{
+			Type:    kueue.WorkloadAdmitted,
+			Status:  metav1.ConditionFalse,
+			Reason:  kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests,
+			Message: "Topology placement is pending",
+		}).Obj()
+
 	fakeClient := utiltesting.NewFakeClient(utiltesting.MakeNamespace(defaultNamespace))
 	manager, _ := NewManagerForUnitTestsWithRequeuer(fakeClient, nil, WithCustomLabels(customLabels), WithPreemptionExpectations(preemptexpectations.New()))
 	customLabels.CQStore("cq1", cq.GetLabels(), cq.GetAnnotations())
@@ -2244,8 +2262,8 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 	t.Run("lifecycle (add, increment, decrement, prune)", func(t *testing.T) {
 		// 1. Add pendingWl1 -> Pending evaluation (represented as NoReservation/PendingEvaluation)
 		manager.UpdateUnadmittedWorkload(ctx, pendingWl1)
-		expectUnadmitted(t, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
 
 		// 2. Add misconfiguredWl -> Inadmissible misconfigured
 		manager.UpdateUnadmittedWorkload(ctx, misconfiguredWl)
@@ -2254,16 +2272,16 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 
 		// 3. Add pendingWl2 -> Pending evaluation (increments to 2)
 		manager.UpdateUnadmittedWorkload(ctx, pendingWl2)
-		expectUnadmitted(t, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 2)
+		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 2)
 
 		// 4. Remove pendingWl1 (decrements to 1)
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(pendingWl1))
-		expectUnadmitted(t, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
 
 		// 5. Remove pendingWl2 (decrements to 0 -> series is deleted/pruned)
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(pendingWl2))
-		expectUnadmitted(t, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
+		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
 
 		// Clean up misconfiguredWl for the next subtest
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(misconfiguredWl))
@@ -2309,8 +2327,8 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 
 		// 1. Workload starts on queue "foo"
 		manager.UpdateUnadmittedWorkload(ctx, pendingWl1)
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
-		expectLQUnadmitted(t, "bar", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 0)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectLQUnadmitted(t, "bar", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 0)
 
 		// 2. Move workload to queue "bar"
 		wlMoved := pendingWl1.DeepCopy()
@@ -2318,12 +2336,48 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 		manager.UpdateUnadmittedWorkload(ctx, wlMoved)
 
 		// Old queue series must be deleted/pruned, new queue series must be registered/incremented
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
-		expectLQUnadmitted(t, "bar", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 1)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
+		expectLQUnadmitted(t, "bar", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 1)
 
 		// Clean up for other tests
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlMoved))
-		expectLQUnadmitted(t, "bar", defaultNamespace, "cq1", "NoReservation", kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 0)
+		expectLQUnadmitted(t, "bar", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "beta", 0)
+	})
+
+	t.Run("missing status conditions fallback (assume NoReservation and PendingEvaluation)", func(t *testing.T) {
+		// 1. Add workload with no conditions -> falls back to NoReservation / PendingEvaluation
+		manager.UpdateUnadmittedWorkload(ctx, wlNoConditions)
+		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+
+		// 2. Remove workload -> cleans up fallback series
+		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlNoConditions))
+		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
+	})
+
+	t.Run("unsatisfied admission checks (underlying cause ChecksNotReady)", func(t *testing.T) {
+		// 1. Add workload with UnsatisfiedAdmissionChecks -> maps to ChecksNotReady
+		manager.UpdateUnadmittedWorkload(ctx, wlChecksPending)
+		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks, "ChecksNotReady", "alpha", 1)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks, "ChecksNotReady", "alpha", 1)
+
+		// 2. Remove workload -> cleans up ChecksNotReady series
+		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlChecksPending))
+		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks, "ChecksNotReady", "alpha", 0)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks, "ChecksNotReady", "alpha", 0)
+	})
+
+	t.Run("pending delayed topology requests (underlying cause PendingTopology)", func(t *testing.T) {
+		// 1. Add workload with PendingDelayedTopologyRequests -> maps to PendingTopology
+		manager.UpdateUnadmittedWorkload(ctx, wlTopologyPending)
+		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests, "PendingTopology", "alpha", 1)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests, "PendingTopology", "alpha", 1)
+
+		// 2. Remove workload -> cleans up PendingTopology series
+		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlTopologyPending))
+		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests, "PendingTopology", "alpha", 0)
+		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests, "PendingTopology", "alpha", 0)
 	})
 }
 

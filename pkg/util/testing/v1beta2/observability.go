@@ -21,8 +21,8 @@ import (
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
-	"sigs.k8s.io/kueue/pkg/workload"
 )
 
 // GetObservabilityConditions returns the status conditions that are set on an unadmitted workload
@@ -39,7 +39,7 @@ func GetObservabilityConditions(reason, message string, now time.Time) []metav1.
 		{
 			Type:               kueue.WorkloadAdmitted,
 			Status:             metav1.ConditionFalse,
-			Reason:             "NoReservation",
+			Reason:             kueue.WorkloadAdmittedReasonNoReservation,
 			Message:            "The workload has no reservation",
 			LastTransitionTime: metav1.NewTime(now),
 		},
@@ -53,7 +53,7 @@ func ApplyStatusConditions(
 ) {
 	for i := range workloads {
 		wl := &workloads[i]
-		namespacedName := string(workload.Key(wl))
+		namespacedName := types.NamespacedName{Namespace: wl.Namespace, Name: wl.Name}.String()
 		if conds, ok := conditions[namespacedName]; ok {
 			for _, cond := range conds {
 				apimeta.SetStatusCondition(&wl.Status.Conditions, cond)

@@ -431,19 +431,11 @@ func TestReconcile(t *testing.T) {
 				Queue("lq").
 				Request(corev1.ResourceCPU, "1").
 				Obj(),
-			cq: utiltestingapi.MakeClusterQueue("cq").
-				Active(metav1.ConditionTrue).
-				Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").Active(metav1.ConditionTrue).Obj(),
 			lq: utiltestingapi.MakeLocalQueue("lq", "ns").Active(metav1.ConditionTrue).ClusterQueue("cq").Obj(),
 			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
 				Request(corev1.ResourceCPU, "1").
-				Condition(metav1.Condition{
-					Type:    kueue.WorkloadQuotaReserved,
-					Status:  metav1.ConditionFalse,
-					Reason:  kueue.WorkloadInadmissible,
-					Message: "ClusterQueue cq is inactive",
-				}).
 				Obj(),
 			wantConditionsWithObservability: []metav1.Condition{
 				{
@@ -2919,8 +2911,7 @@ func TestReconcile(t *testing.T) {
 			},
 		},
 		"should set status QuotaReserved conditions to False with reason Inadmissible if quota not reserved LocalQueue StopPolicy=Hold": {
-			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").StopPolicy(kueue.Hold).Obj(),
-			cq: utiltestingapi.MakeClusterQueue("cq").Active(metav1.ConditionTrue).Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").StopPolicy(kueue.Hold).Obj(),
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Active(true).
 				Queue("lq").
@@ -2951,8 +2942,7 @@ func TestReconcile(t *testing.T) {
 			},
 		},
 		"should set status QuotaReserved conditions to False with reason Inadmissible if quota not reserved LocalQueue StopPolicy=HoldAndDrain": {
-			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").StopPolicy(kueue.HoldAndDrain).Obj(),
-			cq: utiltestingapi.MakeClusterQueue("cq").Active(metav1.ConditionTrue).Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").StopPolicy(kueue.HoldAndDrain).Obj(),
 			workload: utiltestingapi.MakeWorkload("wl", "ns").
 				Active(true).
 				Queue("lq").
@@ -3630,9 +3620,7 @@ func TestReconcile(t *testing.T) {
 				Annotation(constants.AdmissionGatedByAnnotation, "example.com/controller1").
 				ReserveQuotaAt(utiltestingapi.MakeAdmission("cq").Obj(), now).
 				Obj(),
-			cq: utiltestingapi.MakeClusterQueue("cq").
-				Condition(kueue.ClusterQueueActive, metav1.ConditionTrue, "Active", "ClusterQueue is active").
-				Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").Active(metav1.ConditionTrue).Obj(),
 			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
 			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
 				Queue("lq").
@@ -3798,6 +3786,239 @@ func TestReconcile(t *testing.T) {
 				Queue("non-existent-lq").
 				Obj(),
 		},
+		"reconcile DRA validation fails with KueueDRAIntegrationExtendedResource and UnadmittedWorkloadsObservability enabled": {
+			featureGates: map[featuregate.Feature]bool{
+				features.KueueDRAIntegration:                 true,
+				features.KueueDRAIntegrationExtendedResource: true,
+				features.UnadmittedWorkloadsObservability:    true,
+			},
+			workload: utiltestingapi.MakeWorkload("wl-invalid-extended-resource", "ns").
+				Queue("lq").
+				Request("example.com/gpu", "1500m"). // 1.5 GPUs is invalid because extended resources must be integer quantities
+				Obj(),
+			additionalObjects: []client.Object{
+				&resourcev1.DeviceClass{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "gpu-class",
+					},
+					Spec: resourcev1.DeviceClassSpec{
+						ExtendedResourceName: new("example.com/gpu"),
+					},
+				},
+			},
+			cq: utiltestingapi.MakeClusterQueue("cq").
+				ResourceGroup(
+					*utiltestingapi.MakeFlavorQuotas("flavor1").
+						Resource("example.com/gpu", "2").Obj(),
+				).Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl-invalid-extended-resource", "ns").
+				Queue("lq").
+				Request("example.com/gpu", "1500m").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "spec.podSets[0].template.spec.containers[0].resources.requests.example.com/gpu: Invalid value: \"1500m\": extended resource quantity must be an integer",
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadRequeued,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadInadmissible,
+					Message: "spec.podSets[0].template.spec.containers[0].resources.requests.example.com/gpu: Invalid value: \"1500m\": extended resource quantity must be an integer",
+				}).
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "spec.podSets[0].template.spec.containers[0].resources.requests.example.com/gpu: Invalid value: \"1500m\": extended resource quantity must be an integer",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				},
+			},
+			wantErrorMsg: "spec.podSets[0].template.spec.containers[0].resources.requests.example.com/gpu: Invalid value: \"1500m\": extended resource quantity must be an integer",
+		},
+		"reconcile with terminating LocalQueue sets Misconfigured reason": {
+			workload: utiltestingapi.MakeWorkload("wl-terminating-lq", "ns").
+				Queue("lq").
+				Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").Active(metav1.ConditionTrue).Obj(),
+			lq: &kueue.LocalQueue{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "lq",
+					Namespace:         "ns",
+					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+				},
+				Spec: kueue.LocalQueueSpec{
+					ClusterQueue: "cq",
+				},
+			},
+			wantWorkload: utiltestingapi.MakeWorkload("wl-terminating-lq", "ns").
+				Queue("lq").
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "LocalQueue lq is terminating",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				},
+			},
+		},
+		"reconcile with terminating ClusterQueue sets Misconfigured reason": {
+			workload: utiltestingapi.MakeWorkload("wl-terminating-cq", "ns").
+				Queue("lq").
+				Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
+			cq: func() *kueue.ClusterQueue {
+				cq := utiltestingapi.MakeClusterQueue("cq").Obj()
+				cq.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+				return cq
+			}(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl-terminating-cq", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadInadmissible,
+					Message: "ClusterQueue cq is inactive",
+				}).
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "ClusterQueue cq is terminating",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				},
+			},
+		},
+		"reconcile preserves existing Misconfigured QuotaReserved condition": {
+			workload: utiltestingapi.MakeWorkload("wl-preserve-misconfigured", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "LocalQueue lq doesn't exist",
+				}).
+				Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").Active(metav1.ConditionTrue).Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl-preserve-misconfigured", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "LocalQueue lq doesn't exist",
+				}).
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "LocalQueue lq doesn't exist",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				},
+			},
+		},
+		"reconcile preserves existing NoMatchingFlavor QuotaReserved condition": {
+			workload: utiltestingapi.MakeWorkload("wl-preserve-no-flavor", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonNoMatchingFlavor,
+					Message: "couldn't find matching flavor for pod set main",
+				}).
+				Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").Active(metav1.ConditionTrue).Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl-preserve-no-flavor", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonNoMatchingFlavor,
+					Message: "couldn't find matching flavor for pod set main",
+				}).
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonNoMatchingFlavor,
+					Message: "couldn't find matching flavor for pod set main",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				},
+			},
+		},
+		"reconcile preserves existing WaitingForQuota QuotaReserved condition": {
+			workload: utiltestingapi.MakeWorkload("wl-preserve-waiting-quota", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+					Message: "insufficient unused quota",
+				}).
+				Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").Active(metav1.ConditionTrue).Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl-preserve-waiting-quota", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+					Message: "insufficient unused quota",
+				}).
+				Obj(),
+			wantConditionsWithObservability: []metav1.Condition{
+				{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+					Message: "insufficient unused quota",
+				},
+				{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  "NoReservation",
+					Message: "The workload has no reservation",
+				},
+			},
+		},
 	}
 	scenarios := []struct {
 		workloadRequestUseMergePatch     bool
@@ -3848,6 +4069,14 @@ func TestReconcile(t *testing.T) {
 				clientBuilder := utiltesting.NewClientBuilder().
 					WithObjects(objs...).
 					WithStatusSubresource(objs...).
+					WithIndex(&resourcev1.DeviceClass{}, "spec.extendedResourceName",
+						func(obj client.Object) []string {
+							dc := obj.(*resourcev1.DeviceClass)
+							if dc.Spec.ExtendedResourceName == nil || *dc.Spec.ExtendedResourceName == "" {
+								return nil
+							}
+							return []string{*dc.Spec.ExtendedResourceName}
+						}).
 					WithInterceptorFuncs(interceptor.Funcs{SubResourcePatch: utiltesting.TreatSSAAsStrategicMerge})
 				cl := clientBuilder.Build()
 				recorder := &utiltesting.EventRecorder{}
@@ -3868,21 +4097,54 @@ func TestReconcile(t *testing.T) {
 
 				if tc.cq != nil {
 					testCq := tc.cq.DeepCopy()
+					wantDeleted := testCq.DeletionTimestamp != nil
+					testCq.DeletionTimestamp = nil
+					if wantDeleted && len(testCq.Finalizers) == 0 {
+						testCq.Finalizers = []string{"testing-finalizer"}
+					}
 					if err := cl.Create(ctx, testCq); err != nil {
 						t.Errorf("couldn't create the cluster queue: %v", err)
 					}
 					if err := qManager.AddClusterQueue(ctx, testCq); err != nil {
 						t.Errorf("couldn't add the cluster queue to the cache: %v", err)
 					}
+					isActive := false
+					for _, cond := range testCq.Status.Conditions {
+						if cond.Type == kueue.ClusterQueueActive && cond.Status == metav1.ConditionTrue {
+							isActive = true
+							break
+						}
+					}
+					if isActive || wantDeleted {
+						if err := cqCache.AddClusterQueue(ctx, testCq); err != nil {
+							t.Errorf("couldn't add the cluster queue to the scheduler cache: %v", err)
+						}
+					}
+					if wantDeleted {
+						if err := cl.Delete(ctx, testCq); err != nil {
+							t.Errorf("couldn't delete the cluster queue: %v", err)
+						}
+						cqCache.TerminateClusterQueue(kueue.ClusterQueueReference(testCq.Name))
+					}
 				}
 
 				if tc.lq != nil {
 					testLq := tc.lq.DeepCopy()
+					wantDeleted := testLq.DeletionTimestamp != nil
+					testLq.DeletionTimestamp = nil
+					if wantDeleted && len(testLq.Finalizers) == 0 {
+						testLq.Finalizers = []string{"testing-finalizer"}
+					}
 					if err := cl.Create(ctx, testLq); err != nil {
 						t.Errorf("couldn't create the local queue: %v", err)
 					}
 					if err := qManager.AddLocalQueue(ctx, testLq); err != nil {
 						t.Errorf("couldn't add the local queue to the cache: %v", err)
+					}
+					if wantDeleted {
+						if err := cl.Delete(ctx, testLq); err != nil {
+							t.Errorf("couldn't delete the local queue: %v", err)
+						}
 					}
 				}
 

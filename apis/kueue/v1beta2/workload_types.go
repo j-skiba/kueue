@@ -936,6 +936,7 @@ const (
 	WorkloadBlockedOnPreemptionGates = "BlockedOnPreemptionGates"
 
 	// Reasons for the WorkloadAdmitted condition.
+	WorkloadAdmittedReasonNoReservation                  = "NoReservation"
 	WorkloadAdmittedReasonUnsatisfiedAdmissionChecks     = "UnsatisfiedAdmissionChecks"
 	WorkloadAdmittedReasonNoReservationUnsatisfiedChecks = "NoReservationUnsatisfiedChecks"
 	WorkloadAdmittedReasonPendingDelayedTopologyRequests = "PendingDelayedTopologyRequests"

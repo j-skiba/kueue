@@ -69,7 +69,7 @@ func SyncAdmittedCondition(w *kueue.Workload, now time.Time) bool {
 	case !hasReservation && !hasAllChecksReady:
 		newCondition.Status = metav1.ConditionFalse
 		if features.Enabled(features.UnadmittedWorkloadsObservability) {
-			newCondition.Reason = "NoReservation"
+			newCondition.Reason = kueue.WorkloadAdmittedReasonNoReservation
 			newCondition.Message = "The workload has no reservation"
 		} else {
 			newCondition.Reason = kueue.WorkloadAdmittedReasonNoReservationUnsatisfiedChecks
@@ -77,7 +77,7 @@ func SyncAdmittedCondition(w *kueue.Workload, now time.Time) bool {
 		}
 	case !hasReservation:
 		newCondition.Status = metav1.ConditionFalse
-		newCondition.Reason = "NoReservation"
+		newCondition.Reason = kueue.WorkloadAdmittedReasonNoReservation
 		newCondition.Message = "The workload has no reservation"
 	case !hasAllChecksReady:
 		newCondition.Status = metav1.ConditionFalse
