@@ -391,8 +391,8 @@ The label 'result' can have the following values:
 			Subsystem: constants.KueueName,
 			Name:      "unadmitted_workloads",
 			Help: `The number of unadmitted workloads per 'cluster_queue', 'reason' and 'underlying_cause'.
-'reason' maps to the reason why Admitted condition is False.
-'underlying_cause' maps to the QuotaReserved False reason, or ChecksNotReady/PendingTopology when QuotaReserved is True.`,
+'reason' maps to the reason why the Admitted condition is False (defaults to "NoReservation" if the condition is missing).
+'underlying_cause' maps to the QuotaReserved False reason (defaults to "Pending" if the condition is missing), or ChecksNotReady/PendingTopology when QuotaReserved is True.`,
 		}, append([]string{"cluster_queue", "reason", "underlying_cause", "replica_role"}, extraLabels...),
 	)
 	trackGaugeVec(UnadmittedWorkloads, gaugeCleanupScopeClusterQueue, gaugeCleanupScopeClusterQueueCache)
@@ -402,8 +402,8 @@ The label 'result' can have the following values:
 			Subsystem: constants.KueueName,
 			Name:      "local_queue_unadmitted_workloads",
 			Help: `The number of unadmitted workloads per 'local_queue', 'cluster_queue', 'reason' and 'underlying_cause'.
-'reason' maps to the reason why Admitted condition is False.
-'underlying_cause' maps to the QuotaReserved False reason, or ChecksNotReady/PendingTopology when QuotaReserved is True.`,
+'reason' maps to the reason why the Admitted condition is False (defaults to "NoReservation" if the condition is missing).
+'underlying_cause' maps to the QuotaReserved False reason (defaults to "Pending" if the condition is missing), or ChecksNotReady/PendingTopology when QuotaReserved is True.`,
 		}, append([]string{"name", "namespace", "cluster_queue", "reason", "underlying_cause", "replica_role"}, extraLabels...),
 	)
 	trackGaugeVec(LocalQueueUnadmittedWorkloads, gaugeCleanupScopeLocalQueue, gaugeCleanupScopeLocalQueueCache)

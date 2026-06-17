@@ -472,6 +472,15 @@ func ExpectWorkloadsToBePending(ctx context.Context, k8sClient client.Client, wl
 	ExpectWorkloadsToBePendingByKeys(ctx, k8sClient, wlKeys...)
 }
 
+func isQuotaReservedInadmissibleReason(reason string) bool {
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		return reason == kueue.WorkloadQuotaReservedReasonMisconfigured ||
+			reason == kueue.WorkloadQuotaReservedReasonSuspended ||
+			reason == kueue.WorkloadQuotaReservedReasonDeactivated
+	}
+	return reason == "Inadmissible"
+}
+
 func ExpectWorkloadsToBePendingByKeys(ctx context.Context, k8sClient client.Client, wlKeys ...client.ObjectKey) {
 	ginkgo.GinkgoHelper()
 	wlKeys = uniqueKeys(wlKeys)
@@ -484,17 +493,7 @@ func ExpectWorkloadsToBePendingByKeys(ctx context.Context, k8sClient client.Clie
 			cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
 			isPendingReason := false
 			if cond != nil && cond.Status == metav1.ConditionFalse {
-				if features.Enabled(features.UnadmittedWorkloadsObservability) {
-					isPendingReason = cond.Reason == kueue.WorkloadQuotaReservedReasonPendingEvaluation ||
-						cond.Reason == kueue.WorkloadQuotaReservedReasonWaitingForQuota ||
-						cond.Reason == kueue.WorkloadQuotaReservedReasonPendingPreemption ||
-						cond.Reason == kueue.WorkloadQuotaReservedReasonExceedsMaxQuota ||
-						cond.Reason == kueue.WorkloadQuotaReservedReasonTopologyPlacementFailed ||
-						cond.Reason == kueue.WorkloadQuotaReservedReasonWaitingForPodsReady ||
-						cond.Reason == kueue.WorkloadQuotaReservedReasonAdmissionGated
-				} else {
-					isPendingReason = cond.Reason == "Pending"
-				}
+				isPendingReason = !isQuotaReservedInadmissibleReason(cond.Reason)
 			}
 			if isPendingReason {
 				pending = append(pending, wlKey)
@@ -523,12 +522,7 @@ func ExpectWorkloadsToBeInadmissibleByKeys(ctx context.Context, k8sClient client
 			cond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadQuotaReserved)
 			isInadmissible := false
 			if cond != nil && cond.Status == metav1.ConditionFalse {
-				if features.Enabled(features.UnadmittedWorkloadsObservability) {
-					isInadmissible = cond.Reason == kueue.WorkloadQuotaReservedReasonMisconfigured ||
-						cond.Reason == kueue.WorkloadQuotaReservedReasonSuspended
-				} else {
-					isInadmissible = cond.Reason == "Inadmissible"
-				}
+				isInadmissible = isQuotaReservedInadmissibleReason(cond.Reason)
 			}
 			if isInadmissible {
 				inadmissible = append(inadmissible, wlKey)
@@ -739,7 +733,14 @@ func ExpectWorkloadsToBeWaiting(ctx context.Context, k8sClient client.Client, wl
 	}, Timeout, Interval).Should(gomega.Succeed(), AssertMsg("Unexpected workloads are waiting", wlObjects...))
 }
 
-func ExpectWorkloadsToBeFrozen(ctx context.Context, k8sClient client.Client, cq string, wls ...*kueue.Workload) {
+func ExpectWorkloadsToBeFrozen(
+	ctx context.Context,
+	k8sClient client.Client,
+	cq string,
+	expectedReason string,
+	expectedMessageSubstring string,
+	wls ...*kueue.Workload,
+) {
 	wlKeys := uniqueKeys(workloadKeys(wls))
 	wlObjects := make([]*kueue.Workload, len(wlKeys))
 	gomega.EventuallyWithOffset(1, func(g gomega.Gomega) {
@@ -751,7 +752,8 @@ func ExpectWorkloadsToBeFrozen(ctx context.Context, k8sClient client.Client, cq 
 			isFrozen := false
 			if cond != nil && cond.Status == metav1.ConditionFalse {
 				if features.Enabled(features.UnadmittedWorkloadsObservability) {
-					isFrozen = cond.Reason == kueue.WorkloadQuotaReservedReasonMisconfigured
+					isFrozen = cond.Reason == expectedReason &&
+						strings.Contains(cond.Message, expectedMessageSubstring)
 				} else {
 					isFrozen = cond.Reason == "Inadmissible" && cond.Message == fmt.Sprintf("ClusterQueue %s is inactive", cq)
 				}

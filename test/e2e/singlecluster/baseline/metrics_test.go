@@ -640,5 +640,101 @@ var _ = ginkgo.Describe("Metrics", ginkgo.Label("area:singlecluster", "feature:m
 				util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, unadmittedMetrics)
 			})
 		})
+
+		ginkgo.It("should export unadmitted workloads metrics for WaitingForQuota", func() {
+			ginkgo.By("starting the cluster queue to allow admission", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(clusterQueue), clusterQueue)).To(gomega.Succeed())
+					clusterQueue.Spec.StopPolicy = ptr.To(kueue.None)
+					g.Expect(k8sClient.Update(ctx, clusterQueue)).To(gomega.Succeed())
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+			})
+
+			// The first workload (created in BeforeEach) requests 1 CPU, which consumes the entire CQ nominal quota.
+			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, workload)
+
+			ginkgo.By("creating a second workload that exceeds the quota limit")
+			wl2 := utiltestingapi.MakeWorkload("wl2-unadmitted", ns.Name).
+				Queue(kueue.LocalQueueName(localQueue.Name)).
+				Request(corev1.ResourceCPU, "1").
+				Obj()
+			util.MustCreate(ctx, k8sClient, wl2)
+			defer func() {
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, wl2, true)
+			}()
+
+			ginkgo.By("verifying the second workload status conditions indicate WaitingForQuota", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wl2), wl2)).To(gomega.Succeed())
+					g.Expect(wl2.Status.Conditions).To(utiltesting.HaveConditionStatusFalseAndReason(kueue.WorkloadQuotaReserved, kueue.WorkloadQuotaReservedReasonWaitingForQuota))
+					g.Expect(wl2.Status.Conditions).To(utiltesting.HaveConditionStatusFalseAndReason(kueue.WorkloadAdmitted, "NoReservation"))
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+			})
+
+			unadmittedMetrics := [][]string{
+				{"kueue_unadmitted_workloads", "NoReservation", "WaitingForQuota", clusterQueue.Name},
+				{"kueue_local_queue_unadmitted_workloads", "NoReservation", "WaitingForQuota", ns.Name, localQueue.Name, clusterQueue.Name},
+			}
+
+			ginkgo.By("checking that WaitingForQuota metrics are available", func() {
+				util.ExpectMetricsToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, unadmittedMetrics)
+			})
+
+			ginkgo.By("deleting the first workload to release quota", func() {
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, workload, true)
+			})
+
+			ginkgo.By("verifying the second workload is now admitted", func() {
+				util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wl2)
+			})
+
+			ginkgo.By("checking that WaitingForQuota metrics are no longer available after admission", func() {
+				util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, unadmittedMetrics)
+			})
+		})
+
+		ginkgo.It("should export unadmitted workloads metrics for NoMatchingFlavor", func() {
+			ginkgo.By("starting the cluster queue to allow admission", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(clusterQueue), clusterQueue)).To(gomega.Succeed())
+					clusterQueue.Spec.StopPolicy = ptr.To(kueue.None)
+					g.Expect(k8sClient.Update(ctx, clusterQueue)).To(gomega.Succeed())
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+			})
+
+			ginkgo.By("creating a workload requesting a non-matching flavor via NodeSelector")
+			wl2 := utiltestingapi.MakeWorkload("wl2-no-flavor", ns.Name).
+				Queue(kueue.LocalQueueName(localQueue.Name)).
+				Request(corev1.ResourceCPU, "1").
+				// Request a node selector that cannot be satisfied by any flavor in the CQ
+				NodeSelector(map[string]string{"instance-type": "non-existent-type"}).
+				Obj()
+			util.MustCreate(ctx, k8sClient, wl2)
+
+			ginkgo.By("verifying the workload status conditions indicate NoMatchingFlavor", func() {
+				gomega.Eventually(func(g gomega.Gomega) {
+					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wl2), wl2)).To(gomega.Succeed())
+					g.Expect(wl2.Status.Conditions).To(utiltesting.HaveConditionStatusFalseAndReason(kueue.WorkloadQuotaReserved, kueue.WorkloadQuotaReservedReasonNoMatchingFlavor))
+					g.Expect(wl2.Status.Conditions).To(utiltesting.HaveConditionStatusFalseAndReason(kueue.WorkloadAdmitted, "NoReservation"))
+				}, util.Timeout, util.Interval).Should(gomega.Succeed())
+			})
+
+			unadmittedMetrics := [][]string{
+				{"kueue_unadmitted_workloads", "NoReservation", "NoMatchingFlavor", clusterQueue.Name},
+				{"kueue_local_queue_unadmitted_workloads", "NoReservation", "NoMatchingFlavor", ns.Name, localQueue.Name, clusterQueue.Name},
+			}
+
+			ginkgo.By("checking that NoMatchingFlavor metrics are available", func() {
+				util.ExpectMetricsToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, unadmittedMetrics)
+			})
+
+			ginkgo.By("deleting the workload", func() {
+				util.ExpectObjectToBeDeleted(ctx, k8sClient, wl2, true)
+			})
+
+			ginkgo.By("checking that metrics are no longer available after deletion", func() {
+				util.ExpectMetricsNotToBeAvailable(ctx, cfg, restClient, curlPod.Name, curlContainerName, unadmittedMetrics)
+			})
+		})
 	})
 })

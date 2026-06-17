@@ -751,12 +751,16 @@ func (a *FlavorAssigner) assignFlavors(log logr.Logger, counts []int32) Assignme
 			}
 		}
 		if atLeastOnePodsAssignmentFailed {
-			assignment.resolveNoFitDueToCapacity()
+			if features.Enabled(features.UnadmittedWorkloadsObservability) {
+				assignment.resolveNoFitReason()
+			}
 			return assignment
 		}
 	}
 	if assignment.RepresentativeMode() == NoFit {
-		assignment.resolveNoFitDueToCapacity()
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
+			assignment.resolveNoFitReason()
+		}
 		return assignment
 	}
 
@@ -791,11 +795,13 @@ func (a *FlavorAssigner) assignFlavors(log logr.Logger, counts []int32) Assignme
 			}
 		}
 	}
-	assignment.resolveNoFitDueToCapacity()
+	if features.Enabled(features.UnadmittedWorkloadsObservability) {
+		assignment.resolveNoFitReason()
+	}
 	return assignment
 }
 
-func (a *Assignment) resolveNoFitDueToCapacity() {
+func (a *Assignment) resolveNoFitReason() {
 	if a.RepresentativeMode() != NoFit {
 		return
 	}
@@ -806,11 +812,6 @@ func (a *Assignment) resolveNoFitDueToCapacity() {
 	})
 	if !isWaitingForQuota {
 		a.NoFitReason = kueue.WorkloadQuotaReservedReasonNoMatchingFlavor
-		return
-	}
-
-	if !features.Enabled(features.UnadmittedWorkloadsObservability) {
-		a.NoFitReason = kueue.WorkloadQuotaReservedReasonWaitingForQuota
 		return
 	}
 

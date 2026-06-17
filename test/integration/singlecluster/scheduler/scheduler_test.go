@@ -1158,7 +1158,14 @@ var _ = ginkgo.Describe("Scheduler", func() {
 			util.ExpectClusterQueueStatusMetric(fooCQ, metrics.CQStatusPending)
 			wl := utiltestingapi.MakeWorkload("workload", ns.Name).Queue(kueue.LocalQueueName(fooQ.Name)).Request(corev1.ResourceCPU, "1").Obj()
 			util.MustCreate(ctx, k8sClient, wl)
-			util.ExpectWorkloadsToBeFrozen(ctx, k8sClient, fooCQ.Name, wl)
+			util.ExpectWorkloadsToBeFrozen(
+				ctx,
+				k8sClient,
+				fooCQ.Name,
+				kueue.WorkloadQuotaReservedReasonMisconfigured,
+				"Flavor foo-flavor not found",
+				wl,
+			)
 			util.ExpectPendingWorkloadsMetric(fooCQ, 0, 1)
 			util.ExpectReservingActiveWorkloadsMetric(fooCQ, 0)
 			util.ExpectQuotaReservedWorkloadsTotalMetric(fooCQ, "", 0)
@@ -2162,7 +2169,14 @@ var _ = ginkgo.Describe("Scheduler", func() {
 			defer func() {
 				gomega.Expect(util.DeleteObject(ctx, k8sClient, wl2)).To(gomega.Succeed())
 			}()
-			util.ExpectWorkloadsToBeFrozen(ctx, k8sClient, cq.Name, wl2)
+			util.ExpectWorkloadsToBeFrozen(
+				ctx,
+				k8sClient,
+				cq.Name,
+				kueue.WorkloadQuotaReservedReasonMisconfigured,
+				fmt.Sprintf("ClusterQueue %s is terminating", cq.Name),
+				wl2,
+			)
 			util.ExpectReservingActiveWorkloadsMetric(cq, 1)
 			util.ExpectAdmittedWorkloadsTotalMetric(cq, "", 1)
 			util.ExpectPendingWorkloadsMetric(cq, 0, 1)
