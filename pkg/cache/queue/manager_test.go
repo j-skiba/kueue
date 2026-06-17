@@ -2262,26 +2262,23 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 	t.Run("lifecycle (add, increment, decrement, prune)", func(t *testing.T) {
 		// 1. Add pendingWl1 -> Pending evaluation (represented as NoReservation/PendingEvaluation)
 		manager.UpdateUnadmittedWorkload(ctx, pendingWl1)
-		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectGauges(t, "foo", "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
 
 		// 2. Add misconfiguredWl -> Inadmissible misconfigured
 		manager.UpdateUnadmittedWorkload(ctx, misconfiguredWl)
-		expectUnadmitted(t, "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
+		expectGauges(t, "foo", "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
 
 		// 3. Add pendingWl2 -> Pending evaluation (increments to 2)
 		manager.UpdateUnadmittedWorkload(ctx, pendingWl2)
-		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 2)
+		expectGauges(t, "foo", "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 2)
 
 		// 4. Remove pendingWl1 (decrements to 1)
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(pendingWl1))
-		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectGauges(t, "foo", "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
 
 		// 5. Remove pendingWl2 (decrements to 0 -> series is deleted/pruned)
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(pendingWl2))
-		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
+		expectGauges(t, "foo", "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
 
 		// Clean up misconfiguredWl for the next subtest
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(misconfiguredWl))
@@ -2290,7 +2287,7 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 	t.Run("admission transition (cleans up unadmitted metrics upon admission)", func(t *testing.T) {
 		// 1. Workload starts as Inadmissible/Misconfigured
 		manager.UpdateUnadmittedWorkload(ctx, misconfiguredWl)
-		expectUnadmitted(t, "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
+		expectGauges(t, "foo", "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 1)
 
 		// 2. Workload becomes admitted -> cleans up unadmitted metrics
 		wlAdmitted := misconfiguredWl.DeepCopy()
@@ -2303,19 +2300,17 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 			},
 		}
 		manager.UpdateUnadmittedWorkload(ctx, wlAdmitted)
-		expectUnadmitted(t, "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 0)
+		expectGauges(t, "foo", "cq1", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "alpha", 0)
 	})
 
 	t.Run("missing LocalQueue fallback (gracefully handle non-existent queues)", func(t *testing.T) {
 		// 1. Add wlWithMissingQueue on missing local queue -> fallback empty string for ClusterQueue and custom labels
 		manager.UpdateUnadmittedWorkload(ctx, wlWithMissingQueue)
-		expectUnadmitted(t, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 1)
-		expectLQUnadmitted(t, "non-existent-lq", defaultNamespace, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 1)
+		expectGauges(t, "non-existent-lq", "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 1)
 
 		// 2. Remove wlWithMissingQueue -> deletes/prunes fallback series
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlWithMissingQueue))
-		expectUnadmitted(t, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
-		expectLQUnadmitted(t, "non-existent-lq", defaultNamespace, "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
+		expectGauges(t, "non-existent-lq", "", "Inadmissible", kueue.WorkloadQuotaReservedReasonMisconfigured, "", 0)
 	})
 
 	t.Run("queue transition (moving pending workload between local queues updates metrics)", func(t *testing.T) {
@@ -2347,38 +2342,40 @@ func TestUnadmittedWorkloadsMetrics(t *testing.T) {
 	t.Run("missing status conditions fallback (assume NoReservation and PendingEvaluation)", func(t *testing.T) {
 		// 1. Add workload with no conditions -> falls back to NoReservation / PendingEvaluation
 		manager.UpdateUnadmittedWorkload(ctx, wlNoConditions)
-		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
+		expectGauges(t, "foo", "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 1)
 
 		// 2. Remove workload -> cleans up fallback series
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlNoConditions))
-		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
+		expectGauges(t, "foo", "cq1", kueue.WorkloadAdmittedReasonNoReservation, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "alpha", 0)
 	})
 
 	t.Run("unsatisfied admission checks (underlying cause ChecksNotReady)", func(t *testing.T) {
 		// 1. Add workload with UnsatisfiedAdmissionChecks -> maps to ChecksNotReady
 		manager.UpdateUnadmittedWorkload(ctx, wlChecksPending)
-		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks, "ChecksNotReady", "alpha", 1)
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks, "ChecksNotReady", "alpha", 1)
+		expectGauges(t, "foo", "cq1", kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks, "ChecksNotReady", "alpha", 1)
 
 		// 2. Remove workload -> cleans up ChecksNotReady series
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlChecksPending))
-		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks, "ChecksNotReady", "alpha", 0)
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks, "ChecksNotReady", "alpha", 0)
+		expectGauges(t, "foo", "cq1", kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks, "ChecksNotReady", "alpha", 0)
 	})
 
 	t.Run("pending delayed topology requests (underlying cause PendingTopology)", func(t *testing.T) {
 		// 1. Add workload with PendingDelayedTopologyRequests -> maps to PendingTopology
 		manager.UpdateUnadmittedWorkload(ctx, wlTopologyPending)
-		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests, "PendingTopology", "alpha", 1)
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests, "PendingTopology", "alpha", 1)
+		expectGauges(t, "foo", "cq1", kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests, "PendingTopology", "alpha", 1)
 
 		// 2. Remove workload -> cleans up PendingTopology series
 		manager.RemoveUnadmittedWorkload(ctx, workload.Key(wlTopologyPending))
-		expectUnadmitted(t, "cq1", kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests, "PendingTopology", "alpha", 0)
-		expectLQUnadmitted(t, "foo", defaultNamespace, "cq1", kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests, "PendingTopology", "alpha", 0)
+		expectGauges(t, "foo", "cq1", kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests, "PendingTopology", "alpha", 0)
 	})
+}
+
+func expectGauges(t *testing.T, lq, cq, reason, cause, team string, want float64) {
+	t.Helper()
+	expectUnadmitted(t, cq, reason, cause, team, want)
+	if lq != "" {
+		expectLQUnadmitted(t, lq, defaultNamespace, cq, reason, cause, team, want)
+	}
 }
 
 func expectUnadmitted(t *testing.T, cq, reason, cause, team string, want float64) {

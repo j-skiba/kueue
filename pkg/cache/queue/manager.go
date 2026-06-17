@@ -1040,6 +1040,9 @@ func (m *Manager) UpdateUnadmittedWorkload(ctx context.Context, wl *kueue.Worklo
 	if admittedCond != nil {
 		reason = admittedCond.Reason
 	} else {
+		// If the Admitted condition is missing (e.g., because the UnadmittedWorkloadsExplicitStatus
+		// feature gate is disabled, or the workload is newly created), we assume it is unadmitted
+		// with no reservation.
 		reason = kueue.WorkloadAdmittedReasonNoReservation
 	}
 	var underlyingCause string
@@ -1052,6 +1055,8 @@ func (m *Manager) UpdateUnadmittedWorkload(ctx context.Context, wl *kueue.Worklo
 	case quotaReservedCond != nil && quotaReservedCond.Status == metav1.ConditionFalse:
 		underlyingCause = quotaReservedCond.Reason
 	default:
+		// If the QuotaReserved condition is missing (e.g., because the UnadmittedWorkloadsExplicitStatus
+		// feature gate is disabled, or the workload is newly created), we assume it is pending evaluation.
 		underlyingCause = kueue.WorkloadQuotaReservedReasonPendingEvaluation
 	}
 
