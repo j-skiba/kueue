@@ -602,7 +602,7 @@ func (r *WorkloadReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				return workload.SetRequeuedCondition(wl, kueue.WorkloadClusterQueueRestarted, "The ClusterQueue was restarted after being stopped", true), nil
 			}))
 		}
-		if !features.Enabled(features.UnadmittedWorkloadsObservability) && cqOk {
+		if !features.Enabled(features.UnadmittedWorkloadsObservability) {
 			if updated, err := r.reconcileSyncAdmissionChecks(ctx, &wl, &cq); updated || err != nil {
 				return ctrl.Result{}, err
 			}

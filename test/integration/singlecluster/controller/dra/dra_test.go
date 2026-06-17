@@ -51,7 +51,7 @@ var _ = ginkgo.Describe("DRA Integration", ginkgo.Ordered, ginkgo.ContinueOnFail
 
 	ginkgo.BeforeEach(func() {
 		ctx = context.Background()
-		reason = string(kueue.WorkloadInadmissible)
+		reason = kueue.WorkloadInadmissible
 		if features.Enabled(features.UnadmittedWorkloadsObservability) {
 			reason = kueue.WorkloadQuotaReservedReasonMisconfigured
 		}

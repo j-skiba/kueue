@@ -188,12 +188,73 @@ func TestSyncAdmittedCondition(t *testing.T) {
 				{
 					Type:               kueue.WorkloadAdmitted,
 					Status:             metav1.ConditionFalse,
+					Reason:             "UnsatisfiedChecks",
+					ObservedGeneration: 1,
+				},
+			},
+			wantChange:       true,
+			wantAdmittedTime: 1,
+		},
+		"check lost with UnadmittedWorkloadsObservability enabled": {
+			featureGates: map[featuregate.Feature]bool{features.UnadmittedWorkloadsObservability: true},
+			checkStates: []kueue.AdmissionCheckState{
+				{
+					Name:  "check1",
+					State: kueue.CheckStateReady,
+				},
+				{
+					Name:  "check2",
+					State: kueue.CheckStatePending,
+				},
+			},
+			conditions: []metav1.Condition{
+				{
+					Type:   kueue.WorkloadQuotaReserved,
+					Status: metav1.ConditionTrue,
+				},
+				{
+					Type:               kueue.WorkloadAdmitted,
+					Status:             metav1.ConditionTrue,
+					LastTransitionTime: metav1.NewTime(testTime.Add(-time.Second)),
+				},
+			},
+			wantConditions: []metav1.Condition{
+				{
+					Type:   kueue.WorkloadQuotaReserved,
+					Status: metav1.ConditionTrue,
+				},
+				{
+					Type:               kueue.WorkloadAdmitted,
+					Status:             metav1.ConditionFalse,
 					Reason:             kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks,
 					ObservedGeneration: 1,
 				},
 			},
 			wantChange:       true,
 			wantAdmittedTime: 1,
+		},
+		"bare workload, both gates enabled, expect Admitted=False to be created": {
+			featureGates: map[featuregate.Feature]bool{
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: true,
+			},
+			wantConditions: []metav1.Condition{
+				{
+					Type:               kueue.WorkloadAdmitted,
+					Status:             metav1.ConditionFalse,
+					Reason:             "NoReservation",
+					ObservedGeneration: 1,
+				},
+			},
+			wantChange: true,
+		},
+		"bare workload, Observability enabled but ExplicitStatus disabled, expect Admitted condition NOT created": {
+			featureGates: map[featuregate.Feature]bool{
+				features.UnadmittedWorkloadsObservability:  true,
+				features.UnadmittedWorkloadsExplicitStatus: false,
+			},
+			wantConditions: nil,
+			wantChange:     false,
 		},
 		"reservation and check lost": {
 			checkStates: []kueue.AdmissionCheckState{

@@ -44,14 +44,15 @@ func SyncAdmittedCondition(w *kueue.Workload, now time.Time) bool {
 	hasAllTopologyAssignmentsReady := !HasTopologyAssignmentsPending(w)
 
 	currentCond := apimeta.FindStatusCondition(w.Status.Conditions, kueue.WorkloadAdmitted)
-	hasTargetState := hasReservation && hasAllChecksReady && hasAllTopologyAssignmentsReady
 
 	if !features.Enabled(features.UnadmittedWorkloadsObservability) {
-		if isAdmitted == hasTargetState {
+		if isAdmitted == (hasReservation && hasAllChecksReady && hasAllTopologyAssignmentsReady) {
 			return false
 		}
-	} else {
-		if !hasTargetState && currentCond == nil && !features.Enabled(features.UnadmittedWorkloadsExplicitStatus) {
+	} else if !features.Enabled(features.UnadmittedWorkloadsExplicitStatus) {
+		// If the explicit status feature is disabled, we don't want to create
+		// the Admitted: False condition if it doesn't exist yet.
+		if !(hasReservation && hasAllChecksReady && hasAllTopologyAssignmentsReady) && currentCond == nil {
 			return false
 		}
 	}
@@ -80,7 +81,11 @@ func SyncAdmittedCondition(w *kueue.Workload, now time.Time) bool {
 		newCondition.Message = "The workload has no reservation"
 	case !hasAllChecksReady:
 		newCondition.Status = metav1.ConditionFalse
-		newCondition.Reason = kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks
+		if features.Enabled(features.UnadmittedWorkloadsObservability) {
+			newCondition.Reason = kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks
+		} else {
+			newCondition.Reason = "UnsatisfiedChecks"
+		}
 		newCondition.Message = "The workload has not all checks ready"
 	case !hasAllTopologyAssignmentsReady:
 		newCondition.Status = metav1.ConditionFalse
