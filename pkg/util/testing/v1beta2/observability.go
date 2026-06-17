@@ -17,12 +17,12 @@ limitations under the License.
 package v1beta2
 
 import (
-	"fmt"
 	"time"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	"sigs.k8s.io/kueue/pkg/workload"
 )
 
 // GetObservabilityConditions returns the status conditions that are set on an unadmitted workload
@@ -53,7 +53,7 @@ func ApplyStatusConditions(
 ) {
 	for i := range workloads {
 		wl := &workloads[i]
-		namespacedName := fmt.Sprintf("%s/%s", wl.Namespace, wl.Name)
+		namespacedName := string(workload.Key(wl))
 		if conds, ok := conditions[namespacedName]; ok {
 			for _, cond := range conds {
 				apimeta.SetStatusCondition(&wl.Status.Conditions, cond)

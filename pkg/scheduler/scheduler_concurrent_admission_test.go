@@ -82,8 +82,9 @@ func TestScheduleConcurrentAdmission(t *testing.T) {
 		additionalClusterQueues []kueue.ClusterQueue
 		additionalLocalQueues   []kueue.LocalQueue
 
-		wantAssignments                 map[workload.Reference]kueue.Admission
-		wantWorkloads                   []kueue.Workload
+		wantAssignments map[workload.Reference]kueue.Admission
+		wantWorkloads   []kueue.Workload
+		// wantConditionsWithObservability holds the expected workload conditions when the UnadmittedWorkloadsObservability feature gate is enabled.
 		wantConditionsWithObservability map[string][]metav1.Condition
 		wantLeft                        map[kueue.ClusterQueueReference][]workload.Reference
 	}{

@@ -170,7 +170,8 @@ func TestScheduleForFairSharing(t *testing.T) {
 		// wantAssignments is a summary of all the admissions in the cache after this cycle.
 		wantAssignments map[workload.Reference]kueue.Admission
 		// wantWorkloads is the subset of workloads that got admitted in this cycle.
-		wantWorkloads                   []kueue.Workload
+		wantWorkloads []kueue.Workload
+		// wantConditionsWithObservability holds the expected workload conditions when the UnadmittedWorkloadsObservability feature gate is enabled.
 		wantConditionsWithObservability map[string][]metav1.Condition
 		// wantLeft is the workload keys that are left in the queues after this cycle.
 		wantLeft map[kueue.ClusterQueueReference][]workload.Reference

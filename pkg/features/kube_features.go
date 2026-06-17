@@ -424,13 +424,19 @@ const (
 	WorkloadPriorityClassDefaulting featuregate.Feature = "WorkloadPriorityClassDefaulting"
 
 	// owner: @j-skiba
+	// kep: https://github.com/kubernetes-sigs/kueue/tree/main/keps/10852-inadmissible-workloads-observability
 	//
-	// Enables dynamic, tiered QuotaReserved reasons and metrics observability for unadmitted workloads.
+	// issue: https://github.com/kubernetes-sigs/kueue/issues/10852
+	//
+	// Enables granular status reasons for the QuotaReserved condition and detailed Prometheus metrics for unadmitted workloads.
 	UnadmittedWorkloadsObservability featuregate.Feature = "UnadmittedWorkloadsObservability"
 
 	// owner: @j-skiba
+	// kep: https://github.com/kubernetes-sigs/kueue/tree/main/keps/10852-inadmissible-workloads-observability
 	//
-	// Gates the immediate, proactive initialization of both QuotaReserved and Admitted status conditions to False during a workload's first reconciliation.
+	// issue: https://github.com/kubernetes-sigs/kueue/issues/10852
+	//
+	// Enables explicit initialization of QuotaReserved and Admitted status conditions to False during a workload's first reconciliation.
 	UnadmittedWorkloadsExplicitStatus featuregate.Feature = "UnadmittedWorkloadsExplicitStatus"
 )
 

@@ -266,7 +266,8 @@ func TestScheduleForTAS(t *testing.T) {
 		// wantInadmissibleLeft is the workload keys that are left in the inadmissible state after this cycle.
 		wantInadmissibleLeft map[kueue.ClusterQueueReference][]workload.Reference
 		// wantEvents asserts on the events, the comparison options are passed by eventCmpOpts
-		wantEvents                      []utiltesting.EventRecord
+		wantEvents []utiltesting.EventRecord
+		// wantConditionsWithObservability holds the expected workload conditions when the UnadmittedWorkloadsObservability feature gate is enabled.
 		wantConditionsWithObservability map[string][]metav1.Condition
 		// eventCmpOpts are the comparison options for the events
 		eventCmpOpts cmp.Options
@@ -3384,7 +3385,8 @@ func TestScheduleForTASPreemption(t *testing.T) {
 		// wantInadmissibleLeft is the workload keys that are left in the inadmissible state after this cycle.
 		wantInadmissibleLeft map[kueue.ClusterQueueReference][]workload.Reference
 		// wantEvents asserts on the events, the comparison options are passed by eventCmpOpts
-		wantEvents                      []utiltesting.EventRecord
+		wantEvents []utiltesting.EventRecord
+		// wantConditionsWithObservability holds the expected workload conditions when the UnadmittedWorkloadsObservability feature gate is enabled.
 		wantConditionsWithObservability map[string][]metav1.Condition
 		// eventCmpOpts are the comparison options for the events
 		eventCmpOpts cmp.Options
@@ -4939,7 +4941,8 @@ func TestScheduleForTASCohorts(t *testing.T) {
 		// wantInadmissibleLeft is the workload keys that are left in the inadmissible state after this cycle.
 		wantInadmissibleLeft map[kueue.ClusterQueueReference][]workload.Reference
 		// wantEvents asserts on the events, the comparison options are passed by eventCmpOpts
-		wantEvents                      []utiltesting.EventRecord
+		wantEvents []utiltesting.EventRecord
+		// wantConditionsWithObservability holds the expected workload conditions when the UnadmittedWorkloadsObservability feature gate is enabled.
 		wantConditionsWithObservability map[string][]metav1.Condition
 		// eventCmpOpts are the comparison options for the events
 		eventCmpOpts cmp.Options

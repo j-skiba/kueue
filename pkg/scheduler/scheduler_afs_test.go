@@ -78,10 +78,11 @@ func TestScheduleForAFS(t *testing.T) {
 	}
 
 	cases := map[string]struct {
-		featureGates                    map[featuregate.Feature]bool
-		initialUsage                    map[string]corev1.ResourceList
-		workloads                       []kueue.Workload
-		wantWorkloads                   []kueue.Workload
+		featureGates  map[featuregate.Feature]bool
+		initialUsage  map[string]corev1.ResourceList
+		workloads     []kueue.Workload
+		wantWorkloads []kueue.Workload
+		// wantConditionsWithObservability holds the expected workload conditions when the UnadmittedWorkloadsObservability feature gate is enabled.
 		wantConditionsWithObservability map[string][]metav1.Condition
 	}{
 		"admits workload from less active localqueue": {
