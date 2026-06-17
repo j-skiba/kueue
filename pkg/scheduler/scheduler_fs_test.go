@@ -182,7 +182,6 @@ func TestScheduleForFairSharing(t *testing.T) {
 		eventCmpOpts cmp.Options
 
 		wantSkippedPreemptions map[string]int
-		featureGates           map[featuregate.Feature]bool
 	}{
 		"with fair sharing: schedule workload with lowest share first": {
 			enableFairSharing: true,
@@ -3805,7 +3804,6 @@ func TestScheduleForFairSharing(t *testing.T) {
 					features.UnadmittedWorkloadsObservability:  scenario.unadmittedWorkloadsObservability,
 					features.UnadmittedWorkloadsExplicitStatus: scenario.unadmittedWorkloadsObservability,
 				})
-				features.SetFeatureGatesDuringTest(t, tc.featureGates)
 				metrics.AdmissionCyclePreemptionSkips.Reset()
 
 				wantWorkloads := make([]kueue.Workload, len(tc.wantWorkloads))

@@ -700,15 +700,6 @@ var _ = ginkgo.Describe("Job controller", ginkgo.Label("job:batch", "area:jobs")
 	})
 
 	ginkgo.It("Should finish the preemption when the job becomes inactive", framework.SlowSpec, func() {
-		clusterQueue := utiltestingapi.MakeClusterQueue("cq").Obj()
-		util.MustCreate(ctx, k8sClient, clusterQueue)
-		localQueue := utiltestingapi.MakeLocalQueue("q", ns.Name).ClusterQueue(clusterQueue.Name).Obj()
-		util.MustCreate(ctx, k8sClient, localQueue)
-		ginkgo.DeferCleanup(func() {
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, localQueue, true)
-			util.ExpectObjectToBeDeleted(ctx, k8sClient, clusterQueue, true)
-		})
-
 		job := testingjob.MakeJob(jobName, ns.Name).Queue("q").Obj()
 		wl := &kueue.Workload{}
 		var wlLookupKey types.NamespacedName

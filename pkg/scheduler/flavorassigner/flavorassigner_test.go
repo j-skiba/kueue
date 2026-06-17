@@ -4914,7 +4914,6 @@ func TestIsNoFitDueToCapacityAndLimits(t *testing.T) {
 			assigner := New(wlInfo, cqSnapshot, testFlavors, false, &testOracle{simulationResult: tc.simulationResult}, tc.replaceWl, configapi.QuotaCheckBlockUndeclared)
 			gotAssignment := assigner.Assign(log, nil)
 
-			t.Logf("TEST CASE %q: mode=%v, NoFitReason=%q, attempts=%+v", name, gotAssignment.RepresentativeMode(), gotAssignment.NoFitReason, gotAssignment.PodSets[0].FlavorAssignmentAttempts)
 			if gotAssignment.NoFitReason != tc.wantNoFitReason {
 				t.Errorf("gotAssignment.NoFitReason = %q, want %q", gotAssignment.NoFitReason, tc.wantNoFitReason)
 			}

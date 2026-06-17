@@ -17,6 +17,7 @@ limitations under the License.
 package workload
 
 import (
+	"maps"
 	"testing"
 	"time"
 
@@ -439,12 +440,8 @@ func TestSyncAdmittedCondition(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			fg := map[featuregate.Feature]bool{}
-			for k, v := range disabledObservabilityGates {
-				fg[k] = v
-			}
-			for k, v := range tc.featureGates {
-				fg[k] = v
-			}
+			maps.Copy(fg, disabledObservabilityGates)
+			maps.Copy(fg, tc.featureGates)
 			features.SetFeatureGatesDuringTest(t, fg)
 			builder := utiltestingapi.MakeWorkload("foo", "bar").
 				Admission(tc.admission).
