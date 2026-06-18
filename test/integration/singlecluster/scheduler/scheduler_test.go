@@ -1163,7 +1163,7 @@ var _ = ginkgo.Describe("Scheduler", func() {
 				k8sClient,
 				fooCQ.Name,
 				kueue.WorkloadQuotaReservedReasonMisconfigured,
-				"Flavor foo-flavor not found",
+				"missing ResourceFlavor(s): foo-flavor",
 				wl,
 			)
 			util.ExpectPendingWorkloadsMetric(fooCQ, 0, 1)
