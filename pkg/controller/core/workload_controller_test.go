@@ -1096,6 +1096,54 @@ func TestReconcile(t *testing.T) {
 				}).
 				Obj(),
 		},
+		"inadmissible workload due to missing LocalQueue (observability enabled)": {
+			featureGates: map[featuregate.Feature]bool{
+				features.UnadmittedWorkloadsObservability: true,
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("non-existent-lq").
+				Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("non-existent-lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonMisconfigured,
+					Message: "LocalQueue non-existent-lq doesn't exist",
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadAdmittedReasonNoReservation,
+					Message: "The workload has no reservation",
+				}).
+				Obj(),
+		},
+		"inadmissible workload due to stopped ClusterQueue (observability enabled)": {
+			featureGates: map[featuregate.Feature]bool{
+				features.UnadmittedWorkloadsObservability: true,
+			},
+			workload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").Active(metav1.ConditionTrue).StopPolicy(kueue.HoldAndDrain).Obj(),
+			lq: utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj(),
+			wantWorkload: utiltestingapi.MakeWorkload("wl", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonSuspended,
+					Message: "ClusterQueue cq is inactive",
+				}).
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadAdmitted,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadAdmittedReasonNoReservation,
+					Message: "The workload has no reservation",
+				}).
+				Obj(),
+		},
 	}
 	runReconcileTestCases(t, cases, fakeClock)
 }
