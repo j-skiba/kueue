@@ -7443,6 +7443,7 @@ func TestFindTopologyAssignments(t *testing.T) {
 			snapshot := tasFlavorCache.snapshot(
 				log,
 				tasCache.nodesCache.find(tasFlavorCache.flavor.NodeLabels, tasFlavorCache.topology.Levels),
+				0,
 				aggregatedDomainUsage,
 			)
 			flavorTASRequests := make([]TASPodSetRequests, 0, len(tc.podSets))
@@ -7909,6 +7910,7 @@ func TestFindTopologyAssignmentsMultiLayerReplacement(t *testing.T) {
 			snapshot := tasFlavorCache.snapshot(
 				log,
 				tasCache.nodesCache.find(tasFlavorCache.flavor.NodeLabels, tasFlavorCache.topology.Levels),
+				0,
 				aggregatedDomainUsages,
 			)
 			result := snapshot.FindTopologyAssignmentsForFlavor(flavorTASRequests, WithWorkload(wl))

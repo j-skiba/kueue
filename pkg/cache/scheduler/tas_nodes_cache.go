@@ -25,14 +25,21 @@ import (
 )
 
 type nodesCache struct {
-	lock  sync.RWMutex
-	nodes map[string]*nodeInfo
+	lock       sync.RWMutex
+	nodes      map[string]*nodeInfo
+	generation uint64
 }
 
 func newNodesCache() *nodesCache {
 	return &nodesCache{
 		nodes: make(map[string]*nodeInfo),
 	}
+}
+
+func (t *nodesCache) Generation() uint64 {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	return t.generation
 }
 
 func (t *nodesCache) sync(node *corev1.Node) {
@@ -42,6 +49,7 @@ func (t *nodesCache) sync(node *corev1.Node) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
+	t.generation++
 	if schedulableAndReady {
 		t.nodes[node.Name] = newNodeInfo(node)
 	} else {
@@ -52,6 +60,7 @@ func (t *nodesCache) sync(node *corev1.Node) {
 func (t *nodesCache) delete(nodeName string) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
+	t.generation++
 	t.deleteWithoutLock(nodeName)
 }
 

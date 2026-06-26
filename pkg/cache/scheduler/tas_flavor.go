@@ -90,6 +90,10 @@ type TASFlavorCache struct {
 	// nonTasUsageCache maintains the usage coming from non-TAS pods,
 	// e.g. static Pods or DaemonSet pods.
 	nonTasUsageCache *nonTasUsageCache
+
+	// latestSnapshot caches the built snapshot tree to avoid rebuilding overhead.
+	latestSnapshot         *TASFlavorSnapshot
+	latestSnapshotNodesGen uint64
 }
 
 func (t *tasCache) NewTASFlavorCache(topologyInfo topologyInformation,
@@ -117,10 +121,17 @@ func (c *TASFlavorCache) TopologyLevels() []string {
 }
 
 func (c *TASFlavorCache) snapshot(
-	log logr.Logger, nodes []*nodeInfo, aggregatedDomainUsages map[utiltas.TopologyDomainID]resources.Requests,
+	log logr.Logger, nodes []*nodeInfo, nodesGen uint64, aggregatedDomainUsages map[utiltas.TopologyDomainID]resources.Requests,
 ) *TASFlavorSnapshot {
 	c.RLock()
 	defer c.RUnlock()
+
+	// If the node list has not changed, reuse the cached snapshot in-place.
+	if c.latestSnapshot != nil && c.latestSnapshotNodesGen == nodesGen {
+		log.V(3).Info("Reusing cached TAS snapshot", "nodeLabels", c.flavor.NodeLabels, "levels", c.topology.Levels)
+		c.latestSnapshot.reset(aggregatedDomainUsages, c.usage, c.nonTasUsageCache)
+		return c.latestSnapshot
+	}
 
 	infoKV := []any{
 		"nodeLabels", c.flavor.NodeLabels,
@@ -130,12 +141,11 @@ func (c *TASFlavorCache) snapshot(
 	if features.Enabled(features.TASHandleOverlappingFlavors) {
 		infoKV = append(infoKV, "crossFlavorAggregation", aggregatedDomainUsages != nil)
 	}
-	log.V(3).Info("Constructing TAS snapshot", infoKV...)
+	log.V(3).Info("Constructing new TAS snapshot", infoKV...)
 
 	snapshot := newTASFlavorSnapshot(log, c.flavor.TopologyName, c.topology.Levels, withTolerations(c.flavor.Tolerations))
-	nodeToDomain := make(map[string]utiltas.TopologyDomainID)
 	for _, node := range nodes {
-		nodeToDomain[node.Name] = snapshot.addNode(node)
+		snapshot.addNode(node)
 	}
 	snapshot.initialize()
 
@@ -146,11 +156,16 @@ func (c *TASFlavorCache) snapshot(
 	for domainID, usage := range tasDomainUsages {
 		snapshot.addTASUsage(domainID, usage)
 	}
-	for nodeName, usage := range c.nonTasUsageCache.usagePerNode() {
-		if domainID, ok := nodeToDomain[nodeName]; ok {
+	for nodeName, usage := range c.nonTasUsageCache.All() {
+		if domainID, ok := snapshot.nodeToDomain[nodeName]; ok {
 			snapshot.addNonTASUsage(domainID, usage)
 		}
 	}
+
+	// Cache the built snapshot tree and its generation for future cycles
+	c.latestSnapshot = snapshot
+	c.latestSnapshotNodesGen = nodesGen
+
 	return snapshot
 }
 

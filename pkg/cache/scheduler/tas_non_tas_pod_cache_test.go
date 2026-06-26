@@ -42,7 +42,10 @@ func verifyNodeUsageConsistency(t *testing.T, cache *nonTasUsageCache) {
 		expected[pv.node].Add(pv.usage)
 		expected[pv.node][corev1.ResourcePods]++
 	}
-	got := cache.usagePerNode()
+	got := make(map[string]resources.Requests)
+	for node, usage := range cache.All() {
+		got[node] = usage.Clone()
+	}
 	if diff := cmp.Diff(expected, got); diff != "" {
 		t.Errorf("nodeUsage inconsistent with podUsage (-recomputed +nodeUsage):\n%s", diff)
 	}
@@ -178,7 +181,11 @@ func TestNonTasUsageCacheIncrementalUpdates(t *testing.T) {
 			if wantUsage == nil {
 				wantUsage = map[string]resources.Requests{}
 			}
-			if diff := cmp.Diff(wantUsage, cache.usagePerNode()); diff != "" {
+			gotUsage := make(map[string]resources.Requests)
+			for node, usage := range cache.All() {
+				gotUsage[node] = usage.Clone()
+			}
+			if diff := cmp.Diff(wantUsage, gotUsage); diff != "" {
 				t.Errorf("usagePerNode() mismatch (-want +got):\n%s", diff)
 			}
 

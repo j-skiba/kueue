@@ -214,6 +214,7 @@ func (c *Cache) Snapshot(ctx context.Context, options ...SnapshotOption) (*Snaps
 			tasSnapshots[flavor] = cache.snapshot(
 				log,
 				c.tasCache.nodesCache.find(cache.flavor.NodeLabels, cache.topology.Levels),
+				c.tasCache.nodesCache.Generation(),
 				aggregatedDomainUsagesForFlavor,
 			)
 		}

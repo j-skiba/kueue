@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"iter"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -82,14 +83,16 @@ func (n *nonTasUsageCache) delete(key client.ObjectKey, log logr.Logger) {
 	delete(n.podUsage, key)
 }
 
-func (n *nonTasUsageCache) usagePerNode() map[string]resources.Requests {
-	n.lock.RLock()
-	defer n.lock.RUnlock()
-	usage := make(map[string]resources.Requests, len(n.nodeUsage))
-	for node, reqs := range n.nodeUsage {
-		usage[node] = reqs.Clone()
+func (n *nonTasUsageCache) All() iter.Seq2[string, resources.Requests] {
+	return func(yield func(string, resources.Requests) bool) {
+		n.lock.RLock()
+		defer n.lock.RUnlock()
+		for node, reqs := range n.nodeUsage {
+			if !yield(node, reqs) {
+				return
+			}
+		}
 	}
-	return usage
 }
 
 // addNodeUsage increments the pre-aggregated per-node usage.

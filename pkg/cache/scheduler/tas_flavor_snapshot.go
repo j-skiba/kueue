@@ -138,6 +138,9 @@ type TASFlavorSnapshot struct {
 
 	// isLowestLevelNode indicates if kubernetes.io/hostname is the lowest topology level
 	isLowestLevelNode bool
+
+	// nodeToDomain maps node names to their topology domain IDs, cached to avoid allocations
+	nodeToDomain map[string]utiltas.TopologyDomainID
 }
 
 type tasFlavorSnapshotOptions struct {
@@ -176,11 +179,12 @@ func newTASFlavorSnapshot(log logr.Logger, topologyName kueue.TopologyReference,
 		roots:             make(domainByID),
 		domainsPerLevel:   domainsPerLevel,
 		isLowestLevelNode: len(levels) > 0 && levels[len(levels)-1] == corev1.LabelHostname,
+		nodeToDomain:      make(map[string]utiltas.TopologyDomainID),
 	}
 	return snapshot
 }
 
-func (s *TASFlavorSnapshot) addNode(node *nodeInfo) utiltas.TopologyDomainID {
+func (s *TASFlavorSnapshot) addNode(node *nodeInfo) {
 	var levelValues []string
 	var domainID utiltas.TopologyDomainID
 	var leafFound bool
@@ -212,9 +216,9 @@ func (s *TASFlavorSnapshot) addNode(node *nodeInfo) utiltas.TopologyDomainID {
 		}
 		s.leaves[domainID] = &leafDomain
 	}
+	s.nodeToDomain[node.Name] = domainID
 	capacity := resources.NewRequests(node.Allocatable)
 	s.addCapacity(domainID, capacity)
-	return domainID
 }
 
 func (s *TASFlavorSnapshot) lowestLevel() string {
@@ -275,6 +279,46 @@ func (s *TASFlavorSnapshot) addNonTASUsage(domainID utiltas.TopologyDomainID, us
 	// least one TAS pod, and so the addCapacity function to initialize
 	// freeCapacity is already called.
 	s.leaves[domainID].freeCapacity.Sub(usage)
+}
+
+// reset performs an in-place update of capacities and usages on the existing
+// topology tree, and clears any solver search states.
+func (s *TASFlavorSnapshot) reset(
+	aggregatedDomainUsages map[utiltas.TopologyDomainID]resources.Requests,
+	tasDomainUsages map[utiltas.TopologyDomainID]resources.Requests,
+	nonTasUsageCache *nonTasUsageCache,
+) {
+	// 1. Reset all domain solver states to 0
+	for _, dom := range s.domains {
+		dom.state = 0
+		dom.sliceState = 0
+		dom.stateWithLeader = 0
+		dom.sliceStateWithLeader = 0
+		dom.leaderState = 0
+	}
+
+	// 2. Clear usages and reset baseline capacities in all leaf domains
+	for _, leaf := range s.leaves {
+		leaf.tasUsage = nil
+		leaf.freeCapacity = resources.Requests{}
+		leaf.freeCapacity.Add(resources.NewRequests(leaf.node.Allocatable))
+	}
+
+	// 3. Re-apply active TAS usages
+	usages := tasDomainUsages
+	if features.Enabled(features.TASHandleOverlappingFlavors) && aggregatedDomainUsages != nil {
+		usages = aggregatedDomainUsages
+	}
+	for domainID, usage := range usages {
+		s.addTASUsage(domainID, usage)
+	}
+
+	// 4. Re-apply active non-TAS usages using our cached nodeToDomain mapping
+	for nodeName, usage := range nonTasUsageCache.All() {
+		if domainID, ok := s.nodeToDomain[nodeName]; ok {
+			s.addNonTASUsage(domainID, usage)
+		}
+	}
 }
 
 func (s *TASFlavorSnapshot) updateTASUsage(domainID utiltas.TopologyDomainID, usage resources.Requests, op usageOp, count int32) {
