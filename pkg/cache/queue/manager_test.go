@@ -2161,3 +2161,198 @@ func TestQueueSecondPassIfNeeded(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateUnadmittedWorkload(t *testing.T) {
+	ctx, _ := utiltesting.ContextWithLog(t)
+	cq := utiltestingapi.MakeClusterQueue("cq").Obj()
+	lq := utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj()
+
+	cases := map[string]struct {
+		workload       *kueue.Workload
+		expectedStatus unadmittedWorkloadStatus
+	}{
+		"workload with empty status conditions (fresh / disabled explicit status FG)": {
+			workload: utiltestingapi.MakeWorkload("wl-1", "ns").Queue("lq").Obj(),
+			expectedStatus: unadmittedWorkloadStatus{
+				ClusterQueue:        "cq",
+				LocalQueueName:      "lq",
+				LocalQueueNamespace: "ns",
+				Reason:              kueue.WorkloadAdmittedReasonNoReservation,
+				UnderlyingCause:     kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+			},
+		},
+		"workload pending with QuotaReserved=False/WaitingForQuota and missing Admitted condition": {
+			workload: utiltestingapi.MakeWorkload("wl-2", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:   kueue.WorkloadQuotaReserved,
+					Status: metav1.ConditionFalse,
+					Reason: kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+				}).
+				Obj(),
+			expectedStatus: unadmittedWorkloadStatus{
+				ClusterQueue:        "cq",
+				LocalQueueName:      "lq",
+				LocalQueueNamespace: "ns",
+				Reason:              kueue.WorkloadAdmittedReasonNoReservation,
+				UnderlyingCause:     kueue.WorkloadQuotaReservedReasonWaitingForQuota,
+			},
+		},
+		"workload unadmitted due to unsatisfied checks": {
+			workload: utiltestingapi.MakeWorkload("wl-3", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:   kueue.WorkloadQuotaReserved,
+					Status: metav1.ConditionTrue,
+				}).
+				Condition(metav1.Condition{
+					Type:   kueue.WorkloadAdmitted,
+					Status: metav1.ConditionFalse,
+					Reason: kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks,
+				}).
+				Obj(),
+			expectedStatus: unadmittedWorkloadStatus{
+				ClusterQueue:        "cq",
+				LocalQueueName:      "lq",
+				LocalQueueNamespace: "ns",
+				Reason:              kueue.WorkloadAdmittedReasonUnsatisfiedAdmissionChecks,
+				UnderlyingCause:     kueue.WorkloadUnadmittedCauseChecksNotReady,
+			},
+		},
+		"workload unadmitted due to unsatisfied checks (legacy string value UnsatisfiedChecks)": {
+			workload: utiltestingapi.MakeWorkload("wl-4", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:   kueue.WorkloadQuotaReserved,
+					Status: metav1.ConditionTrue,
+				}).
+				Condition(metav1.Condition{
+					Type:   kueue.WorkloadAdmitted,
+					Status: metav1.ConditionFalse,
+					Reason: "UnsatisfiedChecks",
+				}).
+				Obj(),
+			expectedStatus: unadmittedWorkloadStatus{
+				ClusterQueue:        "cq",
+				LocalQueueName:      "lq",
+				LocalQueueNamespace: "ns",
+				Reason:              "UnsatisfiedChecks",
+				UnderlyingCause:     kueue.WorkloadUnadmittedCauseChecksNotReady,
+			},
+		},
+		"workload unadmitted due to pending delayed topology requests": {
+			workload: utiltestingapi.MakeWorkload("wl-5", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:   kueue.WorkloadQuotaReserved,
+					Status: metav1.ConditionTrue,
+				}).
+				Condition(metav1.Condition{
+					Type:   kueue.WorkloadAdmitted,
+					Status: metav1.ConditionFalse,
+					Reason: kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests,
+				}).
+				Obj(),
+			expectedStatus: unadmittedWorkloadStatus{
+				ClusterQueue:        "cq",
+				LocalQueueName:      "lq",
+				LocalQueueNamespace: "ns",
+				Reason:              kueue.WorkloadAdmittedReasonPendingDelayedTopologyRequests,
+				UnderlyingCause:     kueue.WorkloadUnadmittedCausePendingTopology,
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			kClient := utiltesting.NewFakeClient(tc.workload)
+			manager := NewManagerForUnitTests(kClient, nil)
+
+			if err := manager.AddClusterQueue(ctx, cq); err != nil {
+				t.Fatalf("failed to add ClusterQueue: %v", err)
+			}
+			if err := manager.AddLocalQueue(ctx, lq); err != nil {
+				t.Fatalf("failed to add LocalQueue: %v", err)
+			}
+
+			// Update metric
+			manager.UpdateUnadmittedWorkload(tc.workload)
+
+			// Assert on tracked status
+			wlKey := workload.Key(tc.workload)
+			status, ok := manager.trackedUnadmittedWorkloadStatuses[wlKey]
+			if !ok {
+				t.Fatalf("expected workload to be tracked in unadmitted registry")
+			}
+
+			if diff := cmp.Diff(tc.expectedStatus, status); diff != "" {
+				t.Errorf("unexpected tracked status (-want,+got):\n%s", diff)
+			}
+
+			// Assert CQ ref counts are incremented
+			cqKey := tc.expectedStatus.CQVal()
+			if count, ok := manager.unadmittedCQRefCounts[cqKey]; !ok || count != 1 {
+				t.Errorf("expected CQ ref count to be 1, got count=%d, ok=%t", count, ok)
+			}
+
+			// Assert LQ ref counts are incremented
+			lqKey := tc.expectedStatus
+			if count, ok := manager.unadmittedLQRefCounts[lqKey]; !ok || count != 1 {
+				t.Errorf("expected LQ ref count to be 1, got count=%d, ok=%t", count, ok)
+			}
+
+			// Cleanup the workload
+			tc.workload.Status.Conditions = []metav1.Condition{
+				{
+					Type:   kueue.WorkloadAdmitted,
+					Status: metav1.ConditionTrue,
+				},
+			}
+			manager.UpdateUnadmittedWorkload(tc.workload)
+
+			// Assert counts are decremented and entry deleted
+			if _, ok := manager.trackedUnadmittedWorkloadStatuses[wlKey]; ok {
+				t.Errorf("expected workload to be removed from unadmitted registry")
+			}
+			if count, ok := manager.unadmittedCQRefCounts[cqKey]; ok && count != 0 {
+				t.Errorf("expected CQ ref count to be decremented to 0, got count=%d", count)
+			}
+			if count, ok := manager.unadmittedLQRefCounts[lqKey]; ok && count != 0 {
+				t.Errorf("expected LQ ref count to be decremented to 0, got count=%d", count)
+			}
+		})
+	}
+}
+
+func TestResyncUnadmittedWorkloadsMetrics(t *testing.T) {
+	features.SetFeatureGateDuringTest(t, features.UnadmittedWorkloadsObservability, true)
+
+	ctx, _ := utiltesting.ContextWithLog(t)
+	cq := utiltestingapi.MakeClusterQueue("cq").Obj()
+	lq := utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj()
+	wl := utiltestingapi.MakeWorkload("wl", "ns").Queue("lq").Obj()
+
+	lqMetricsConfig := &metrics.LocalQueueMetricsConfig{
+		Enabled:       true,
+		QueueSelector: labels.Everything(),
+	}
+
+	kClient := utiltesting.NewFakeClient(wl)
+	manager := NewManagerForUnitTests(kClient, nil, WithLocalQueueMetrics(lqMetricsConfig))
+
+	if err := manager.AddClusterQueue(ctx, cq); err != nil {
+		t.Fatalf("failed to add ClusterQueue: %v", err)
+	}
+	if err := manager.AddLocalQueue(ctx, lq); err != nil {
+		t.Fatalf("failed to add LocalQueue: %v", err)
+	}
+
+	manager.UpdateUnadmittedWorkload(wl)
+
+	manager.ResyncGaugeMetrics()
+
+	manager.ResyncClusterQueueGaugeMetrics("cq")
+
+	lqRef := queue.NewLocalQueueReference("ns", "lq")
+	manager.ResyncLocalQueueGaugeMetrics(lqRef)
+}
