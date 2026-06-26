@@ -1875,9 +1875,8 @@ func (r *WorkloadReconciler) resolveGranularUnadmittedQuotaReservedCondition(
 		cond.Reason != kueue.WorkloadQuotaReservedReasonMisconfigured:
 		return r.newQuotaReservedCondition(wl, cond.Reason, cond.Message), nil
 	default:
-		// Stamping the condition on creation is deferred to the next feature gate:
-		// UnadmittedWorkloadsObservabilityExplicitStatus.
-		if cond == nil {
+		// Stamping the condition on creation is gated by UnadmittedWorkloadsExplicitStatus.
+		if !features.Enabled(features.UnadmittedWorkloadsExplicitStatus) && cond == nil {
 			return nil, nil
 		}
 		return r.newQuotaReservedCondition(wl, kueue.WorkloadQuotaReservedReasonPendingEvaluation, "Workload is pending evaluation in the scheduling queue"), nil
