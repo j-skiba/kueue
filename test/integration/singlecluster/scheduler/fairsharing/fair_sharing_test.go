@@ -17,7 +17,9 @@ limitations under the License.
 package fairsharing
 
 import (
+	"context"
 	"math"
+	"sync/atomic"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -38,6 +40,7 @@ import (
 	utilqueue "sigs.k8s.io/kueue/pkg/util/queue"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
+	"sigs.k8s.io/kueue/pkg/workload"
 	"sigs.k8s.io/kueue/test/integration/framework"
 	"sigs.k8s.io/kueue/test/util"
 )
@@ -1515,5 +1518,135 @@ var _ = ginkgo.Describe("Scheduler with AdmissionFairSharing = nil", ginkgo.Labe
 			gomega.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(lqA), lqA)).To(gomega.Succeed())
 			gomega.Expect(lqA.Status.FairSharing).Should(gomega.BeNil())
 		})
+	})
+})
+
+var _ = ginkgo.Describe("Preemption Loop Reproduction with Sleep and 0 Nominal Quota", ginkgo.Label("feature:fairsharing"), func() {
+	var (
+		ns        *corev1.Namespace
+		flavorS2B *kueue.ResourceFlavor
+		cohort    *kueue.Cohort
+		cq1       *kueue.ClusterQueue
+		cq2       *kueue.ClusterQueue
+		lq1       *kueue.LocalQueue
+		lq2       *kueue.LocalQueue
+	)
+
+	ginkgo.BeforeEach(func() {
+		features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.AdmissionFairSharing, true)
+		fwk.StartManager(ctx, cfg, managerAndSchedulerSetupWithFairSharing(
+			&config.FairSharing{
+				PreemptionStrategies: []config.PreemptionStrategy{config.LessThanInitialShare},
+			},
+			nil,
+		))
+		flavorS2B = utiltestingapi.MakeResourceFlavor("flavor-s2b").Obj()
+		util.MustCreate(ctx, k8sClient, flavorS2B)
+
+		ns = util.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "fair-s2b-")
+	})
+
+	ginkgo.AfterEach(func() {
+		gomega.Expect(util.DeleteNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
+		util.ExpectObjectToBeDeleted(ctx, k8sClient, cq1, true)
+		util.ExpectObjectToBeDeleted(ctx, k8sClient, cq2, true)
+		util.ExpectObjectToBeDeleted(ctx, k8sClient, cohort, true)
+		util.ExpectObjectToBeDeleted(ctx, k8sClient, flavorS2B, true)
+		fwk.StopManager(ctx)
+	})
+
+	ginkgo.It("re-admits wlcq1 ahead of wlcq2-new after real-time AFS usage decay", func() {
+		cohort = utiltestingapi.MakeCohort("cohort-s2b").
+			ResourceGroup(
+				*utiltestingapi.MakeFlavorQuotas("flavor-s2b").Resource(corev1.ResourceCPU, "10").Obj(),
+			).Obj()
+		util.MustCreate(ctx, k8sClient, cohort)
+
+		cq1 = utiltestingapi.MakeClusterQueue("cq1").
+			Cohort("cohort-s2b").
+			FairWeight(resource.MustParse("1")).
+			ResourceGroup(
+				*utiltestingapi.MakeFlavorQuotas("flavor-s2b").Resource(corev1.ResourceCPU, "0").Obj(),
+			).
+			Preemption(kueue.ClusterQueuePreemption{
+				ReclaimWithinCohort: kueue.PreemptionPolicyAny,
+				WithinClusterQueue:  kueue.PreemptionPolicyLowerPriority,
+			}).Obj()
+		util.MustCreate(ctx, k8sClient, cq1)
+
+		cq2 = utiltestingapi.MakeClusterQueue("cq2").
+			Cohort("cohort-s2b").
+			FairWeight(resource.MustParse("1")).
+			ResourceGroup(
+				*utiltestingapi.MakeFlavorQuotas("flavor-s2b").Resource(corev1.ResourceCPU, "0").Obj(),
+			).
+			Preemption(kueue.ClusterQueuePreemption{
+				ReclaimWithinCohort: kueue.PreemptionPolicyAny,
+				WithinClusterQueue:  kueue.PreemptionPolicyLowerPriority,
+			}).Obj()
+		util.MustCreate(ctx, k8sClient, cq2)
+
+		lq1 = utiltestingapi.MakeLocalQueue("lq1", ns.Name).
+			ClusterQueue(cq1.Name).
+			FairSharing(&kueue.FairSharing{Weight: ptr.To(resource.MustParse("1"))}).Obj()
+		util.MustCreate(ctx, k8sClient, lq1)
+
+		lq2 = utiltestingapi.MakeLocalQueue("lq2", ns.Name).
+			ClusterQueue(cq2.Name).
+			FairSharing(&kueue.FairSharing{Weight: ptr.To(resource.MustParse("1"))}).Obj()
+		util.MustCreate(ctx, k8sClient, lq2)
+
+		ginkgo.By("Creating wlcq1 in cq1 requesting 5 CPU")
+		wlcq1 := utiltestingapi.MakeWorkload("wlcq1", ns.Name).
+			Queue(kueue.LocalQueueName(lq1.Name)).
+			Request(corev1.ResourceCPU, "5").
+			Obj()
+		util.MustCreate(ctx, k8sClient, wlcq1)
+		util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wlcq1)
+		util.ExpectReservingActiveWorkloadsMetric(cq1, 1)
+
+		ginkgo.By("Creating wlcq2-running in cq2 requesting 5 CPU")
+		wlcq2Running := utiltestingapi.MakeWorkload("wlcq2-running", ns.Name).
+			Queue(kueue.LocalQueueName(lq2.Name)).
+			Request(corev1.ResourceCPU, "5").
+			Obj()
+		util.MustCreate(ctx, k8sClient, wlcq2Running)
+		util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wlcq2Running)
+		util.ExpectReservingActiveWorkloadsMetric(cq2, 1)
+
+		var wlcq1EvictedCount atomic.Int32
+		autoEvictionCtx, cancelAutoEviction := context.WithCancel(ctx)
+		defer cancelAutoEviction()
+		go func() {
+			for {
+				select {
+				case <-autoEvictionCtx.Done():
+					return
+				default:
+					var wl kueue.Workload
+					if err := k8sClient.Get(autoEvictionCtx, client.ObjectKeyFromObject(wlcq1), &wl); err == nil {
+						if workload.IsEvicted(&wl) && workload.HasQuotaReservation(&wl) {
+							util.FinishEvictionForWorkloads(autoEvictionCtx, k8sClient, &wl)
+							wlcq1EvictedCount.Add(1)
+						}
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+			}
+		}()
+
+		ginkgo.By("Creating wlcq2-new in cq2 requesting 5 CPU which requires preemption of wlcq1")
+		wlcq2New := utiltestingapi.MakeWorkload("wlcq2-new", ns.Name).
+			Queue(kueue.LocalQueueName(lq2.Name)).
+			Request(corev1.ResourceCPU, "5").
+			Obj()
+		util.MustCreate(ctx, k8sClient, wlcq2New)
+
+		ginkgo.By("Verifying that wlcq2-new remains unadmitted due to the preemption/re-admission loop")
+		gomega.Consistently(func(g gomega.Gomega) bool {
+			var updatedWlcq2New kueue.Workload
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wlcq2New), &updatedWlcq2New)).To(gomega.Succeed())
+			return workload.IsAdmitted(&updatedWlcq2New)
+		}, util.MediumTimeout, util.Interval).Should(gomega.BeFalse(), "wlcq2-new should remain unadmitted")
 	})
 })
