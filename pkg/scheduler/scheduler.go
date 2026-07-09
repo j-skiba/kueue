@@ -527,6 +527,9 @@ func (s *Scheduler) issuePreemptions(ctx context.Context, log logr.Logger, e *en
 		log.Error(err, "Failed to preempt workloads")
 	}
 	e.markPreemptionOutcome(preempted, errors)
+	if preempted > 0 {
+		time.Sleep(3 * time.Second)
+	}
 }
 
 // waitForPodsReadyIfBlocked blocks admission until all currently admitted
