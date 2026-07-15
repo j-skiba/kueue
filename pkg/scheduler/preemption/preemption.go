@@ -623,10 +623,7 @@ func cqIsBorrowing(cq *schdcache.ClusterQueueSnapshot, frsNeedPreemption sets.Se
 // if it belongs to one.
 func workloadFits(preemptionCtx *preemptionCtx, allowBorrowing bool) bool {
 	wlKey := workload.Key(preemptionCtx.preemptor.Obj)
-	res, ok := preemptionCtx.snapshot.PreemptionReservations[wlKey]
-	if !ok {
-		res, ok = preemptionCtx.snapshot.GenericReservations[wlKey]
-	}
+	res, ok := preemptionCtx.snapshot.Reservations[wlKey]
 	if ok && len(res.Usage) > 0 {
 		revert := preemptionCtx.preemptorCQ.SimulateReservationRemoval(res.Usage)
 		defer revert()

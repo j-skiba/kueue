@@ -54,10 +54,7 @@ type Snapshot struct {
 	ResourceFlavors          map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor
 	InactiveClusterQueueSets sets.Set[kueue.ClusterQueueReference]
 
-	PreemptionReservations map[workload.Reference]*ReservationInfo
-	// Reservations for workloads at the head of a StrictFIFO queue to block
-	// capacity across cycles without needing preemption targets.
-	GenericReservations map[workload.Reference]*ReservationInfo
+	Reservations map[workload.Reference]*ReservationInfo
 	// Workloads with active reservations accounted for in the snapshot's usage
 	// to avoid double-counting or conflicts.
 	AppliedReservations sets.Set[workload.Reference]
@@ -111,13 +108,8 @@ func (s *Snapshot) SimulateLowerPriorityReservationsRemoval(priority int64) func
 		usage resources.FlavorResourceQuantities
 	}
 	var cqUsages []cqResUsage
-	for wlKey, res := range s.PreemptionReservations {
-		if res.OwnerPriority < priority && s.AppliedReservations.Has(wlKey) {
-			cqUsages = append(cqUsages, cqResUsage{cq: res.ClusterQueue, usage: res.Usage})
-		}
-	}
-	for _, res := range s.GenericReservations {
-		if res.OwnerPriority < priority {
+	for wlKey, res := range s.Reservations {
+		if res.OwnerPriority < priority && (res.Victims.Len() == 0 || s.AppliedReservations.Has(wlKey)) {
 			cqUsages = append(cqUsages, cqResUsage{cq: res.ClusterQueue, usage: res.Usage})
 		}
 	}
@@ -216,8 +208,7 @@ func (c *Cache) Snapshot(ctx context.Context, options ...SnapshotOption) (*Snaps
 		Manager:                  hierarchy.NewManager(newCohortSnapshot),
 		ResourceFlavors:          make(map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor, len(c.resourceFlavors)),
 		InactiveClusterQueueSets: sets.New[kueue.ClusterQueueReference](),
-		PreemptionReservations:   make(map[workload.Reference]*ReservationInfo, len(c.preemptionReservations)),
-		GenericReservations:      make(map[workload.Reference]*ReservationInfo, len(c.genericReservations)),
+		Reservations:             make(map[workload.Reference]*ReservationInfo, len(c.reservations)),
 		AppliedReservations:      sets.New[workload.Reference](),
 	}
 	for _, cohort := range c.hm.Cohorts() {
@@ -294,8 +285,8 @@ func (c *Cache) Snapshot(ctx context.Context, options ...SnapshotOption) (*Snaps
 		wlKey workload.Reference
 		res   *ReservationInfo
 	}
-	for wlKey, res := range c.preemptionReservations {
-		snap.PreemptionReservations[wlKey] = res
+	for wlKey, res := range c.reservations {
+		snap.Reservations[wlKey] = res
 		sortedReservations = append(sortedReservations, struct {
 			wlKey workload.Reference
 			res   *ReservationInfo
@@ -325,15 +316,6 @@ func (c *Cache) Snapshot(ctx context.Context, options ...SnapshotOption) (*Snaps
 		cqSnap.AddReservation(res.Usage)
 		coveredVictims = coveredVictims.Union(res.Victims)
 		snap.AppliedReservations.Insert(entry.wlKey)
-	}
-
-	for wlKey, res := range c.genericReservations {
-		snap.GenericReservations[wlKey] = res
-		cqSnap := snap.ClusterQueue(res.ClusterQueue)
-		if cqSnap == nil {
-			continue
-		}
-		cqSnap.AddReservation(res.Usage)
 	}
 
 	return &snap, nil

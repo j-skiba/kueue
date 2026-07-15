@@ -507,7 +507,7 @@ func (s *Scheduler) reserveCapacityForUnreclaimablePreempt(log logr.Logger, e *e
 		cq.AddUsage(usage)
 	}
 	if cq.QueueingStrategy == kueue.StrictFIFO {
-		s.cache.AddGenericReservation(&e.Info, usage.Quota, cq.Name, int64(priority.Priority(e.Obj)))
+		s.cache.AddReservation(&e.Info, usage.Quota, nil, cq.Name, int64(priority.Priority(e.Obj)))
 	}
 }
 
@@ -539,7 +539,7 @@ func (s *Scheduler) issuePreemptions(ctx context.Context, log logr.Logger, e *en
 		for _, target := range preemptionTargets {
 			victimKeys = append(victimKeys, workload.Key(target.WorkloadInfo.Obj))
 		}
-		s.cache.AddPreemptionReservation(&e.Info, e.assignmentUsage(log).Quota, victimKeys, e.clusterQueueSnapshot.Name, int64(priority.Priority(e.Obj)))
+		s.cache.AddReservation(&e.Info, e.assignmentUsage(log).Quota, victimKeys, e.clusterQueueSnapshot.Name, int64(priority.Priority(e.Obj)))
 	}
 	e.markPreemptionOutcome(preempted, errors)
 }
@@ -676,10 +676,7 @@ func (s *Scheduler) updateAssignmentIfNeeded(log logr.Logger,
 	cq *schdcache.ClusterQueueSnapshot,
 	preemptedWorkloads preemption.PreemptedWorkloads) (workload.Usage, bool) {
 	usage := e.assignmentUsage(log)
-	wlReservation := snapshot.PreemptionReservations[workload.Key(e.Obj)]
-	if wlReservation == nil {
-		wlReservation = snapshot.GenericReservations[workload.Key(e.Obj)]
-	}
+	wlReservation := snapshot.Reservations[workload.Key(e.Obj)]
 	var excludedUsage resources.FlavorResourceQuantities
 	if wlReservation != nil {
 		excludedUsage = wlReservation.Usage
@@ -790,10 +787,7 @@ func (s *Scheduler) getInitialAssignments(log logr.Logger, wl *workload.Info, sn
 	cq := snap.ClusterQueue(wl.ClusterQueue)
 
 	preemptionTargets, replaceableWorkloadSlice := workloadslicing.ReplacedWorkloadSlice(wl, snap)
-	wlReservation := snap.PreemptionReservations[workload.Key(wl.Obj)]
-	if wlReservation == nil {
-		wlReservation = snap.GenericReservations[workload.Key(wl.Obj)]
-	}
+	wlReservation := snap.Reservations[workload.Key(wl.Obj)]
 	flvAssigner := flavorassigner.New(wl, cq, snap.ResourceFlavors, fairsharing.Enabled(s.fairSharing), preemption.NewOracle(s.preemptor, snap), replaceableWorkloadSlice, wlReservation, snap.AppliedReservations, s.quotaCheckStrategy)
 	fullAssignment := flvAssigner.Assign(log, nil)
 

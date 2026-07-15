@@ -60,7 +60,7 @@ var snapCmpOpts = cmp.Options{
 	cmpopts.IgnoreFields(schdcache.CohortSnapshot{}, "Cohort"),
 	cmp.AllowUnexported(schdcache.ClusterQueueSnapshot{}, schdcache.CohortSnapshot{}),
 	cmpopts.IgnoreFields(schdcache.ClusterQueueSnapshot{}, "ClusterQueue"),
-	cmpopts.IgnoreFields(schdcache.Snapshot{}, "PreemptionReservations", "GenericReservations"),
+	cmpopts.IgnoreFields(schdcache.Snapshot{}, "Reservations"),
 	// Ignore Reservations in resourceNode
 	cmpopts.IgnoreFields(schdcache.NewResourceNode(), "Reservations"),
 }
