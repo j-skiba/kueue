@@ -2862,14 +2862,15 @@ var _ = ginkgo.Describe("Scheduler", func() {
 			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wlHigh)
 
 			createdWlLow := &kueue.Workload{}
-			gomega.Eventually(func(g gomega.Gomega) {
+			gomega.Consistently(func(g gomega.Gomega) {
 				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wlLow), createdWlLow)).Should(gomega.Succeed())
 				g.Expect(workload.IsAdmitted(createdWlLow)).Should(gomega.BeFalse())
 				g.Expect(meta.FindStatusCondition(createdWlLow.Status.Conditions, kueue.WorkloadEvicted)).To(gomega.BeNil())
-			}, util.Timeout, util.Interval).Should(gomega.Succeed())
+			}, util.ConsistentDuration, util.Interval).Should(gomega.Succeed())
 
-			ginkgo.By("Verify preemption metrics")
+			ginkgo.By("Verify preemption and admission metrics")
 			util.ExpectEvictedWorkloadsTotalMetric(clusterQueue.Name, kueue.WorkloadEvictedByPreemption, "", "", 2)
+			util.ExpectAdmittedWorkloadsTotalMetric(clusterQueue, "", 3)
 		})
 	})
 

@@ -99,32 +99,32 @@ func (s *Snapshot) SimulateWorkloadRemoval(workloads []*workload.Info) func() {
 	}
 }
 
+type clusterQueueReservedUsage struct {
+	clusterQueue  kueue.ClusterQueueReference
+	reservedUsage resources.FlavorResourceQuantities
+}
+
 // SimulateLowerPriorityReservationsRemoval modifies the snapshot by removing reservations
 // held by workloads with priority strictly lower than the given priority.
 // Returns a function to restore the snapshot state.
 func (s *Snapshot) SimulateLowerPriorityReservationsRemoval(priority int64) func() {
-	type cqResUsage struct {
-		cq    kueue.ClusterQueueReference
-		usage resources.FlavorResourceQuantities
-	}
-	var cqUsages []cqResUsage
+	var removedReservations []clusterQueueReservedUsage
 	for wlKey, res := range s.Reservations {
 		if res.OwnerPriority < priority && (res.Victims.Len() == 0 || s.AppliedReservations.Has(wlKey)) {
-			cqUsages = append(cqUsages, cqResUsage{cq: res.ClusterQueue, usage: res.Usage})
+			if cq := s.ClusterQueue(res.ClusterQueue); cq != nil {
+				cq.RemoveReservation(res.Usage)
+				removedReservations = append(removedReservations, clusterQueueReservedUsage{
+					clusterQueue:  res.ClusterQueue,
+					reservedUsage: res.Usage,
+				})
+			}
 		}
 	}
 
-	for _, cqUsage := range cqUsages {
-		cq := s.ClusterQueue(cqUsage.cq)
-		if cq != nil {
-			cq.RemoveReservation(cqUsage.usage)
-		}
-	}
 	return func() {
-		for _, cqUsage := range cqUsages {
-			cq := s.ClusterQueue(cqUsage.cq)
-			if cq != nil {
-				cq.AddReservation(cqUsage.usage)
+		for _, entry := range removedReservations {
+			if cq := s.ClusterQueue(entry.clusterQueue); cq != nil {
+				cq.AddReservation(entry.reservedUsage)
 			}
 		}
 	}

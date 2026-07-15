@@ -124,7 +124,6 @@ type ClusterQueue struct {
 	heap              heap.Heap[workload.Info, workload.Reference]
 	namespaceSelector labels.Selector
 	active            bool
-	sw                *stickyWorkload
 
 	// inadmissibleWorkloads are workloads that have been tried at least once and couldn't be admitted.
 	inadmissibleWorkloads inadmissibleWorkloads
@@ -268,7 +267,6 @@ func newClusterQueueImpl(ctx context.Context, client client.Client, wo workload.
 		clock:                     clock,
 		afsEntryPenalties:         options.afsEntryPenalties,
 		localQueuesInClusterQueue: make(map[utilqueue.LocalQueueReference]bool),
-		sw:                        &sw,
 		pendingResourcesTotal:     make(map[corev1.ResourceName]int64),
 	}
 }
@@ -893,17 +891,7 @@ func (c *ClusterQueue) Active() bool {
 // quotaReservedReason represents the WorkloadQuotaReserved condition reason computed by the scheduler.
 // Returns true if the workload was inserted.
 func (c *ClusterQueue) RequeueIfNotPresent(ctx context.Context, wInfo *workload.Info, reason RequeueReason, quotaReservedReason QuotaReservedReason) bool {
-	// when preemptions are in-progress, we keep attempting to
-	// schedule the same workload for BestEffortFIFO queues. See
-	// documentation of stickyWorkload for more details
 	log := ctrl.LoggerFrom(ctx)
-	if (reason == RequeueReasonPendingPreemption || reason == RequeueReasonPendingMigration) && c.queueingStrategy == kueue.BestEffortFIFO {
-		if logV := log.V(5); logV.Enabled() {
-			logV.Info("Setting sticky workload", "clusterQueue", wInfo.ClusterQueue, "workload", workload.Key(wInfo.Obj))
-		}
-		c.sw.set(workload.Key(wInfo.Obj))
-	}
-
 	var immediate bool
 	if c.queueingStrategy == kueue.StrictFIFO {
 		immediate = reason != RequeueReasonNamespaceMismatch

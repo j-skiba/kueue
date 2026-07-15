@@ -8192,13 +8192,9 @@ func TestEntryComparerLess(t *testing.T) {
 					}},
 				},
 			},
-			requestedFRs: map[workload.Reference]resources.FlavorResourceQuantities{
-				"default/lower-drs":  {cpuDefault: resources.NewAmount(1)},
-				"default/higher-drs": {cpuDefault: resources.NewAmount(1)},
-			},
 			drsValues: map[drsKey]schdcache.DRS{
 				{parentCohort: cohort, workloadKey: "default/lower-drs"}:  schdcache.NegativeDRS(),
-				{parentCohort: cohort, workloadKey: "default/higher-drs"}: schdcache.BorrowingDRS(cpuDefault),
+				{parentCohort: cohort, workloadKey: "default/higher-drs"}: {},
 			},
 			wantLess: true,
 		},

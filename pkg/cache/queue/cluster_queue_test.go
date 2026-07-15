@@ -1044,11 +1044,6 @@ func TestBestEffortFIFORequeueIfNotPresent(t *testing.T) {
 				t.Errorf("Unexpected inadmissible status (-want,+got):\n%s", diff)
 			}
 
-			gotSticky := cq.sw.matches(workload.Key(wl))
-			if diff := cmp.Diff(tc.wantSticky, gotSticky); diff != "" {
-				t.Errorf("Unexpected sticky status (-want,+got):\n%s", diff)
-			}
-
 			if ok := cq.RequeueIfNotPresent(ctx, workload.NewInfo(wl), tc.reason, ""); ok {
 				t.Error("Re-queued a workload that was already present")
 			}

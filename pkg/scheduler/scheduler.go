@@ -56,6 +56,7 @@ import (
 	utilqueue "sigs.k8s.io/kueue/pkg/util/queue"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	"sigs.k8s.io/kueue/pkg/util/routine"
+	utilslices "sigs.k8s.io/kueue/pkg/util/slices"
 	"sigs.k8s.io/kueue/pkg/util/wait"
 	"sigs.k8s.io/kueue/pkg/workload"
 	"sigs.k8s.io/kueue/pkg/workload/concurrentadmission"
@@ -535,10 +536,9 @@ func (s *Scheduler) issuePreemptions(ctx context.Context, log logr.Logger, e *en
 		log.Error(err, "Failed to preempt workloads")
 	}
 	if preempted != 0 {
-		var victimKeys []workload.Reference
-		for _, target := range preemptionTargets {
-			victimKeys = append(victimKeys, workload.Key(target.WorkloadInfo.Obj))
-		}
+		victimKeys := utilslices.Map(preemptionTargets, func(target **preemption.Target) workload.Reference {
+			return workload.Key((*target).WorkloadInfo.Obj)
+		})
 		s.cache.AddReservation(&e.Info, e.assignmentUsage(log).Quota, victimKeys, e.clusterQueueSnapshot.Name, int64(priority.Priority(e.Obj)))
 	}
 	e.markPreemptionOutcome(preempted, errors)
