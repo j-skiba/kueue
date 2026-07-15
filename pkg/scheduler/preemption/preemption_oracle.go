@@ -21,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
+	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/classical"
 	preemptioncommon "sigs.k8s.io/kueue/pkg/scheduler/preemption/common"
@@ -45,14 +46,17 @@ func (p *PreemptionOracle) SimulatePreemption(
 	fr resources.FlavorResource,
 	quantity resources.Amount,
 ) (preemptioncommon.PreemptionPossibility, int) {
-	wlReservation := p.snapshot.Reservations[workload.Key(wl.Obj)]
+	var wlPreadmissionReservation *schdcache.ReservationInfo
+	if features.Enabled(features.PreadmissionReservations) {
+		wlPreadmissionReservation = p.snapshot.PreadmissionReservations[workload.Key(wl.Obj)]
+	}
 	var excludedUsage resources.FlavorResourceQuantities
-	if wlReservation != nil {
-		excludedUsage = wlReservation.Usage
+	if wlPreadmissionReservation != nil && p.snapshot.AppliedPreadmissionReservations.Has(workload.Key(wl.Obj)) {
+		excludedUsage = wlPreadmissionReservation.Usage
 	}
 
 	if len(excludedUsage) > 0 {
-		revert := cq.SimulateReservationRemoval(excludedUsage)
+		revert := cq.SimulatePreadmissionReservationRemoval(excludedUsage)
 		defer revert()
 	}
 	candidates := p.preemptor.getTargets(&preemptionCtx{

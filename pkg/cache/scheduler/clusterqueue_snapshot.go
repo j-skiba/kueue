@@ -108,12 +108,12 @@ func (c *ClusterQueueSnapshot) SimulateUsageRemoval(usage workload.Usage) func()
 	}
 }
 
-// SimulateReservationRemoval modifies the snapshot by removing reservation usage, and
+// SimulatePreadmissionReservationRemoval modifies the snapshot by removing reservation usage, and
 // returns a function used to restore the usage.
-func (c *ClusterQueueSnapshot) SimulateReservationRemoval(usage resources.FlavorResourceQuantities) func() {
-	c.RemoveReservation(usage)
+func (c *ClusterQueueSnapshot) SimulatePreadmissionReservationRemoval(usage resources.FlavorResourceQuantities) func() {
+	c.RemovePreadmissionReservation(usage)
 	return func() {
-		c.AddReservation(usage)
+		c.AddPreadmissionReservation(usage)
 	}
 }
 
@@ -131,26 +131,26 @@ func (c *ClusterQueueSnapshot) RemoveUsage(usage workload.Usage) {
 	c.updateTASUsage(usage.TAS, subtract)
 }
 
-func (c *ClusterQueueSnapshot) AddReservation(usage resources.FlavorResourceQuantities) {
+func (c *ClusterQueueSnapshot) AddPreadmissionReservation(usage resources.FlavorResourceQuantities) {
 	for fr, q := range usage {
-		addReservation(c, fr, q)
+		addPreadmissionReservation(c, fr, q)
 	}
 }
 
-func (c *ClusterQueueSnapshot) RemoveReservation(usage resources.FlavorResourceQuantities) {
+func (c *ClusterQueueSnapshot) RemovePreadmissionReservation(usage resources.FlavorResourceQuantities) {
 	for fr, q := range usage {
-		removeReservation(c, fr, q)
+		removePreadmissionReservation(c, fr, q)
 	}
 }
 
-func (c *ClusterQueueSnapshot) RemoveAllReservations() {
-	if len(c.ResourceNode.Reservations) == 0 {
+func (c *ClusterQueueSnapshot) RemoveAllPreadmissionReservations() {
+	if len(c.ResourceNode.PreadmissionReservations) == 0 {
 		return
 	}
-	for fr, q := range c.ResourceNode.Reservations {
-		removeUsage(c, fr, q)
+	for fr, q := range c.ResourceNode.PreadmissionReservations {
+		removePreadmissionReservation(c, fr, q)
 	}
-	c.ResourceNode.Reservations = nil
+	c.ResourceNode.PreadmissionReservations = nil
 }
 
 func (c *ClusterQueueSnapshot) updateTASUsage(usage workload.TASUsage, op usageOp) {
@@ -167,8 +167,8 @@ func (c *ClusterQueueSnapshot) updateTASUsage(usage workload.TASUsage, op usageO
 }
 
 func (c *ClusterQueueSnapshot) Fits(usage workload.Usage, excludedUsage resources.FlavorResourceQuantities) FitsCheck {
-	if len(excludedUsage) > 0 {
-		revert := c.SimulateReservationRemoval(excludedUsage)
+	if features.Enabled(features.PreadmissionReservations) && len(excludedUsage) > 0 {
+		revert := c.SimulatePreadmissionReservationRemoval(excludedUsage)
 		defer revert()
 	}
 	for fr, q := range usage.Quota {

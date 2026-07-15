@@ -162,6 +162,8 @@ type ClusterQueue struct {
 	afsEntryPenalties         *queueafs.AfsEntryPenalties
 	localQueuesInClusterQueue map[utilqueue.LocalQueueReference]bool
 
+	sw *stickyWorkload
+
 	ConcurrentAdmissionPolicy *kueue.ConcurrentAdmissionPolicy
 	// pendingResourcesTotal is the incremental sum of TotalRequests across workloads
 	// in heap and inadmissibleWorkloads (not inflight). Updated at each mutation site so
@@ -267,6 +269,7 @@ func newClusterQueueImpl(ctx context.Context, client client.Client, wo workload.
 		clock:                     clock,
 		afsEntryPenalties:         options.afsEntryPenalties,
 		localQueuesInClusterQueue: make(map[utilqueue.LocalQueueReference]bool),
+		sw:                        &sw,
 		pendingResourcesTotal:     make(map[corev1.ResourceName]int64),
 	}
 }
@@ -499,6 +502,12 @@ func (c *ClusterQueue) delete(log logr.Logger, key workload.Reference) {
 	}
 	c.heap.Delete(key)
 	c.forgetInflightByKey(key)
+	if !features.Enabled(features.PreadmissionReservations) && c.sw.matches(key) {
+		if logV := log.V(5); logV.Enabled() {
+			logV.Info("Clearing sticky workload due to deletion", "clusterQueue", c.name, "workload", key)
+		}
+		c.sw.clear()
+	}
 }
 
 // DeleteFromLocalQueue removes all workloads belonging to this queue from
@@ -892,6 +901,13 @@ func (c *ClusterQueue) Active() bool {
 // Returns true if the workload was inserted.
 func (c *ClusterQueue) RequeueIfNotPresent(ctx context.Context, wInfo *workload.Info, reason RequeueReason, quotaReservedReason QuotaReservedReason) bool {
 	log := ctrl.LoggerFrom(ctx)
+	if !features.Enabled(features.PreadmissionReservations) && (reason == RequeueReasonPendingPreemption || reason == RequeueReasonPendingMigration) && c.queueingStrategy == kueue.BestEffortFIFO {
+		if logV := log.V(5); logV.Enabled() {
+			logV.Info("Setting sticky workload", "clusterQueue", wInfo.ClusterQueue, "workload", workload.Key(wInfo.Obj))
+		}
+		c.sw.set(workload.Key(wInfo.Obj))
+	}
+
 	var immediate bool
 	if c.queueingStrategy == kueue.StrictFIFO {
 		immediate = reason != RequeueReasonNamespaceMismatch
@@ -907,15 +923,17 @@ func (c *ClusterQueue) RequeueIfNotPresent(ctx context.Context, wInfo *workload.
 // baseCompareFunc orders workloads by priority, timestamp, and UID.
 func baseCompareFunc(log logr.Logger, wo workload.Ordering, sw *stickyWorkload) func(a, b *workload.Info) int {
 	return func(a, b *workload.Info) int {
-		aSticky := sw.matches(workload.Key(a.Obj))
-		bSticky := sw.matches(workload.Key(b.Obj))
-		if aSticky != bSticky {
-			if aSticky {
-				logStickyWorkloadSelectionIfVerbose(log, a.Obj)
-				return -1
+		if !features.Enabled(features.PreadmissionReservations) {
+			aSticky := sw.matches(workload.Key(a.Obj))
+			bSticky := sw.matches(workload.Key(b.Obj))
+			if aSticky != bSticky {
+				if aSticky {
+					logStickyWorkloadSelectionIfVerbose(log, a.Obj)
+					return -1
+				}
+				logStickyWorkloadSelectionIfVerbose(log, b.Obj)
+				return 1
 			}
-			logStickyWorkloadSelectionIfVerbose(log, b.Obj)
-			return 1
 		}
 
 		p1 := utilpriority.EffectivePriority(log, a.Obj)

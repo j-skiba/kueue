@@ -54,10 +54,10 @@ type Snapshot struct {
 	ResourceFlavors          map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor
 	InactiveClusterQueueSets sets.Set[kueue.ClusterQueueReference]
 
-	Reservations map[workload.Reference]*ReservationInfo
+	PreadmissionReservations map[workload.Reference]*ReservationInfo
 	// Workloads with active reservations accounted for in the snapshot's usage
 	// to avoid double-counting or conflicts.
-	AppliedReservations sets.Set[workload.Reference]
+	AppliedPreadmissionReservations sets.Set[workload.Reference]
 }
 
 // RemoveWorkload removes a workload from its corresponding ClusterQueue and
@@ -104,15 +104,15 @@ type clusterQueueReservedUsage struct {
 	reservedUsage resources.FlavorResourceQuantities
 }
 
-// SimulateLowerPriorityReservationsRemoval modifies the snapshot by removing reservations
+// SimulateLowerPriorityPreadmissionReservationsRemoval modifies the snapshot by removing reservations
 // held by workloads with priority strictly lower than the given priority.
 // Returns a function to restore the snapshot state.
-func (s *Snapshot) SimulateLowerPriorityReservationsRemoval(priority int64) func() {
+func (s *Snapshot) SimulateLowerPriorityPreadmissionReservationsRemoval(priority int64) func() {
 	var removedReservations []clusterQueueReservedUsage
-	for wlKey, res := range s.Reservations {
-		if res.OwnerPriority < priority && (res.Victims.Len() == 0 || s.AppliedReservations.Has(wlKey)) {
+	for wlKey, res := range s.PreadmissionReservations {
+		if res != nil && res.OwnerPriority < priority && (res.Victims.Len() == 0 || s.AppliedPreadmissionReservations.Has(wlKey)) {
 			if cq := s.ClusterQueue(res.ClusterQueue); cq != nil {
-				cq.RemoveReservation(res.Usage)
+				cq.RemovePreadmissionReservation(res.Usage)
 				removedReservations = append(removedReservations, clusterQueueReservedUsage{
 					clusterQueue:  res.ClusterQueue,
 					reservedUsage: res.Usage,
@@ -124,7 +124,7 @@ func (s *Snapshot) SimulateLowerPriorityReservationsRemoval(priority int64) func
 	return func() {
 		for _, entry := range removedReservations {
 			if cq := s.ClusterQueue(entry.clusterQueue); cq != nil {
-				cq.AddReservation(entry.reservedUsage)
+				cq.AddPreadmissionReservation(entry.reservedUsage)
 			}
 		}
 	}
@@ -205,11 +205,11 @@ func (c *Cache) Snapshot(ctx context.Context, options ...SnapshotOption) (*Snaps
 	}
 
 	snap := Snapshot{
-		Manager:                  hierarchy.NewManager(newCohortSnapshot),
-		ResourceFlavors:          make(map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor, len(c.resourceFlavors)),
-		InactiveClusterQueueSets: sets.New[kueue.ClusterQueueReference](),
-		Reservations:             make(map[workload.Reference]*ReservationInfo, len(c.reservations)),
-		AppliedReservations:      sets.New[workload.Reference](),
+		Manager:                         hierarchy.NewManager(newCohortSnapshot),
+		ResourceFlavors:                 make(map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor, len(c.resourceFlavors)),
+		InactiveClusterQueueSets:        sets.New[kueue.ClusterQueueReference](),
+		PreadmissionReservations:        make(map[workload.Reference]*ReservationInfo, len(c.preadmissionReservations)),
+		AppliedPreadmissionReservations: sets.New[workload.Reference](),
 	}
 	for _, cohort := range c.hm.Cohorts() {
 		if hierarchy.HasCycle(cohort) {
@@ -280,42 +280,51 @@ func (c *Cache) Snapshot(ctx context.Context, options ...SnapshotOption) (*Snaps
 	// Shallow copy is enough
 	maps.Copy(snap.ResourceFlavors, c.resourceFlavors)
 
-	// Gather and sort reservations by priority descending
-	var sortedReservations []struct {
-		wlKey workload.Reference
-		res   *ReservationInfo
-	}
-	for wlKey, res := range c.reservations {
-		snap.Reservations[wlKey] = res
-		sortedReservations = append(sortedReservations, struct {
+	if features.Enabled(features.PreadmissionReservations) {
+		// Gather and sort reservations by priority descending
+		var sortedReservations []struct {
 			wlKey workload.Reference
 			res   *ReservationInfo
-		}{wlKey, res})
-	}
-	slices.SortFunc(sortedReservations, func(a, b struct {
-		wlKey workload.Reference
-		res   *ReservationInfo
-	}) int {
-		return cmp.Compare(b.res.OwnerPriority, a.res.OwnerPriority)
-	})
-
-	for _, cqSnap := range snap.ClusterQueues() {
-		cqSnap.RemoveAllReservations()
-	}
-
-	coveredVictims := sets.New[workload.Reference]()
-	for _, entry := range sortedReservations {
-		res := entry.res
-		if res.Victims.Intersection(coveredVictims).Len() > 0 {
-			continue
 		}
-		cqSnap := snap.ClusterQueue(res.ClusterQueue)
-		if cqSnap == nil {
-			continue
+		for wlKey, res := range c.preadmissionReservations {
+			if res == nil {
+				continue
+			}
+			clonedRes := res.Clone()
+			snap.PreadmissionReservations[wlKey] = clonedRes
+			sortedReservations = append(sortedReservations, struct {
+				wlKey workload.Reference
+				res   *ReservationInfo
+			}{wlKey, clonedRes})
 		}
-		cqSnap.AddReservation(res.Usage)
-		coveredVictims = coveredVictims.Union(res.Victims)
-		snap.AppliedReservations.Insert(entry.wlKey)
+		slices.SortFunc(sortedReservations, func(a, b struct {
+			wlKey workload.Reference
+			res   *ReservationInfo
+		}) int {
+			if c := cmp.Compare(b.res.OwnerPriority, a.res.OwnerPriority); c != 0 {
+				return c
+			}
+			return cmp.Compare(a.wlKey, b.wlKey)
+		})
+
+		for _, cqSnap := range snap.ClusterQueues() {
+			cqSnap.RemoveAllPreadmissionReservations()
+		}
+
+		coveredVictims := sets.New[workload.Reference]()
+		for _, entry := range sortedReservations {
+			res := entry.res
+			if res.Victims.Intersection(coveredVictims).Len() > 0 {
+				continue
+			}
+			cqSnap := snap.ClusterQueue(res.ClusterQueue)
+			if cqSnap == nil {
+				continue
+			}
+			cqSnap.AddPreadmissionReservation(res.Usage)
+			coveredVictims = coveredVictims.Union(res.Victims)
+			snap.AppliedPreadmissionReservations.Insert(entry.wlKey)
+		}
 	}
 
 	return &snap, nil

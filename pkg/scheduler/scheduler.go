@@ -384,8 +384,11 @@ func (s *Scheduler) processEntry(
 	ctx = ctrl.LoggerInto(ctx, log)
 	log.V(2).Info("Attempting to schedule workload")
 
-	revertReservations := snapshot.SimulateLowerPriorityReservationsRemoval(int64(priority.Priority(e.Obj)))
-	defer revertReservations()
+	var revertReservations func()
+	if features.Enabled(features.PreadmissionReservations) {
+		revertReservations = snapshot.SimulateLowerPriorityPreadmissionReservationsRemoval(int64(priority.Priority(e.Obj)))
+		defer revertReservations()
+	}
 
 	if features.Enabled(features.ConcurrentAdmission) && concurrentadmission.IsVariant(e.Obj) {
 		if moreFavorableSibling := s.findAdmittedMoreFavorableSibling(&e.Info, snapshot); moreFavorableSibling != nil {
@@ -413,7 +416,9 @@ func (s *Scheduler) processEntry(
 		e.requeueReason = qcache.RequeueReasonNoFit
 		log.V(3).Info("Skipping workload as FlavorAssigner assigned NoFit mode")
 		e.quotaReservedReason = e.assignment.NoFitReason
-		s.cache.RemoveReservation(workload.Key(e.Obj))
+		if features.Enabled(features.PreadmissionReservations) {
+			s.cache.RemovePreadmissionReservation(workload.Key(e.Obj))
+		}
 		return
 	}
 
@@ -507,8 +512,8 @@ func (s *Scheduler) reserveCapacityForUnreclaimablePreempt(log logr.Logger, e *e
 	if !preemption.CanAlwaysReclaim(cq) {
 		cq.AddUsage(usage)
 	}
-	if cq.QueueingStrategy == kueue.StrictFIFO {
-		s.cache.AddReservation(&e.Info, usage.Quota, nil, cq.Name, int64(priority.Priority(e.Obj)))
+	if features.Enabled(features.PreadmissionReservations) && cq.QueueingStrategy == kueue.StrictFIFO {
+		s.cache.AddPreadmissionReservation(&e.Info, usage.Quota, nil, cq.Name, int64(priority.Priority(e.Obj)))
 	}
 }
 
@@ -535,11 +540,11 @@ func (s *Scheduler) issuePreemptions(ctx context.Context, log logr.Logger, e *en
 	if err != nil {
 		log.Error(err, "Failed to preempt workloads")
 	}
-	if preempted != 0 {
+	if features.Enabled(features.PreadmissionReservations) && preempted != 0 {
 		victimKeys := utilslices.Map(preemptionTargets, func(target **preemption.Target) workload.Reference {
 			return workload.Key((*target).WorkloadInfo.Obj)
 		})
-		s.cache.AddReservation(&e.Info, e.assignmentUsage(log).Quota, victimKeys, e.clusterQueueSnapshot.Name, int64(priority.Priority(e.Obj)))
+		s.cache.AddPreadmissionReservation(&e.Info, e.assignmentUsage(log).Quota, victimKeys, e.clusterQueueSnapshot.Name, int64(priority.Priority(e.Obj)))
 	}
 	e.markPreemptionOutcome(preempted, errors)
 }
@@ -658,9 +663,14 @@ func (s *Scheduler) nominate(ctx context.Context, workloads []workload.Info, sna
 				}
 			}
 		} else {
-			revertReservations := snap.SimulateLowerPriorityReservationsRemoval(int64(priority.Priority(w.Obj)))
+			var revertReservations func()
+			if features.Enabled(features.PreadmissionReservations) {
+				revertReservations = snap.SimulateLowerPriorityPreadmissionReservationsRemoval(int64(priority.Priority(w.Obj)))
+			}
 			assignment, targets := s.getAssignments(log, &e.Info, snap)
-			revertReservations()
+			if revertReservations != nil {
+				revertReservations()
+			}
 			e.recordAssignment(assignment, targets)
 			entries = append(entries, e)
 			continue
@@ -676,10 +686,13 @@ func (s *Scheduler) updateAssignmentIfNeeded(log logr.Logger,
 	cq *schdcache.ClusterQueueSnapshot,
 	preemptedWorkloads preemption.PreemptedWorkloads) (workload.Usage, bool) {
 	usage := e.assignmentUsage(log)
-	wlReservation := snapshot.Reservations[workload.Key(e.Obj)]
+	var wlPreadmissionReservation *schdcache.ReservationInfo
+	if features.Enabled(features.PreadmissionReservations) {
+		wlPreadmissionReservation = snapshot.PreadmissionReservations[workload.Key(e.Obj)]
+	}
 	var excludedUsage resources.FlavorResourceQuantities
-	if wlReservation != nil {
-		excludedUsage = wlReservation.Usage
+	if wlPreadmissionReservation != nil && snapshot.AppliedPreadmissionReservations.Has(workload.Key(e.Obj)) {
+		excludedUsage = wlPreadmissionReservation.Usage
 	}
 	fitsCheck := fits(snapshot, cq, &usage, preemptedWorkloads, e.preemptionTargets, excludedUsage)
 	if fitsCheck == schdcache.FitsCheckNoTAS && features.Enabled(features.TASRecomputeAssignmentWithinSchedulingCycle) {
@@ -688,9 +701,14 @@ func (s *Scheduler) updateAssignmentIfNeeded(log logr.Logger,
 		// reach all flavors from the nomination.
 		e.LastAssignment = nil
 		e.NominationMapping = e.readResourceToFlavorMapping()
-		revertReservations := snapshot.SimulateLowerPriorityReservationsRemoval(int64(priority.Priority(e.Obj)))
+		var revertReservations func()
+		if features.Enabled(features.PreadmissionReservations) {
+			revertReservations = snapshot.SimulateLowerPriorityPreadmissionReservationsRemoval(int64(priority.Priority(e.Obj)))
+		}
 		newAssignment, newTargets := s.getAssignments(log, &e.Info, snapshot)
-		revertReservations()
+		if revertReservations != nil {
+			revertReservations()
+		}
 		e.recordAssignment(newAssignment, newTargets)
 		usage = e.assignmentUsage(log)
 		fitsCheck = fits(snapshot, cq, &usage, preemptedWorkloads, newTargets, excludedUsage)
@@ -787,8 +805,11 @@ func (s *Scheduler) getInitialAssignments(log logr.Logger, wl *workload.Info, sn
 	cq := snap.ClusterQueue(wl.ClusterQueue)
 
 	preemptionTargets, replaceableWorkloadSlice := workloadslicing.ReplacedWorkloadSlice(wl, snap)
-	wlReservation := snap.Reservations[workload.Key(wl.Obj)]
-	flvAssigner := flavorassigner.New(wl, cq, snap.ResourceFlavors, fairsharing.Enabled(s.fairSharing), preemption.NewOracle(s.preemptor, snap), replaceableWorkloadSlice, wlReservation, snap.AppliedReservations, s.quotaCheckStrategy)
+	var wlPreadmissionReservation *schdcache.ReservationInfo
+	if features.Enabled(features.PreadmissionReservations) {
+		wlPreadmissionReservation = snap.PreadmissionReservations[workload.Key(wl.Obj)]
+	}
+	flvAssigner := flavorassigner.New(wl, cq, snap.ResourceFlavors, fairsharing.Enabled(s.fairSharing), preemption.NewOracle(s.preemptor, snap), replaceableWorkloadSlice, wlPreadmissionReservation, snap.AppliedPreadmissionReservations, s.quotaCheckStrategy)
 	fullAssignment := flvAssigner.Assign(log, nil)
 
 	arm := fullAssignment.RepresentativeMode()
@@ -883,8 +904,10 @@ func (s *Scheduler) admit(ctx context.Context, e *entry, cq *schdcache.ClusterQu
 	if err != nil {
 		return err
 	}
-	s.cache.RemoveReservation(workload.Key(e.Obj))
-	s.cache.RemoveLowerPriorityReservations(int64(priority.Priority(e.Obj)), e.ClusterQueue)
+	if features.Enabled(features.PreadmissionReservations) {
+		s.cache.RemovePreadmissionReservation(workload.Key(e.Obj))
+		s.cache.RemoveLowerPriorityPreadmissionReservations(int64(priority.Priority(e.Obj)), e.ClusterQueue)
+	}
 
 	newWorkload := e.Obj.DeepCopy()
 	s.admissionRoutineWrapper.Run(func() {

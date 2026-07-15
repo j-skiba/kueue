@@ -19,6 +19,7 @@ package scheduler
 import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/cache/hierarchy"
+	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/resources"
 )
 
@@ -88,5 +89,9 @@ func (c *CohortSnapshot) fairWeight() float64 {
 }
 
 func (c *CohortSnapshot) BorrowingWith(fr resources.FlavorResource, val resources.Amount) bool {
-	return c.ResourceNode.SubtreeQuota[fr].Cmp(c.ResourceNode.Usage[fr].Add(val)) < 0
+	usage := c.ResourceNode.Usage[fr]
+	if features.Enabled(features.PreadmissionReservations) {
+		usage = usage.Add(c.ResourceNode.PreadmissionReservations[fr])
+	}
+	return c.ResourceNode.SubtreeQuota[fr].Cmp(usage.Add(val)) < 0
 }

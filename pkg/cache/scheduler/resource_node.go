@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/kueue/pkg/cache/hierarchy"
+	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/resources"
 )
 
@@ -41,10 +42,10 @@ type resourceNode struct {
 	// usage. For Cohorts, this is the sum of childrens'
 	// usages past childrens' localQuota.
 	Usage resources.FlavorResourceQuantities
-	// Reservations is the quantity which is reserved for specific workloads
+	// PreadmissionReservations is the quantity which is reserved for specific workloads
 	// (e.g., preempting workloads or nominated workloads).
 	// While initiated at the ClusterQueue level, it accumulates up the cohort tree.
-	Reservations resources.FlavorResourceQuantities
+	PreadmissionReservations resources.FlavorResourceQuantities
 }
 
 func NewResourceNode() resourceNode {
@@ -59,10 +60,10 @@ func NewResourceNode() resourceNode {
 // Quota and SubtreeQuota (these are replaced with new maps upon update).
 func (r resourceNode) Clone() resourceNode {
 	return resourceNode{
-		Quotas:       r.Quotas,
-		SubtreeQuota: r.SubtreeQuota,
-		Usage:        maps.Clone(r.Usage),
-		Reservations: maps.Clone(r.Reservations),
+		Quotas:                   r.Quotas,
+		SubtreeQuota:             r.SubtreeQuota,
+		Usage:                    maps.Clone(r.Usage),
+		PreadmissionReservations: maps.Clone(r.PreadmissionReservations),
 	}
 }
 
@@ -96,7 +97,11 @@ type flatResourceNode interface {
 // This quota is available at this node but is not visible at its parent.
 func LocalAvailable(node flatResourceNode, fr resources.FlavorResource) resources.Amount {
 	r := node.getResourceNode()
-	return resources.MaxAmount(resources.NewAmount(0), r.localQuota(fr).Sub(r.Usage[fr]))
+	usage := r.Usage[fr]
+	if features.Enabled(features.PreadmissionReservations) {
+		usage = usage.Add(r.PreadmissionReservations[fr])
+	}
+	return resources.MaxAmount(resources.NewAmount(0), r.localQuota(fr).Sub(usage))
 }
 
 // available determines how much capacity remains for the current
@@ -111,8 +116,8 @@ func LocalAvailable(node flatResourceNode, fr resources.FlavorResource) resource
 func available(node hierarchicalResourceNode, fr resources.FlavorResource, includeReservations bool) resources.Amount {
 	r := node.getResourceNode()
 	usage := r.Usage[fr]
-	if includeReservations {
-		usage = usage.Add(r.Reservations[fr])
+	if includeReservations && features.Enabled(features.PreadmissionReservations) {
+		usage = usage.Add(r.PreadmissionReservations[fr])
 	}
 	if !node.HasParent() {
 		return r.SubtreeQuota[fr].Sub(usage)
@@ -174,24 +179,24 @@ func removeUsage(node hierarchicalResourceNode, fr resources.FlavorResource, val
 	removeUsage(node.parentHRN(), fr, deltaParentUsage)
 }
 
-func addReservation(node hierarchicalResourceNode, fr resources.FlavorResource, val resources.Amount) {
+func addPreadmissionReservation(node hierarchicalResourceNode, fr resources.FlavorResource, val resources.Amount) {
 	r := node.getResourceNode()
-	if r.Reservations == nil {
-		r.Reservations = make(resources.FlavorResourceQuantities)
+	if r.PreadmissionReservations == nil {
+		r.PreadmissionReservations = make(resources.FlavorResourceQuantities)
 	}
-	r.Reservations[fr] = r.Reservations[fr].Add(val)
+	r.PreadmissionReservations[fr] = r.PreadmissionReservations[fr].Add(val)
 	if node.HasParent() {
-		addReservation(node.parentHRN(), fr, val)
+		addPreadmissionReservation(node.parentHRN(), fr, val)
 	}
 }
 
-func removeReservation(node hierarchicalResourceNode, fr resources.FlavorResource, val resources.Amount) {
+func removePreadmissionReservation(node hierarchicalResourceNode, fr resources.FlavorResource, val resources.Amount) {
 	r := node.getResourceNode()
-	if r.Reservations != nil {
-		r.Reservations[fr] = r.Reservations[fr].Sub(val)
+	if r.PreadmissionReservations != nil {
+		r.PreadmissionReservations[fr] = r.PreadmissionReservations[fr].Sub(val)
 	}
 	if node.HasParent() {
-		removeReservation(node.parentHRN(), fr, val)
+		removePreadmissionReservation(node.parentHRN(), fr, val)
 	}
 }
 

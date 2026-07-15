@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 
@@ -41,6 +42,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/resources"
+	"sigs.k8s.io/kueue/pkg/util/priority"
 	"sigs.k8s.io/kueue/pkg/util/queue"
 	utilresource "sigs.k8s.io/kueue/pkg/util/resource"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
@@ -132,6 +134,15 @@ type ReservationInfo struct {
 	Victims       sets.Set[workload.Reference]
 }
 
+func (r *ReservationInfo) Clone() *ReservationInfo {
+	return &ReservationInfo{
+		Usage:         maps.Clone(r.Usage),
+		ClusterQueue:  r.ClusterQueue,
+		OwnerPriority: r.OwnerPriority,
+		Victims:       r.Victims.Clone(),
+	}
+}
+
 // Cache keeps track of the Workloads that got admitted through ClusterQueues.
 type Cache struct {
 	sync.RWMutex
@@ -148,7 +159,7 @@ type Cache struct {
 	// Tracks Workload's ClusterQueue assignment throughout its presence in the cache, which is when they reserve quota (`QuotaReserved=True`).
 	workloadAssignedQueues map[workload.Reference]kueue.ClusterQueueReference
 
-	reservations map[workload.Reference]*ReservationInfo
+	preadmissionReservations map[workload.Reference]*ReservationInfo
 
 	hm hierarchy.Manager[*clusterQueue, *cohort]
 
@@ -161,13 +172,13 @@ type Cache struct {
 
 func New(client client.Client, options ...Option) *Cache {
 	cache := &Cache{
-		client:                 client,
-		resourceFlavors:        make(map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor),
-		admissionChecks:        make(map[kueue.AdmissionCheckReference]AdmissionCheck),
-		workloadAssignedQueues: make(map[workload.Reference]kueue.ClusterQueueReference),
-		reservations:           make(map[workload.Reference]*ReservationInfo),
-		hm:                     hierarchy.NewManager(newCohort),
-		tasCache:               NewTASCache(client),
+		client:                   client,
+		resourceFlavors:          make(map[kueue.ResourceFlavorReference]*kueue.ResourceFlavor),
+		admissionChecks:          make(map[kueue.AdmissionCheckReference]AdmissionCheck),
+		workloadAssignedQueues:   make(map[workload.Reference]kueue.ClusterQueueReference),
+		preadmissionReservations: make(map[workload.Reference]*ReservationInfo),
+		hm:                       hierarchy.NewManager(newCohort),
+		tasCache:                 NewTASCache(client),
 	}
 	for _, option := range options {
 		option(cache)
@@ -601,9 +612,9 @@ func (c *Cache) DeleteClusterQueue(cq *kueue.ClusterQueue) {
 		metrics.ClearClusterQueueInfo(cqName)
 	}
 
-	for wlKey, res := range c.reservations {
+	for wlKey, res := range c.preadmissionReservations {
 		if res.ClusterQueue == cqName {
-			delete(c.reservations, wlKey)
+			delete(c.preadmissionReservations, wlKey)
 		}
 	}
 
@@ -823,6 +834,8 @@ func (c *Cache) addOrUpdateWorkloadWithoutLock(log logr.Logger, wl *kueue.Worklo
 	}
 
 	c.workloadAssignedQueues[wlKey] = cq.Name
+	delete(c.preadmissionReservations, wlKey)
+	c.removeLowerPriorityPreadmissionReservationsWithoutLock(int64(priority.Priority(wl)), cq.Name)
 	cq.addOrUpdateWorkload(log, wl)
 
 	return true, nil
@@ -838,7 +851,7 @@ func (c *Cache) DeleteWorkload(log logr.Logger, wlKey workload.Reference) error 
 	c.Lock()
 	defer c.Unlock()
 
-	delete(c.reservations, wlKey)
+	delete(c.preadmissionReservations, wlKey)
 
 	cqName, assigned := c.workloadAssignedQueues[wlKey]
 	if !assigned {
@@ -1174,33 +1187,37 @@ func queueKey(q *kueue.LocalQueue) queue.LocalQueueReference {
 	return queue.NewLocalQueueReference(q.Namespace, kueue.LocalQueueName(q.Name))
 }
 
-func (c *Cache) AddReservation(wl *workload.Info, usage resources.FlavorResourceQuantities, victims []workload.Reference, clusterQueue kueue.ClusterQueueReference, priority int64) {
+func (c *Cache) AddPreadmissionReservation(wl *workload.Info, usage resources.FlavorResourceQuantities, victims []workload.Reference, clusterQueue kueue.ClusterQueueReference, priority int64) {
 	c.Lock()
 	defer c.Unlock()
 
 	wlKey := workload.Key(wl.Obj)
-	c.reservations[wlKey] = &ReservationInfo{
-		Usage:         usage,
+	c.preadmissionReservations[wlKey] = &ReservationInfo{
+		Usage:         maps.Clone(usage),
 		ClusterQueue:  clusterQueue,
 		OwnerPriority: priority,
 		Victims:       sets.New(victims...),
 	}
 }
 
-func (c *Cache) RemoveReservation(wlKey workload.Reference) {
+func (c *Cache) RemovePreadmissionReservation(wlKey workload.Reference) {
 	c.Lock()
 	defer c.Unlock()
-	delete(c.reservations, wlKey)
+	delete(c.preadmissionReservations, wlKey)
 }
 
-func (c *Cache) RemoveLowerPriorityReservations(priority int64, cqName kueue.ClusterQueueReference) {
-	c.Lock()
-	defer c.Unlock()
-	for wlKey, res := range c.reservations {
+func (c *Cache) removeLowerPriorityPreadmissionReservationsWithoutLock(priority int64, cqName kueue.ClusterQueueReference) {
+	for wlKey, res := range c.preadmissionReservations {
 		if res.ClusterQueue == cqName && res.OwnerPriority < priority {
-			delete(c.reservations, wlKey)
+			delete(c.preadmissionReservations, wlKey)
 		}
 	}
+}
+
+func (c *Cache) RemoveLowerPriorityPreadmissionReservations(priority int64, cqName kueue.ClusterQueueReference) {
+	c.Lock()
+	defer c.Unlock()
+	c.removeLowerPriorityPreadmissionReservationsWithoutLock(priority, cqName)
 }
 
 // ShouldExposeLocalQueueMetricsForWorkload determines if LocalQueue metric reporting should be made for the associated LocalQueue.
