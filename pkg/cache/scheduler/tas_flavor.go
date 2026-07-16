@@ -121,6 +121,11 @@ func (c *TASFlavorCache) snapshot(
 	c.RLock()
 	defer c.RUnlock()
 
+	tasDomainUsages := c.usage
+	if features.Enabled(features.TASHandleOverlappingFlavors) && aggregatedDomainUsages != nil {
+		tasDomainUsages = aggregatedDomainUsages
+	}
+
 	infoKV := []any{
 		"nodeLabels", c.flavor.NodeLabels,
 		"levels", c.topology.Levels,
@@ -138,16 +143,20 @@ func (c *TASFlavorCache) snapshot(
 	}
 	snapshot.initialize()
 
-	tasDomainUsages := c.usage
-	if features.Enabled(features.TASHandleOverlappingFlavors) && aggregatedDomainUsages != nil {
-		tasDomainUsages = aggregatedDomainUsages
-	}
 	for domainID, usage := range tasDomainUsages {
-		snapshot.addTASUsage(domainID, usage)
+		if features.Enabled(features.VectorizedResourceRequests) {
+			snapshot.addTASSliceUsage(domainID, resources.NewSliceRequests(usage))
+		} else {
+			snapshot.addTASUsage(domainID, usage)
+		}
 	}
 	c.nonTasUsageCache.forEachNodeUsage(func(nodeName string, usage resources.Requests) {
 		if domainID, ok := nodeToDomain[nodeName]; ok {
-			snapshot.addNonTASUsage(domainID, usage)
+			if features.Enabled(features.VectorizedResourceRequests) {
+				snapshot.addNonTASSliceUsage(domainID, resources.NewSliceRequests(usage))
+			} else {
+				snapshot.addNonTASUsage(domainID, usage)
+			}
 		}
 	})
 	return snapshot

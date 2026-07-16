@@ -500,6 +500,8 @@ const (
 
 	// owner: @j-skiba
 	//
+	// owner: @j-skiba
+	//
 	// Enable caching node matching results (NodeSelector, Tolerations, Affinity) per workload/PodSet
 	// to be reused within a single scheduling cycle by TAS evaluations corresponding to different
 	// sets of preemption candidates.
@@ -509,6 +511,12 @@ const (
 	//
 	// Enables caching of remaining capacity and clone reduction in TAS Flavor Snapshot.
 	TASCachingRemainingResources featuregate.Feature = "TASCachingRemainingResources"
+
+	// owner: @j-skiba
+	//
+	// VectorizedResourceRequests enables slice-based indexing for resource requests in TAS snapshots,
+	// replacing map lookups for higher performance during scheduling and preemption.
+	VectorizedResourceRequests featuregate.Feature = "VectorizedResourceRequests"
 )
 
 func init() {
@@ -782,6 +790,11 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 
 	TASCachingRemainingResources: {
 		{Version: version.MustParse("0.19"), Default: true, PreRelease: featuregate.Beta},
+	},
+
+	VectorizedResourceRequests: {
+		{Version: version.MustParse("0.19"), Default: true, PreRelease: featuregate.Alpha},
+	},
 	},
 }
 

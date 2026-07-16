@@ -36,29 +36,30 @@ import (
 )
 
 func TestFreeCapacityPerDomain(t *testing.T) {
+	features.SetFeatureGateDuringTest(t, features.VectorizedResourceRequests, true)
 	snapshot := &TASFlavorSnapshot{
 		leaves: leafDomainByID{
 			"domain2": &leafDomain{
-				freeCapacity: resources.Requests{
+				sliceFreeCapacity: resources.NewSliceRequests(resources.Requests{
 					corev1.ResourceCPU:    1000,
 					corev1.ResourceMemory: 2 * 1024 * 1024 * 1024, // 2 GiB
-				},
-				tasUsage: resources.Requests{
+				}),
+				sliceTasUsage: resources.NewSliceRequests(resources.Requests{
 					corev1.ResourceMemory: 1 * 1024 * 1024 * 1024, // 1 GiB
 					corev1.ResourceCPU:    500,
-				},
+				}),
 			},
 			"domain1": &leafDomain{
-				freeCapacity: resources.Requests{
+				sliceFreeCapacity: resources.NewSliceRequests(resources.Requests{
 					corev1.ResourceMemory: 4 * 1024 * 1024 * 1024, // 4 GiB
 					corev1.ResourceCPU:    2000,
 					"nvidia.com/gpu":      1,
-				},
-				tasUsage: resources.Requests{
+				}),
+				sliceTasUsage: resources.NewSliceRequests(resources.Requests{
 					corev1.ResourceCPU:    500,
 					"nvidia.com/gpu":      1,
 					corev1.ResourceMemory: 2 * 1024 * 1024 * 1024, // 1 GiB
-				},
+				}),
 			},
 		},
 	}
@@ -993,6 +994,32 @@ func TestTASCachingRemainingResourcesFeatureGate(t *testing.T) {
 
 			// Fits should now return true again after cache invalidation / re-evaluation
 			g.Expect(snapshot.Fits(flavorUsage)).To(gomega.BeTrue())
+		})
+	}
+}
+
+func TestVectorizedResourceRequestsFeatureGate(t *testing.T) {
+	for _, fgEnabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("VectorizedResourceRequests=%v", fgEnabled), func(t *testing.T) {
+			features.SetFeatureGateDuringTest(t, features.VectorizedResourceRequests, fgEnabled)
+			_, log := utiltesting.ContextWithLog(t)
+
+			s := newTASFlavorSnapshot(log, "test-flavor", []string{"block", "hostname"})
+			n := node.MakeNode("node-1").
+				Label("block", "b1").
+				Label("hostname", "node-1").
+				StatusAllocatable(corev1.ResourceList{
+					corev1.ResourceCPU:  resource.MustParse("10"),
+					corev1.ResourcePods: resource.MustParse("10"),
+				}).Obj()
+
+			s.addNode(n)
+			s.initialize()
+
+			free := s.freeCapacityPerDomain()
+			if len(free) == 0 {
+				t.Fatalf("expected non-empty free capacity")
+			}
 		})
 	}
 }
