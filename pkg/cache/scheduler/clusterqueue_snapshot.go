@@ -172,7 +172,7 @@ func (c *ClusterQueueSnapshot) Fits(usage workload.Usage, excludedUsage resource
 		defer revert()
 	}
 	for fr, q := range usage.Quota {
-		if c.AvailableWithoutReservations(fr).Cmp(q) < 0 {
+		if c.Available(fr).Cmp(q) < 0 {
 			return FitsCheckNoQuota
 		}
 	}

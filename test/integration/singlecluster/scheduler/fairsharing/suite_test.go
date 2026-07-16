@@ -80,8 +80,18 @@ func managerAndSchedulerSetup(
 	admissionFairSharing *config.AdmissionFairSharing,
 	mappings ...[]config.DeviceClassMapping,
 ) framework.ManagerSetup {
+	return managerAndSchedulerSetupWithFairSharing(&config.FairSharing{}, admissionFairSharing, mappings...)
+}
+
+func managerAndSchedulerSetupWithFairSharing(
+	fairSharing *config.FairSharing,
+	admissionFairSharing *config.AdmissionFairSharing,
+	mappings ...[]config.DeviceClassMapping,
+) framework.ManagerSetup {
 	return func(ctx context.Context, mgr manager.Manager) {
-		fairSharing := &config.FairSharing{}
+		if fairSharing == nil {
+			fairSharing = &config.FairSharing{}
+		}
 
 		err := indexer.Setup(ctx, mgr.GetFieldIndexer())
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

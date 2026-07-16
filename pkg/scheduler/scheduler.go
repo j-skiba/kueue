@@ -547,6 +547,9 @@ func (s *Scheduler) issuePreemptions(ctx context.Context, log logr.Logger, e *en
 		s.cache.AddPreadmissionReservation(&e.Info, e.assignmentUsage(log).Quota, victimKeys, e.clusterQueueSnapshot.Name, int64(priority.Priority(e.Obj)))
 	}
 	e.markPreemptionOutcome(preempted, errors)
+	if preempted > 0 {
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 // waitForPodsReadyIfBlocked blocks admission until all currently admitted
