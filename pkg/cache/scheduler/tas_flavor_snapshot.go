@@ -1677,6 +1677,9 @@ func (s *TASFlavorSnapshot) lowerLevelDomains(domains []*domain) []*domain {
 }
 
 func compareDomainLevelValues(a, b *domain) int {
+	if a.parent == b.parent && a.parent != nil {
+		return cmp.Compare(a.levelValues[len(a.levelValues)-1], b.levelValues[len(b.levelValues)-1])
+	}
 	return slices.Compare(a.levelValues, b.levelValues)
 }
 
