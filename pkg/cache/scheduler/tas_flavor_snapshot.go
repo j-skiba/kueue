@@ -97,7 +97,10 @@ type domain struct {
 // leafDomain extends the domain with information for the lowest-level domain.
 type leafDomain struct {
 	domain
-	// Legacy map-based requests (used when VectorizedResourceRequests FG is disabled)
+	// Legacy map-based requests (used when VectorizedResourceRequests FG is disabled):
+	// freeCapacity represents the total node capacity minus the non-TAS usage,
+	// coming from Pods which are not managed by workloads admitted by TAS
+	// (typically static Pods, DaemonSets, or Deployments).
 	freeCapacity resources.Requests
 	tasUsage     resources.Requests
 
@@ -315,6 +318,10 @@ func (s *TASFlavorSnapshot) initializeHelper(dom *domain) {
 }
 
 func (s *TASFlavorSnapshot) addCapacity(domainID utiltas.TopologyDomainID, capacity resources.Requests) {
+	if features.Enabled(features.VectorizedResourceRequests) {
+		s.addSliceCapacity(domainID, resources.NewSliceRequests(capacity))
+		return
+	}
 	if s.leaves[domainID].freeCapacity == nil {
 		s.leaves[domainID].freeCapacity = resources.Requests{}
 	}
@@ -331,12 +338,18 @@ func (s *TASFlavorSnapshot) addSliceCapacity(domainID utiltas.TopologyDomainID, 
 }
 
 func (s *TASFlavorSnapshot) addNonTASUsage(domainID utiltas.TopologyDomainID, usage resources.Requests) {
+	if features.Enabled(features.VectorizedResourceRequests) {
+		s.addNonTASSliceUsage(domainID, resources.NewSliceRequests(usage))
+		return
+	}
 	s.leaves[domainID].freeCapacity.Sub(usage)
 	s.leaves[domainID].cachedRemainingCapacity = resources.LazyRequests{}
 }
 
 func (s *TASFlavorSnapshot) addNonTASSliceUsage(domainID utiltas.TopologyDomainID, usage resources.SliceRequests) {
-	s.leaves[domainID].sliceFreeCapacity.Sub(usage)
+	if s.leaves[domainID].sliceFreeCapacity != nil {
+		s.leaves[domainID].sliceFreeCapacity.Sub(usage)
+	}
 }
 
 func (s *TASFlavorSnapshot) updateTASUsage(domainID utiltas.TopologyDomainID, usage resources.Requests, op usageOp, count int32) {
@@ -370,6 +383,10 @@ func (s *TASFlavorSnapshot) getRemainingCapacity(leaf *leafDomain) resources.Req
 }
 
 func (s *TASFlavorSnapshot) addTASUsage(domainID utiltas.TopologyDomainID, usage resources.Requests) {
+	if features.Enabled(features.VectorizedResourceRequests) {
+		s.addTASSliceUsage(domainID, resources.NewSliceRequests(usage))
+		return
+	}
 	if s.leaves[domainID] == nil {
 		s.log.V(3).Info("skip accounting for TAS usage in domain", "domain", domainID, "usage", usage)
 		return
@@ -394,6 +411,10 @@ func (s *TASFlavorSnapshot) addTASSliceUsage(domainID utiltas.TopologyDomainID, 
 }
 
 func (s *TASFlavorSnapshot) removeTASUsage(domainID utiltas.TopologyDomainID, usage resources.Requests) {
+	if features.Enabled(features.VectorizedResourceRequests) {
+		s.removeTASSliceUsage(domainID, resources.NewSliceRequests(usage))
+		return
+	}
 	if s.leaves[domainID] == nil {
 		s.log.V(3).Info("skip removing TAS usage in domain", "domain", domainID, "usage", usage)
 		return
