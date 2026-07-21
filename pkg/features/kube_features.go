@@ -500,8 +500,6 @@ const (
 
 	// owner: @j-skiba
 	//
-	// owner: @j-skiba
-	//
 	// Enable caching node matching results (NodeSelector, Tolerations, Affinity) per workload/PodSet
 	// to be reused within a single scheduling cycle by TAS evaluations corresponding to different
 	// sets of preemption candidates.
@@ -794,7 +792,6 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 
 	VectorizedResourceRequests: {
 		{Version: version.MustParse("0.19"), Default: true, PreRelease: featuregate.Alpha},
-	},
 	},
 }
 

@@ -8,7 +8,7 @@ You may obtain a copy of the License at
     http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
+Distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
@@ -97,12 +97,12 @@ func ResourceListToSliceRequests(rl corev1.ResourceList) SliceRequests {
 }
 
 // ToRequests converts a SliceRequests back to a Requests map.
-func (sr SliceRequests) ToRequests() Requests {
-	if len(sr) == 0 {
+func (sr *SliceRequests) ToRequests() Requests {
+	if sr == nil || len(*sr) == 0 {
 		return nil
 	}
-	req := make(Requests, len(sr))
-	for _, entry := range sr {
+	req := make(Requests, len(*sr))
+	for _, entry := range *sr {
 		if entry.Value != 0 {
 			req[entry.Name] = entry.Value
 		}
@@ -110,13 +110,47 @@ func (sr SliceRequests) ToRequests() Requests {
 	return req
 }
 
-// Clone returns a deep copy of SliceRequests.
-func (sr SliceRequests) Clone() SliceRequests {
-	return slices.Clone(sr)
+func (sr SliceRequests) ToRequestsValue() Requests {
+	return sr.ToRequests()
 }
 
-// Add performs an element-wise addition. Operates in a single pass with zero allocations when resource keys match.
-func (sr *SliceRequests) Add(other SliceRequests) {
+func (sr SliceRequests) Clone() SliceRequests {
+	res := make(SliceRequests, len(sr))
+	copy(res, sr)
+	return res
+}
+
+func (sr *SliceRequests) CloneResourceRequests() ResourceRequests {
+	if sr == nil {
+		return (*SliceRequests)(nil)
+	}
+	res := make(SliceRequests, len(*sr))
+	copy(res, *sr)
+	return &res
+}
+
+// Add performs an element-wise addition.
+func (sr *SliceRequests) Add(other ResourceRequests) {
+	if other == nil || sr == nil {
+		return
+	}
+	var otherSlice SliceRequests
+	if s, ok := other.(*SliceRequests); ok && s != nil {
+		otherSlice = *s
+	} else {
+		otherSlice = NewSliceRequests(other.ToRequests())
+	}
+	sr.AddSlice(otherSlice)
+}
+
+func (sr *SliceRequests) AddSlice(other SliceRequests) {
+	if sr == nil {
+		return
+	}
+	if *sr == nil {
+		*sr = other.Clone()
+		return
+	}
 	if len(*sr) == len(other) {
 		i := 0
 		for i < len(*sr) && (*sr)[i].Hash == other[i].Hash {
@@ -135,8 +169,24 @@ func (sr *SliceRequests) Add(other SliceRequests) {
 	})
 }
 
-// Sub performs an element-wise subtraction. Operates in a single pass with zero allocations when resource keys match.
-func (sr *SliceRequests) Sub(other SliceRequests) {
+// Sub performs an element-wise subtraction.
+func (sr *SliceRequests) Sub(other ResourceRequests) {
+	if other == nil || sr == nil {
+		return
+	}
+	var otherSlice SliceRequests
+	if s, ok := other.(*SliceRequests); ok && s != nil {
+		otherSlice = *s
+	} else {
+		otherSlice = NewSliceRequests(other.ToRequests())
+	}
+	sr.SubSlice(otherSlice)
+}
+
+func (sr *SliceRequests) SubSlice(other SliceRequests) {
+	if sr == nil || *sr == nil {
+		return
+	}
 	if len(*sr) == len(other) {
 		i := 0
 		for i < len(*sr) && (*sr)[i].Hash == other[i].Hash {
@@ -158,8 +208,6 @@ func (sr *SliceRequests) Sub(other SliceRequests) {
 // MergeFunc defines a computation lambda between matching or missing values in two SliceRequests.
 type MergeFunc func(valA, valB int64) int64
 
-// MergeWith creates a new SliceRequests by walking both instances in two-pointer order
-// and applying fn to calculate the resulting value for each resource.
 func (sr SliceRequests) MergeWith(other SliceRequests, fn MergeFunc) SliceRequests {
 	if len(sr) == 0 && len(other) == 0 {
 		return nil
@@ -182,56 +230,40 @@ func (sr SliceRequests) MergeWith(other SliceRequests, fn MergeFunc) SliceReques
 		}
 	}
 
-	for ; i < len(sr); i++ {
+	for i < len(sr) {
 		appendEntry(&result, sr[i], fn(sr[i].Value, 0))
+		i++
 	}
-	for ; j < len(other); j++ {
+
+	for j < len(other) {
 		appendEntry(&result, other[j], fn(0, other[j].Value))
+		j++
 	}
 
 	return result
 }
 
-func appendEntry(dst *SliceRequests, entry ResourceEntry, val int64) {
+func appendEntry(result *SliceRequests, entry ResourceEntry, val int64) {
 	if val != 0 {
-		entry.Value = val
-		*dst = append(*dst, entry)
+		*result = append(*result, ResourceEntry{
+			Name:  entry.Name,
+			Hash:  entry.Hash,
+			Value: val,
+		})
 	}
 }
 
-// VisitFunc defines a lambda function for two-pointer traversal over matching/missing resources.
-// Returning false halts the traversal early.
-type VisitFunc func(name corev1.ResourceName, valA, valB int64) bool
-
-// ZipVisits walks two SliceRequests in parallel, invoking fn for each resource.
-func (sr SliceRequests) ZipVisits(other SliceRequests, fn VisitFunc) {
-	i, j := 0, 0
-	for i < len(sr) || j < len(other) {
-		var name corev1.ResourceName
-		var valA, valB int64
-
-		if i < len(sr) && (j >= len(other) || sr[i].Hash < other[j].Hash) {
-			name, valA = sr[i].Name, sr[i].Value
-			i++
-		} else if j < len(other) && (i >= len(sr) || other[j].Hash < sr[i].Hash) {
-			name, valB = other[j].Name, other[j].Value
-			j++
-		} else {
-			name = sr[i].Name
-			valA, valB = sr[i].Value, other[j].Value
-			i++
-			j++
-		}
-
-		if !fn(name, valA, valB) {
-			break
-		}
+func (sr *SliceRequests) CountIn(capacity ResourceRequests) int32 {
+	if capacity == nil || sr == nil {
+		return 0
 	}
+	if capSlice, ok := capacity.(*SliceRequests); ok && capSlice != nil {
+		return sr.CountInSlice(*capSlice)
+	}
+	return sr.CountInSlice(NewSliceRequests(capacity.ToRequests()))
 }
 
-// CountIn computes how many times sr fits into capacity using two-pointer merge.
-// Exits early as soon as any requested resource cannot fit (count == 0).
-func (sr SliceRequests) CountIn(capacity SliceRequests) int32 {
+func (sr SliceRequests) CountInSlice(capacity SliceRequests) int32 {
 	if len(sr) == 0 {
 		return math.MaxInt32
 	}
@@ -267,9 +299,17 @@ func (sr SliceRequests) CountIn(capacity SliceRequests) int32 {
 	return minCount
 }
 
-// CountInWithLimitingResource returns how many times sr fits into capacity
-// and the limiting ResourceName. Ties with equal counts are broken alphabetically.
-func (sr SliceRequests) CountInWithLimitingResource(capacity SliceRequests) (int32, corev1.ResourceName) {
+func (sr *SliceRequests) CountInWithLimitingResource(capacity ResourceRequests) (int32, corev1.ResourceName) {
+	if capacity == nil || sr == nil {
+		return 0, ""
+	}
+	if capSlice, ok := capacity.(*SliceRequests); ok && capSlice != nil {
+		return sr.CountInWithLimitingResourceSlice(*capSlice)
+	}
+	return sr.CountInWithLimitingResourceSlice(NewSliceRequests(capacity.ToRequests()))
+}
+
+func (sr SliceRequests) CountInWithLimitingResourceSlice(capacity SliceRequests) (int32, corev1.ResourceName) {
 	if len(sr) == 0 {
 		return math.MaxInt32, ""
 	}
@@ -307,4 +347,24 @@ func (sr SliceRequests) CountInWithLimitingResource(capacity SliceRequests) (int
 		return 0, ""
 	}
 	return minCount, limitingRes
+}
+
+func (sr *SliceRequests) SerializeDetails() map[corev1.ResourceName]string {
+	if sr == nil {
+		return nil
+	}
+	details := make(map[corev1.ResourceName]string, len(*sr))
+	for _, entry := range *sr {
+		details[entry.Name] = ResourceQuantityString(entry.Name, entry.Value)
+	}
+	return details
+}
+
+func (sr *SliceRequests) IsEmpty() bool {
+	return sr == nil || len(*sr) == 0
+}
+
+func (sr *SliceRequests) CreateEmpty() ResourceRequests {
+	empty := SliceRequests{}
+	return &empty
 }

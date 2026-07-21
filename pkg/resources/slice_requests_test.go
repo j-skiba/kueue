@@ -49,7 +49,7 @@ func TestSliceRequestsAddAndSub(t *testing.T) {
 		"nvidia.com/gpu":      1,
 	})
 
-	sr1.Add(sr2)
+	sr1.Add(&sr2)
 	wantAdd := Requests{
 		corev1.ResourceCPU:    1000,
 		corev1.ResourceMemory: 3072,
@@ -59,7 +59,7 @@ func TestSliceRequestsAddAndSub(t *testing.T) {
 		t.Errorf("Add mismatch (-want +got):\n%s", diff)
 	}
 
-	sr1.Sub(sr2)
+	sr1.Sub(&sr2)
 	wantSub := Requests{
 		corev1.ResourceCPU:    1000,
 		corev1.ResourceMemory: 2048,
@@ -82,12 +82,12 @@ func TestSliceRequestsCountIn(t *testing.T) {
 		corev1.ResourcePods:   10,
 	})
 
-	count := req.CountIn(capacity)
+	count := req.CountIn(&capacity)
 	if count != 5 {
 		t.Errorf("expected count 5, got %d", count)
 	}
 
-	countLimiting, limitingRes := req.CountInWithLimitingResource(capacity)
+	countLimiting, limitingRes := req.CountInWithLimitingResource(&capacity)
 	if countLimiting != 5 {
 		t.Errorf("expected limiting count 5, got %d", countLimiting)
 	}
@@ -107,12 +107,12 @@ func TestSliceRequestsNonExistentResource(t *testing.T) {
 		"example.com/bogus-gpu": 1,
 	})
 
-	count := req.CountIn(capacity)
+	count := req.CountIn(&capacity)
 	if count != 0 {
 		t.Errorf("expected CountIn 0 for non-existent resource, got %d", count)
 	}
 
-	countLimiting, limitingRes := req.CountInWithLimitingResource(capacity)
+	countLimiting, limitingRes := req.CountInWithLimitingResource(&capacity)
 	if countLimiting != 0 {
 		t.Errorf("expected count 0 for non-existent resource, got %d", countLimiting)
 	}
@@ -135,5 +135,32 @@ func TestResourceListToSliceRequests(t *testing.T) {
 
 	if diff := cmp.Diff(wantMap, sr.ToRequests()); diff != "" {
 		t.Errorf("ResourceListToSliceRequests mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestLazySliceRequests(t *testing.T) {
+	base := NewSliceRequests(Requests{
+		corev1.ResourceCPU:    1000,
+		corev1.ResourceMemory: 2048,
+	})
+
+	lazy := NewLazyRequests(&base)
+	if !lazy.IsValid() {
+		t.Errorf("expected Lazy to be valid")
+	}
+
+	sub := NewSliceRequests(Requests{
+		corev1.ResourceMemory: 1024,
+	})
+
+	lazy.Sub(&sub)
+
+	want := Requests{
+		corev1.ResourceCPU:    1000,
+		corev1.ResourceMemory: 1024,
+	}
+
+	if diff := cmp.Diff(want, lazy.Get().ToRequests()); diff != "" {
+		t.Errorf("Lazy[SliceRequests] Sub mismatch (-want +got):\n%s", diff)
 	}
 }
