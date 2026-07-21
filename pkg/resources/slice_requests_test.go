@@ -62,6 +62,7 @@ func TestSliceRequestsAddAndSub(t *testing.T) {
 	wantSub := Requests{
 		corev1.ResourceCPU:    1000,
 		corev1.ResourceMemory: 2048,
+		"nvidia.com/gpu":      0,
 	}
 	if diff := cmp.Diff(wantSub, sr1.ToRequests()); diff != "" {
 		t.Errorf("Sub mismatch (-want +got):\n%s", diff)
