@@ -3416,30 +3416,42 @@ func TestScheduleForTAS(t *testing.T) {
 			features.UnadmittedWorkloadsObservability: false,
 			features.TASCacheNodeMatchResults:         true,
 			features.TASCachingRemainingResources:     true,
+			features.VectorizedResourceRequests:       false,
+		},
+		{
+			features.WorkloadRequestUseMergePatch:     false,
+			features.UnadmittedWorkloadsObservability: false,
+			features.TASCacheNodeMatchResults:         true,
+			features.TASCachingRemainingResources:     true,
+			features.VectorizedResourceRequests:       true,
 		},
 		{
 			features.WorkloadRequestUseMergePatch:     false,
 			features.UnadmittedWorkloadsObservability: true,
 			features.TASCacheNodeMatchResults:         true,
 			features.TASCachingRemainingResources:     true,
+			features.VectorizedResourceRequests:       true,
 		},
 		{
 			features.WorkloadRequestUseMergePatch:     true,
 			features.UnadmittedWorkloadsObservability: false,
 			features.TASCacheNodeMatchResults:         true,
 			features.TASCachingRemainingResources:     true,
+			features.VectorizedResourceRequests:       true,
 		},
 		{
 			features.WorkloadRequestUseMergePatch:     true,
 			features.UnadmittedWorkloadsObservability: true,
 			features.TASCacheNodeMatchResults:         true,
 			features.TASCachingRemainingResources:     true,
+			features.VectorizedResourceRequests:       true,
 		},
 		{
 			features.WorkloadRequestUseMergePatch:     false,
 			features.UnadmittedWorkloadsObservability: false,
 			features.TASCacheNodeMatchResults:         false,
 			features.TASCachingRemainingResources:     false,
+			features.VectorizedResourceRequests:       true,
 		},
 	}
 
