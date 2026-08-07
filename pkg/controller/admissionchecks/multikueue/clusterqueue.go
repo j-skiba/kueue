@@ -44,6 +44,7 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/controller/core/indexer"
 	"sigs.k8s.io/kueue/pkg/util/admissioncheck"
+	"sigs.k8s.io/kueue/pkg/util/resourcegroups"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 )
 
@@ -216,7 +217,7 @@ func (r *cqReconciler) aggregateWorkerQuotas(ctx context.Context, cq *kueue.Clus
 			if !remoteCQKeys.Has(key) {
 				continue
 			}
-			for _, rg := range rcq.Spec.ResourceGroups {
+			for _, rg := range resourcegroups.EffectiveResourceGroups(&rcq) {
 				for _, flavor := range rg.Flavors {
 					for _, res := range flavor.Resources {
 						curr := total[res.Name]

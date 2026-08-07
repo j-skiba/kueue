@@ -1117,6 +1117,14 @@ when participating in Fair Sharing.
 This is recorded only when Fair Sharing is enabled in the Kueue configuration.</p>
 </td>
 </tr>
+<tr><td><code>effectiveQuota</code><br/>
+<a href="#kueue-x-k8s-io-v1beta2-EffectiveQuotaStatus"><code>EffectiveQuotaStatus</code></a>
+</td>
+<td>
+   <p>effectiveQuota denotes the quota structure which will be used, if provided,
+for scheduling instead of the quota structure defined in .spec.resourceGroups.</p>
+</td>
+</tr>
 </tbody>
 </table>
 
@@ -1264,6 +1272,14 @@ when participating in Fair Sharing.
 The is recorded only when Fair Sharing is enabled in the Kueue configuration.</p>
 </td>
 </tr>
+<tr><td><code>effectiveQuota</code><br/>
+<a href="#kueue-x-k8s-io-v1beta2-EffectiveQuotaStatus"><code>EffectiveQuotaStatus</code></a>
+</td>
+<td>
+   <p>effectiveQuota denotes the quota structure which will be used, if provided,
+for scheduling instead of the quota structure defined in .spec.resourceGroups.</p>
+</td>
+</tr>
 </tbody>
 </table>
 
@@ -1386,6 +1402,87 @@ Flavor preferences are expressed through the order of flavors in the ClusterQueu
 
 
 
+
+## `EffectiveQuotaStatus`     {#kueue-x-k8s-io-v1beta2-EffectiveQuotaStatus}
+    
+
+**Appears in:**
+
+- [ClusterQueueStatus](#kueue-x-k8s-io-v1beta2-ClusterQueueStatus)
+
+- [CohortStatus](#kueue-x-k8s-io-v1beta2-CohortStatus)
+
+
+<p>EffectiveQuotaStatus denotes the effective quota structure used for scheduling.</p>
+
+
+<table class="table">
+<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
+<tbody>
+    
+  
+<tr><td><code>lastUpdateTime</code><br/>
+<a href="https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#time-v1-meta"><code>k8s.io/apimachinery/pkg/apis/meta/v1.Time</code></a>
+</td>
+<td>
+   <p>lastUpdateTime denotes the last update of the effective quota structure.</p>
+</td>
+</tr>
+<tr><td><code>capacityRevision</code><br/>
+<code>int64</code>
+</td>
+<td>
+   <p>capacityRevision denotes the manager's revision of the capacity used to infer the effective quota structure.</p>
+</td>
+</tr>
+<tr><td><code>managerRef</code><br/>
+<a href="#kueue-x-k8s-io-v1beta2-EffectiveQuotaStatusManagerRef"><code>EffectiveQuotaStatusManagerRef</code></a>
+</td>
+<td>
+   <p>managerRef denotes the reference to the manager.</p>
+</td>
+</tr>
+<tr><td><code>resourceGroups</code><br/>
+<a href="#kueue-x-k8s-io-v1beta2-ResourceGroup"><code>[]ResourceGroup</code></a>
+</td>
+<td>
+   <p>resourceGroups denotes the effective quotas which, if present and feature gate is enabled,
+should be used by scheduler for scheduling.</p>
+</td>
+</tr>
+</tbody>
+</table>
+
+## `EffectiveQuotaStatusManagerRef`     {#kueue-x-k8s-io-v1beta2-EffectiveQuotaStatusManagerRef}
+    
+
+**Appears in:**
+
+- [EffectiveQuotaStatus](#kueue-x-k8s-io-v1beta2-EffectiveQuotaStatus)
+
+
+
+<table class="table">
+<thead><tr><th width="30%">Field</th><th>Description</th></tr></thead>
+<tbody>
+    
+  
+<tr><td><code>kind</code><br/>
+<code>string</code>
+</td>
+<td>
+   <p>kind is the kind of manager managing effective quota.</p>
+</td>
+</tr>
+<tr><td><code>name</code><br/>
+<code>string</code>
+</td>
+<td>
+   <p>name is the name of the manager managing effective quota.</p>
+</td>
+</tr>
+</tbody>
+</table>
 
 ## `EvictionUnderlyingCause`     {#kueue-x-k8s-io-v1beta2-EvictionUnderlyingCause}
     
@@ -3158,6 +3255,8 @@ nodes matching to the Resource Flavor node labels.</p>
 - [ClusterQueueSpec](#kueue-x-k8s-io-v1beta2-ClusterQueueSpec)
 
 - [CohortSpec](#kueue-x-k8s-io-v1beta2-CohortSpec)
+
+- [EffectiveQuotaStatus](#kueue-x-k8s-io-v1beta2-EffectiveQuotaStatus)
 
 
 

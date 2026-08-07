@@ -519,6 +519,52 @@ const (
 	//
 	// Rejects Workloads with non-positive TAS slice sizes in PodSet topology requests.
 	TASValidateWorkloadSliceSize featuregate.Feature = "TASValidateWorkloadSliceSize"
+
+	// owner: @Dasmat13
+	// issue: https://github.com/kubernetes-sigs/kueue/issues/12775
+	//
+	// WorkloadValidationForPodSetMetadata enables validation of labels and annotations
+	// in PodSet template metadata during Workload creation and update.
+	WorkloadValidationForPodSetMetadata featuregate.Feature = "WorkloadValidationForPodSetMetadata"
+
+	// owner: @ivnovakov
+	//
+	// pr: https://github.com/kubernetes-sigs/kueue/pull/13279#discussion_r3655384989
+	// Keeps spec.leaderWorkerTemplate.size immutable while a LeaderWorkerSet is managed by
+	// Kueue. Workload updates never recompute PodSets, so growing size would ungate extra
+	// pods per group without accounting for quota. Recreate the LeaderWorkerSet to change
+	// the size, or disable this gate to accept the previous behavior.
+	LWSImmutableGroupSize featuregate.Feature = "LWSImmutableGroupSize"
+
+	// owner: @vladikkuzn
+	//
+	// issue: https://github.com/kubernetes-sigs/kueue/pull/13014
+	// Refuse to adopt an existing Workload by pod-group name when it was not created
+	// by the pod-group framework (missing is-group-workload annotation).
+	PodIntegrationValidateGroupOwner featuregate.Feature = "PodIntegrationValidateGroupOwner"
+
+	// owner: @iaalm
+	//
+	// pr: https://github.com/kubernetes-sigs/kueue/pull/10009
+	// Tolerates a missing owner while walking the ownership chain of an object that is
+	// already being deleted (GC teardown with mixed foreground/background deletion), so
+	// Kueue webhooks do not block finalizer removal. Disable to restore the previous
+	// behavior of failing the admission request when an owner cannot be found.
+	//
+	// Note: the tolerance cannot apply at creation time — the API server never creates
+	// an object with a deletionTimestamp itself (one could technically be injected by a
+	// mutating webhook, which is deliberately not covered) — so the strict missing-owner
+	// handling on CREATE (which
+	// protects against acting on a stale informer view of a just-created owner) is
+	// unchanged. The earliest the tolerance can apply is an update after deletion has
+	// begun, and suspend defaulting only ever adds suspend, so no path exists to
+	// unsuspend an object or bypass quota via create-then-delete.
+	SkipAncestorCheckForDeletedWorkloads featuregate.Feature = "SkipAncestorCheckForDeletedWorkloads"
+
+	// owner: @j-skiba
+	//
+	// Enables Dynamic Quota Orchestration and respecting Effective Quota in ClusterQueue/Cohort status.
+	DynamicQuota featuregate.Feature = "DynamicQuota"
 )
 
 func init() {
@@ -799,6 +845,29 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 	TASValidateWorkloadSliceSize: {
 		{Version: version.MustParse("0.20"), Default: true, PreRelease: featuregate.Beta}, // GA in 0.21
 	},
+<<<<<<< HEAD
+=======
+
+	WorkloadValidationForPodSetMetadata: {
+		{Version: version.MustParse("0.20"), Default: true, PreRelease: featuregate.Beta},
+	},
+
+	LWSImmutableGroupSize: {
+		{Version: version.MustParse("0.20"), Default: true, PreRelease: featuregate.Beta},
+	},
+
+	PodIntegrationValidateGroupOwner: {
+		{Version: version.MustParse("0.20"), Default: true, PreRelease: featuregate.Beta},
+	},
+
+	SkipAncestorCheckForDeletedWorkloads: {
+		{Version: version.MustParse("0.20"), Default: true, PreRelease: featuregate.Beta},
+	},
+
+	DynamicQuota: {
+		{Version: version.MustParse("0.20"), Default: false, PreRelease: featuregate.Alpha},
+	},
+>>>>>>> f37a57ea1 (handle EffectiveQuota)
 }
 
 func SetFeatureGateDuringTest(tb testing.TB, f featuregate.Feature, value bool) {

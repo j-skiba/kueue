@@ -396,6 +396,44 @@ type ClusterQueueStatus struct {
 	// This is recorded only when Fair Sharing is enabled in the Kueue configuration.
 	// +optional
 	FairSharing *FairSharingStatus `json:"fairSharing,omitempty"`
+
+	// effectiveQuota denotes the quota structure which will be used, if provided,
+	// for scheduling instead of the quota structure defined in .spec.resourceGroups.
+	// +optional
+	EffectiveQuota *EffectiveQuotaStatus `json:"effectiveQuota,omitempty"`
+}
+
+// EffectiveQuotaStatus denotes the effective quota structure used for scheduling.
+type EffectiveQuotaStatus struct {
+	// lastUpdateTime denotes the last update of the effective quota structure.
+	// +optional
+	LastUpdateTime metav1.Time `json:"lastUpdateTime,omitempty"`
+
+	// capacityRevision denotes the manager's revision of the capacity used to infer the effective quota structure.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	CapacityRevision *int64 `json:"capacityRevision,omitempty"`
+
+	// managerRef denotes the reference to the manager.
+	// +optional
+	ManagerRef EffectiveQuotaStatusManagerRef `json:"managerRef,omitempty"`
+
+	// resourceGroups denotes the effective quotas which, if present and feature gate is enabled,
+	// should be used by scheduler for scheduling.
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=16
+	// +optional
+	ResourceGroups []ResourceGroup `json:"resourceGroups,omitempty"`
+}
+
+type EffectiveQuotaStatusManagerRef struct {
+	// kind is the kind of manager managing effective quota.
+	// +optional
+	Kind string `json:"kind,omitempty"`
+
+	// name is the name of the manager managing effective quota.
+	// +optional
+	Name string `json:"name,omitempty"`
 }
 
 type FlavorUsage struct {

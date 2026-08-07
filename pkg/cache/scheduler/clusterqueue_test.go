@@ -21,11 +21,14 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	tasindexer "sigs.k8s.io/kueue/pkg/controller/tas/indexer"
+	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/metrics"
+	"sigs.k8s.io/kueue/pkg/resources"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
 )
@@ -647,5 +650,144 @@ func TestClusterQueueReadinessWithTAS(t *testing.T) {
 				t.Errorf("Unexpected inactiveMessage (-want,+got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestClusterQueueEffectiveQuota(t *testing.T) {
+	specRGs := []kueue.ResourceGroup{
+		{
+			CoveredResources: []corev1.ResourceName{corev1.ResourceCPU},
+			Flavors: []kueue.FlavorQuotas{
+				{
+					Name: "x86",
+					Resources: []kueue.ResourceQuota{
+						{Name: corev1.ResourceCPU, NominalQuota: resource.MustParse("10")},
+					},
+				},
+			},
+		},
+	}
+
+	effectiveRGs := []kueue.ResourceGroup{
+		{
+			CoveredResources: []corev1.ResourceName{corev1.ResourceCPU},
+			Flavors: []kueue.FlavorQuotas{
+				{
+					Name: "x86",
+					Resources: []kueue.ResourceQuota{
+						{Name: corev1.ResourceCPU, NominalQuota: resource.MustParse("50")},
+					},
+				},
+			},
+		},
+	}
+
+	cq := &kueue.ClusterQueue{
+		ObjectMeta: metav1.ObjectMeta{Name: "cq"},
+		Spec:       kueue.ClusterQueueSpec{ResourceGroups: specRGs},
+		Status: kueue.ClusterQueueStatus{
+			EffectiveQuota: &kueue.EffectiveQuotaStatus{
+				ResourceGroups: effectiveRGs,
+			},
+		},
+	}
+
+	cases := map[string]struct {
+		dynamicQuota bool
+		wantNominal  int64
+	}{
+		"DynamicQuota disabled uses spec quotas": {
+			dynamicQuota: false,
+			wantNominal:  10000,
+		},
+		"DynamicQuota enabled uses effective quota": {
+			dynamicQuota: true,
+			wantNominal:  50000,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGateDuringTest(t, features.DynamicQuota, tc.dynamicQuota)
+
+			_, log := utiltesting.ContextWithLog(t)
+			cache := New(utiltesting.NewFakeClient())
+			c, err := cache.newClusterQueue(log, cq)
+			if err != nil {
+				t.Fatalf("unexpected error creating cluster queue: %v", err)
+			}
+
+			fr := resources.FlavorResource{Flavor: "x86", Resource: corev1.ResourceCPU}
+			if got := c.resourceNode.Quotas[fr].Nominal.Int64(); got != tc.wantNominal {
+				t.Errorf("Expected nominal quota %d, got %d", tc.wantNominal, got)
+			}
+		})
+	}
+}
+
+func TestClusterQueueEffectiveQuotaUpdateAndFallback(t *testing.T) {
+	features.SetFeatureGateDuringTest(t, features.DynamicQuota, true)
+	ctx, log := utiltesting.ContextWithLog(t)
+	cache := New(utiltesting.NewFakeClient())
+
+	cqSpec := utiltestingapi.MakeClusterQueue("cq-eff").
+		ResourceGroup(
+			*utiltestingapi.MakeFlavorQuotas("default").
+				ResourceQuotaWrapper("cpu").NominalQuota("5").Append().
+				Obj(),
+		).Obj()
+
+	if err := cache.AddClusterQueue(ctx, cqSpec); err != nil {
+		t.Fatalf("failed to add CQ to cache: %v", err)
+	}
+
+	cqObj := cache.hm.ClusterQueue("cq-eff")
+	if cqObj == nil {
+		t.Fatalf("expected clusterqueue cq-eff in cache")
+	}
+
+	fr := resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU}
+	// Verify fallback to spec (nominal quota = 5)
+	if q := cqObj.resourceNode.Quotas[fr]; q.Nominal != resources.NewAmount(5000) {
+		t.Errorf("expected nominal quota 5000 from spec, got %v", q.Nominal)
+	}
+
+	// Update CQ with Status.EffectiveQuota (nominal quota = 10)
+	cqEffective := utiltestingapi.MakeClusterQueue("cq-eff").
+		ResourceGroup(
+			*utiltestingapi.MakeFlavorQuotas("default").
+				ResourceQuotaWrapper("cpu").NominalQuota("5").Append().
+				Obj(),
+		).
+		EffectiveResourceGroup(
+			*utiltestingapi.MakeFlavorQuotas("default").
+				ResourceQuotaWrapper("cpu").NominalQuota("10").Append().
+				Obj(),
+		).Obj()
+
+	if err := cache.UpdateClusterQueue(log, cqEffective); err != nil {
+		t.Fatalf("failed to update CQ in cache: %v", err)
+	}
+
+	cqObj = cache.hm.ClusterQueue("cq-eff")
+	if q := cqObj.resourceNode.Quotas[fr]; q.Nominal != resources.NewAmount(10000) {
+		t.Errorf("expected nominal quota 10000 from EffectiveQuota, got %v", q.Nominal)
+	}
+
+	// Clear EffectiveQuota in update, verify fallback to Spec
+	cqCleared := utiltestingapi.MakeClusterQueue("cq-eff").
+		ResourceGroup(
+			*utiltestingapi.MakeFlavorQuotas("default").
+				ResourceQuotaWrapper("cpu").NominalQuota("5").Append().
+				Obj(),
+		).Obj()
+
+	if err := cache.UpdateClusterQueue(log, cqCleared); err != nil {
+		t.Fatalf("failed to update CQ in cache: %v", err)
+	}
+
+	cqObj = cache.hm.ClusterQueue("cq-eff")
+	if q := cqObj.resourceNode.Quotas[fr]; q.Nominal != resources.NewAmount(5000) {
+		t.Errorf("expected nominal quota 5000 after clearing EffectiveQuota, got %v", q.Nominal)
 	}
 }

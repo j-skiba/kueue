@@ -48,6 +48,7 @@ import (
 	utilpriority "sigs.k8s.io/kueue/pkg/util/priority"
 	utilqueue "sigs.k8s.io/kueue/pkg/util/queue"
 	"sigs.k8s.io/kueue/pkg/util/resource"
+	"sigs.k8s.io/kueue/pkg/util/resourcegroups"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	"sigs.k8s.io/kueue/pkg/workload"
 	"sigs.k8s.io/kueue/pkg/workload/concurrentadmission"
@@ -324,7 +325,7 @@ func (c *ClusterQueue) Update(apiCQ *kueue.ClusterQueue) error {
 // zero entries for resources removed from the spec.
 func (c *ClusterQueue) updateConfiguredResources(apiCQ *kueue.ClusterQueue) {
 	newConfigured := sets.New[corev1.ResourceName]()
-	for _, rg := range apiCQ.Spec.ResourceGroups {
+	for _, rg := range resourcegroups.EffectiveResourceGroups(apiCQ) {
 		for _, fq := range rg.Flavors {
 			for _, r := range fq.Resources {
 				newConfigured.Insert(r.Name)

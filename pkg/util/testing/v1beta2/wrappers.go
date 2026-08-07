@@ -929,6 +929,28 @@ func (c *CohortWrapper) ResourceGroup(flavors ...kueue.FlavorQuotas) *CohortWrap
 	return c
 }
 
+// EffectiveResourceGroup adds a ResourceGroup with flavors to status.effectiveQuota.
+func (c *CohortWrapper) EffectiveResourceGroup(flavors ...kueue.FlavorQuotas) *CohortWrapper {
+	if c.Status.EffectiveQuota == nil {
+		c.Status.EffectiveQuota = &kueue.EffectiveQuotaStatus{}
+	}
+	c.Status.EffectiveQuota.ResourceGroups = append(c.Status.EffectiveQuota.ResourceGroups, ResourceGroup(flavors...))
+	return c
+}
+
+// EffectiveQuotaFromSpec copies spec.resourceGroups to status.effectiveQuota.resourceGroups.
+func (c *CohortWrapper) EffectiveQuotaFromSpec() *CohortWrapper {
+	if c.Status.EffectiveQuota == nil {
+		c.Status.EffectiveQuota = &kueue.EffectiveQuotaStatus{}
+	}
+	rgs := make([]kueue.ResourceGroup, len(c.Spec.ResourceGroups))
+	for i, rg := range c.Spec.ResourceGroups {
+		rgs[i] = *rg.DeepCopy()
+	}
+	c.Status.EffectiveQuota.ResourceGroups = rgs
+	return c
+}
+
 func (c *CohortWrapper) FairWeight(w resource.Quantity) *CohortWrapper {
 	if c.Spec.FairSharing == nil {
 		c.Spec.FairSharing = &kueue.FairSharing{}
@@ -1078,6 +1100,28 @@ func ResourceGroup(flavors ...kueue.FlavorQuotas) kueue.ResourceGroup {
 // ResourceGroup adds a ResourceGroup with flavors.
 func (c *ClusterQueueWrapper) ResourceGroup(flavors ...kueue.FlavorQuotas) *ClusterQueueWrapper {
 	c.Spec.ResourceGroups = append(c.Spec.ResourceGroups, ResourceGroup(flavors...))
+	return c
+}
+
+// EffectiveResourceGroup adds a ResourceGroup with flavors to status.effectiveQuota.
+func (c *ClusterQueueWrapper) EffectiveResourceGroup(flavors ...kueue.FlavorQuotas) *ClusterQueueWrapper {
+	if c.Status.EffectiveQuota == nil {
+		c.Status.EffectiveQuota = &kueue.EffectiveQuotaStatus{}
+	}
+	c.Status.EffectiveQuota.ResourceGroups = append(c.Status.EffectiveQuota.ResourceGroups, ResourceGroup(flavors...))
+	return c
+}
+
+// EffectiveQuotaFromSpec copies spec.resourceGroups to status.effectiveQuota.resourceGroups.
+func (c *ClusterQueueWrapper) EffectiveQuotaFromSpec() *ClusterQueueWrapper {
+	if c.Status.EffectiveQuota == nil {
+		c.Status.EffectiveQuota = &kueue.EffectiveQuotaStatus{}
+	}
+	rgs := make([]kueue.ResourceGroup, len(c.Spec.ResourceGroups))
+	for i, rg := range c.Spec.ResourceGroups {
+		rgs[i] = *rg.DeepCopy()
+	}
+	c.Status.EffectiveQuota.ResourceGroups = rgs
 	return c
 }
 

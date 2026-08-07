@@ -24,6 +24,7 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueueapi "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	"sigs.k8s.io/kueue/pkg/util/resourcegroups"
 )
 
 // ClusterQueuesWebSocketHandler streams all cluster queues
@@ -66,7 +67,8 @@ func (h *Handlers) fetchClusterQueues(ctx context.Context) ([]map[string]any, er
 
 		// Extract flavors from resourceGroups
 		var flavors []string
-		for _, rg := range item.Spec.ResourceGroups {
+		itemRGs := resourcegroups.EffectiveResourceGroups(&item)
+		for _, rg := range itemRGs {
 			for _, flavor := range rg.Flavors {
 				flavors = append(flavors, string(flavor.Name))
 			}
@@ -76,7 +78,7 @@ func (h *Handlers) fetchClusterQueues(ctx context.Context) ([]map[string]any, er
 		result = append(result, map[string]any{
 			"name":               name,
 			"cohort":             cohort,
-			"resourceGroups":     convertResourceGroups(item.Spec.ResourceGroups),
+			"resourceGroups":     convertResourceGroups(itemRGs),
 			"admittedWorkloads":  admittedWorkloads,
 			"pendingWorkloads":   pendingWorkloads,
 			"reservingWorkloads": reservingWorkloads,
@@ -125,7 +127,7 @@ func (h *Handlers) fetchClusterQueueDetails(ctx context.Context, name string) (a
 		"metadata": cq.ObjectMeta,
 		"spec": map[string]any{
 			"cohortName":        string(cq.Spec.CohortName),
-			"resourceGroups":    convertResourceGroups(cq.Spec.ResourceGroups),
+			"resourceGroups":    convertResourceGroups(resourcegroups.EffectiveResourceGroups(cq)),
 			"preemption":        cq.Spec.Preemption,
 			"flavorFungibility": cq.Spec.FlavorFungibility,
 			"queueingStrategy":  cq.Spec.QueueingStrategy,

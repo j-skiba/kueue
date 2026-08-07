@@ -60,6 +60,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/util/priority"
 	utilptr "sigs.k8s.io/kueue/pkg/util/ptr"
 	"sigs.k8s.io/kueue/pkg/util/queue"
+	"sigs.k8s.io/kueue/pkg/util/resourcegroups"
 	utilslices "sigs.k8s.io/kueue/pkg/util/slices"
 	"sigs.k8s.io/kueue/pkg/util/tas"
 	"sigs.k8s.io/kueue/pkg/util/wait"
@@ -1474,7 +1475,7 @@ func AdmissionChecksForWorkload(log logr.Logger, wl *kueue.Workload, cq *kueue.C
 
 	// If no admission is present yet we can only list
 	// the checks which apply to all flavors supported by the ClusterQueue
-	allFlavors := queue.AllFlavors(cq.Spec.ResourceGroups)
+	allFlavors := queue.AllFlavors(resourcegroups.EffectiveResourceGroups(cq))
 	checksForAllFlavors := filterChecks(allChecks, func(acFlavors flavorSet) bool {
 		return acFlavors.IsSuperset(allFlavors)
 	})

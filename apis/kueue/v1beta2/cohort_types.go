@@ -78,6 +78,11 @@ type CohortStatus struct {
 	// The is recorded only when Fair Sharing is enabled in the Kueue configuration.
 	// +optional
 	FairSharing *FairSharingStatus `json:"fairSharing,omitempty"`
+
+	// effectiveQuota denotes the quota structure which will be used, if provided,
+	// for scheduling instead of the quota structure defined in .spec.resourceGroups.
+	// +optional
+	EffectiveQuota *EffectiveQuotaStatus `json:"effectiveQuota,omitempty"`
 }
 
 // +genclient

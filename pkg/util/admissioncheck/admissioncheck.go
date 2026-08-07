@@ -30,6 +30,7 @@ import (
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	controllerconsts "sigs.k8s.io/kueue/pkg/controller/constants"
+	"sigs.k8s.io/kueue/pkg/util/resourcegroups"
 )
 
 var (
@@ -184,7 +185,7 @@ func NewAdmissionChecks(cq *kueue.ClusterQueue) map[kueue.AdmissionCheckReferenc
 
 func allFlavors(cq *kueue.ClusterQueue) sets.Set[kueue.ResourceFlavorReference] {
 	flavors := sets.New[kueue.ResourceFlavorReference]()
-	for _, rg := range cq.Spec.ResourceGroups {
+	for _, rg := range resourcegroups.EffectiveResourceGroups(cq) {
 		for _, fv := range rg.Flavors {
 			flavors.Insert(fv.Name)
 		}
