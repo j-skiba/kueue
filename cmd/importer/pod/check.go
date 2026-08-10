@@ -27,7 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/kueue/cmd/importer/cache"
-	"sigs.k8s.io/kueue/pkg/util/resourcegroups"
 )
 
 func Check(ctx context.Context, c client.Client, importCache *cache.ImportCache, jobs uint) error {
@@ -47,16 +46,15 @@ func Check(ctx context.Context, c client.Client, importCache *cache.ImportCache,
 			return skip, err
 		}
 
-		rgs := resourcegroups.EffectiveResourceGroups(cq)
-		if len(rgs) == 0 {
+		if len(cq.Spec.ResourceGroups) == 0 {
 			return false, fmt.Errorf("%q has no resource groups: %w", cq.Name, cache.ErrCQInvalid)
 		}
 
-		if len(rgs[0].Flavors) == 0 {
+		if len(cq.Spec.ResourceGroups[0].Flavors) == 0 {
 			return false, fmt.Errorf("%q has no resource groups flavors: %w", cq.Name, cache.ErrCQInvalid)
 		}
 
-		rfName := rgs[0].Flavors[0].Name
+		rfName := cq.Spec.ResourceGroups[0].Flavors[0].Name
 		rf, rfFound := importCache.ResourceFlavors[rfName]
 		if !rfFound {
 			return false, fmt.Errorf("%q flavor %q: %w", cq.Name, rfName, cache.ErrCQInvalid)

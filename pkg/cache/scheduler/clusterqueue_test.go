@@ -747,12 +747,10 @@ func TestClusterQueueEffectiveQuotaUpdateAndFallback(t *testing.T) {
 	}
 
 	fr := resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU}
-	// Verify fallback to spec (nominal quota = 5)
 	if q := cqObj.resourceNode.Quotas[fr]; q.Nominal != resources.NewAmount(5000) {
 		t.Errorf("expected nominal quota 5000 from spec, got %v", q.Nominal)
 	}
 
-	// Update CQ with Status.EffectiveQuota (nominal quota = 10)
 	cqEffective := utiltestingapi.MakeClusterQueue("cq-eff").
 		ResourceGroup(
 			*utiltestingapi.MakeFlavorQuotas("default").
@@ -774,7 +772,6 @@ func TestClusterQueueEffectiveQuotaUpdateAndFallback(t *testing.T) {
 		t.Errorf("expected nominal quota 10000 from EffectiveQuota, got %v", q.Nominal)
 	}
 
-	// Clear EffectiveQuota in update, verify fallback to Spec
 	cqCleared := utiltestingapi.MakeClusterQueue("cq-eff").
 		ResourceGroup(
 			*utiltestingapi.MakeFlavorQuotas("default").

@@ -24,7 +24,6 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueueapi "sigs.k8s.io/kueue/apis/kueue/v1beta2"
-	"sigs.k8s.io/kueue/pkg/util/resourcegroups"
 )
 
 // CohortsWebSocketHandler streams all cohorts
@@ -114,7 +113,7 @@ func (h *Handlers) fetchCohortDetails(ctx context.Context, cohortName string) (m
 				"name": item.GetName(),
 				"spec": map[string]any{
 					"cohortName":        string(item.Spec.CohortName),
-					"resourceGroups":    convertResourceGroups(resourcegroups.EffectiveResourceGroups(&item)),
+					"resourceGroups":    convertResourceGroups(item.Spec.ResourceGroups),
 					"preemption":        item.Spec.Preemption,
 					"flavorFungibility": item.Spec.FlavorFungibility,
 					"queueingStrategy":  item.Spec.QueueingStrategy,

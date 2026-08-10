@@ -536,10 +536,12 @@ spec:
                       kind:
                         description: kind is the kind of manager managing effective
                           quota.
+                        maxLength: 63
                         type: string
                       name:
                         description: name is the name of the manager managing effective
                           quota.
+                        maxLength: 253
                         type: string
                     type: object
                   resourceGroups:

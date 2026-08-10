@@ -322,7 +322,7 @@ func (c *ClusterQueue) Update(apiCQ *kueue.ClusterQueue) error {
 
 // updateConfiguredResources seeds pendingResourcesTotal with 0 for newly configured
 // resources so they appear in metrics even when no workloads are pending, and prunes
-// zero entries for resources removed from the spec.
+// zero entries for resources removed from the effective resource groups.
 func (c *ClusterQueue) updateConfiguredResources(apiCQ *kueue.ClusterQueue) {
 	newConfigured := sets.New[corev1.ResourceName]()
 	for _, rg := range resourcegroups.EffectiveResourceGroups(apiCQ) {

@@ -200,7 +200,10 @@ func (r *CohortReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		)
 	}
 
-	log.V(2).Info("Cohort is being created or updated", "resources", resourcegroups.EffectiveCohortResourceGroups(&cohort))
+	log.V(2).Info("Cohort is being created or updated",
+		"resources", resourcegroups.EffectiveCohortResourceGroups(&cohort),
+		"usesEffectiveQuota", features.Enabled(features.DynamicQuota) && cohort.Status.EffectiveQuota != nil,
+	)
 	if err := r.cache.AddOrUpdateCohort(&cohort); err != nil {
 		log.V(2).Error(err, "Error adding or updating cohort in the cache")
 		// Fail fast to avoid queue/status updates from a stale cache state.

@@ -3437,7 +3437,7 @@ func TestTotalExecutionTime(t *testing.T) {
 	}
 }
 
-func TestAdmissionChecksForWorkload_DynamicQuota(t *testing.T) {
+func TestAdmissionChecksForWorkloadDynamicQuota(t *testing.T) {
 	cases := map[string]struct {
 		wl           *kueue.Workload
 		cq           *kueue.ClusterQueue

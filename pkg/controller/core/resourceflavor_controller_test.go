@@ -36,7 +36,6 @@ import (
 	mockscore "sigs.k8s.io/kueue/internal/mocks/controller/core"
 	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
-	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
@@ -173,16 +172,6 @@ func TestResourceFlavorReconcile(t *testing.T) {
 			},
 			wantFlavor: utiltestingapi.MakeResourceFlavor("flavor").Finalizers(kueue.ResourceInUseFinalizerName).Obj(),
 		},
-		"removes finalizer when deleted and effectiveQuota overrides flavor": {
-			flavor: utiltestingapi.MakeResourceFlavor("flavor-a").Finalizers(kueue.ResourceInUseFinalizerName).Obj(),
-			clusterQueues: []*kueue.ClusterQueue{
-				utiltestingapi.MakeClusterQueue("cq-using-flavor").
-					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor-a").Resource(corev1.ResourceCPU, "10").Obj()).
-					EffectiveResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor-b").Resource(corev1.ResourceCPU, "10").Obj()).
-					Obj(),
-			},
-			wantDeleted: true,
-		},
 		"ignores not-found flavor": {
 			flavor:    utiltestingapi.MakeResourceFlavor("flavor").Obj(),
 			skipStore: true,
@@ -191,7 +180,6 @@ func TestResourceFlavorReconcile(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			features.SetFeatureGateDuringTest(t, features.DynamicQuota, true)
 			ctx, _ := utiltesting.ContextWithLog(t)
 
 			builder := utiltesting.NewClientBuilder()
@@ -356,18 +344,10 @@ func TestCqHandlerGeneric(t *testing.T) {
 			},
 			wantEnqueued: []string{"flavor-orphan"},
 		},
-		"enqueues flavors from effectiveQuota when present": {
-			cq: utiltestingapi.MakeClusterQueue("cq").
-				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor-spec").Resource(corev1.ResourceCPU, "10").Obj()).
-				EffectiveResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor-eff").Resource(corev1.ResourceCPU, "10").Obj()).
-				Obj(),
-			wantEnqueued: []string{"flavor-eff"},
-		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			features.SetFeatureGateDuringTest(t, features.DynamicQuota, true)
 			ctx, _ := utiltesting.ContextWithLog(t)
 			cl := utiltesting.NewClientBuilder().Build()
 			cqCache := schdcache.New(cl)
@@ -434,18 +414,10 @@ func TestResourceFlavors(t *testing.T) {
 			cq:   makeCQ([]string{"flavor-a"}, []string{"flavor-a"}),
 			want: []kueue.ResourceFlavorReference{"flavor-a"},
 		},
-		"flavors from effectiveQuota when present": {
-			cq: utiltestingapi.MakeClusterQueue("cq").
-				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor-a").Resource(corev1.ResourceCPU, "10").Obj()).
-				EffectiveResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor-b").Resource(corev1.ResourceCPU, "10").Obj()).
-				Obj(),
-			want: []kueue.ResourceFlavorReference{"flavor-b"},
-		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			features.SetFeatureGateDuringTest(t, features.DynamicQuota, true)
 			got := sets.List(resourceFlavors(tc.cq))
 
 			if diff := cmp.Diff(tc.want, got,

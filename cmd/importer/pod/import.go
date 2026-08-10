@@ -39,7 +39,6 @@ import (
 	controllerconstants "sigs.k8s.io/kueue/pkg/controller/constants"
 	"sigs.k8s.io/kueue/pkg/controller/jobs/pod"
 	"sigs.k8s.io/kueue/pkg/resources"
-	"sigs.k8s.io/kueue/pkg/util/resourcegroups"
 	"sigs.k8s.io/kueue/pkg/workload"
 	workloadpatching "sigs.k8s.io/kueue/pkg/workload/patching"
 )
@@ -197,7 +196,7 @@ func admitWorkload(ctx context.Context, c client.Client, wl *kueue.Workload, cq 
 				},
 			},
 		}
-		flv := resourcegroups.EffectiveResourceGroups(cq)[0].Flavors[0].Name
+		flv := cq.Spec.ResourceGroups[0].Flavors[0].Name
 		if info.TotalRequests[0].Requests != nil {
 			info.TotalRequests[0].Requests.ForEach(func(name corev1.ResourceName, val int64) {
 				admission.PodSetAssignments[0].Flavors[name] = flv

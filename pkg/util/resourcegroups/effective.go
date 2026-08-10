@@ -24,12 +24,11 @@ import (
 // EffectiveResourceGroups returns Status.EffectiveQuota.ResourceGroups when DynamicQuota
 // feature gate is enabled and effective quota is set; otherwise returns Spec.ResourceGroups.
 func EffectiveResourceGroups(cq *kueue.ClusterQueue) []kueue.ResourceGroup {
-	if cq != nil && features.Enabled(features.DynamicQuota) &&
-		cq.Status.EffectiveQuota != nil && len(cq.Status.EffectiveQuota.ResourceGroups) > 0 {
-		return cq.Status.EffectiveQuota.ResourceGroups
-	}
 	if cq == nil {
 		return nil
+	}
+	if features.Enabled(features.DynamicQuota) && cq.Status.EffectiveQuota != nil {
+		return cq.Status.EffectiveQuota.ResourceGroups
 	}
 	return cq.Spec.ResourceGroups
 }
@@ -37,12 +36,11 @@ func EffectiveResourceGroups(cq *kueue.ClusterQueue) []kueue.ResourceGroup {
 // EffectiveCohortResourceGroups returns Status.EffectiveQuota.ResourceGroups when DynamicQuota
 // feature gate is enabled and effective quota is set; otherwise returns Spec.ResourceGroups.
 func EffectiveCohortResourceGroups(cohort *kueue.Cohort) []kueue.ResourceGroup {
-	if cohort != nil && features.Enabled(features.DynamicQuota) &&
-		cohort.Status.EffectiveQuota != nil && len(cohort.Status.EffectiveQuota.ResourceGroups) > 0 {
-		return cohort.Status.EffectiveQuota.ResourceGroups
-	}
 	if cohort == nil {
 		return nil
+	}
+	if features.Enabled(features.DynamicQuota) && cohort.Status.EffectiveQuota != nil {
+		return cohort.Status.EffectiveQuota.ResourceGroups
 	}
 	return cohort.Spec.ResourceGroups
 }

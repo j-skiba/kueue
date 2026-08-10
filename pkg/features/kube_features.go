@@ -845,8 +845,6 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 	TASValidateWorkloadSliceSize: {
 		{Version: version.MustParse("0.20"), Default: true, PreRelease: featuregate.Beta}, // GA in 0.21
 	},
-<<<<<<< HEAD
-=======
 
 	WorkloadValidationForPodSetMetadata: {
 		{Version: version.MustParse("0.20"), Default: true, PreRelease: featuregate.Beta},
@@ -867,7 +865,6 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 	DynamicQuota: {
 		{Version: version.MustParse("0.20"), Default: false, PreRelease: featuregate.Alpha},
 	},
->>>>>>> f37a57ea1 (handle EffectiveQuota)
 }
 
 func SetFeatureGateDuringTest(tb testing.TB, f featuregate.Feature, value bool) {

@@ -24,7 +24,6 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueueapi "sigs.k8s.io/kueue/apis/kueue/v1beta2"
-	"sigs.k8s.io/kueue/pkg/util/resourcegroups"
 )
 
 // ClusterQueuesWebSocketHandler streams all cluster queues
@@ -127,7 +126,7 @@ func (h *Handlers) fetchClusterQueueDetails(ctx context.Context, name string) (a
 		"metadata": cq.ObjectMeta,
 		"spec": map[string]any{
 			"cohortName":        string(cq.Spec.CohortName),
-			"resourceGroups":    convertResourceGroups(resourcegroups.EffectiveResourceGroups(cq)),
+			"resourceGroups":    convertResourceGroups(cq.Spec.ResourceGroups),
 			"preemption":        cq.Spec.Preemption,
 			"flavorFungibility": cq.Spec.FlavorFungibility,
 			"queueingStrategy":  cq.Spec.QueueingStrategy,

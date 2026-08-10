@@ -429,10 +429,12 @@ type EffectiveQuotaStatus struct {
 type EffectiveQuotaStatusManagerRef struct {
 	// kind is the kind of manager managing effective quota.
 	// +optional
+	// +kubebuilder:validation:MaxLength=63
 	Kind string `json:"kind,omitempty"`
 
 	// name is the name of the manager managing effective quota.
 	// +optional
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name,omitempty"`
 }
 

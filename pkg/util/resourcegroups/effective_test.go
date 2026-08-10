@@ -83,6 +83,23 @@ func TestEffectiveResourceGroups(t *testing.T) {
 	cqNoEffective := &kueue.ClusterQueue{Spec: kueue.ClusterQueueSpec{ResourceGroups: specRGs}}
 	cohortNoEffective := &kueue.Cohort{Spec: kueue.CohortSpec{ResourceGroups: specRGs}}
 
+	cqEmptyEffective := &kueue.ClusterQueue{
+		Spec: kueue.ClusterQueueSpec{ResourceGroups: specRGs},
+		Status: kueue.ClusterQueueStatus{
+			EffectiveQuota: &kueue.EffectiveQuotaStatus{
+				ResourceGroups: []kueue.ResourceGroup{},
+			},
+		},
+	}
+	cohortEmptyEffective := &kueue.Cohort{
+		Spec: kueue.CohortSpec{ResourceGroups: specRGs},
+		Status: kueue.CohortStatus{
+			EffectiveQuota: &kueue.EffectiveQuotaStatus{
+				ResourceGroups: []kueue.ResourceGroup{},
+			},
+		},
+	}
+
 	cases := map[string]struct {
 		dynamicQuota bool
 		cq           *kueue.ClusterQueue
@@ -106,6 +123,12 @@ func TestEffectiveResourceGroups(t *testing.T) {
 			cq:           cqNoEffective,
 			cohort:       cohortNoEffective,
 			wantRGs:      specRGs,
+		},
+		"DynamicQuota enabled returns empty status effectiveQuota when set to empty": {
+			dynamicQuota: true,
+			cq:           cqEmptyEffective,
+			cohort:       cohortEmptyEffective,
+			wantRGs:      []kueue.ResourceGroup{},
 		},
 	}
 

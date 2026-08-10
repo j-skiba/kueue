@@ -45,7 +45,6 @@ var _ = ginkgo.Describe("Scheduler DynamicQuota", ginkgo.Ordered, func() {
 		flavor = utiltestingapi.MakeResourceFlavor("dynquota-flavor").Obj()
 		util.MustCreate(ctx, k8sClient, flavor)
 
-		// Create ClusterQueue with 0 nominal quota in Spec
 		clusterQueue = utiltestingapi.MakeClusterQueue("dynquota-cq").
 			ResourceGroup(*utiltestingapi.MakeFlavorQuotas(flavor.Name).
 				Resource(corev1.ResourceCPU, "0").
@@ -89,14 +88,11 @@ var _ = ginkgo.Describe("Scheduler DynamicQuota", ginkgo.Ordered, func() {
 						Name: "dqo-test",
 					},
 					ResourceGroups: []kueue.ResourceGroup{
-						{
-							CoveredResources: []corev1.ResourceName{corev1.ResourceCPU},
-							Flavors: []kueue.FlavorQuotas{
-								*utiltestingapi.MakeFlavorQuotas(flavor.Name).
-									Resource(corev1.ResourceCPU, "5").
-									Obj(),
-							},
-						},
+						utiltestingapi.ResourceGroup(
+							*utiltestingapi.MakeFlavorQuotas(flavor.Name).
+								Resource(corev1.ResourceCPU, "5").
+								Obj(),
+						),
 					},
 				}
 				g.Expect(k8sClient.Status().Update(ctx, &cq)).To(gomega.Succeed())
@@ -127,52 +123,52 @@ var _ = ginkgo.Describe("Scheduler DynamicQuota", ginkgo.Ordered, func() {
 	})
 
 	ginkgo.It("should fallback to spec when EffectiveQuota status is cleared", func() {
-		// First, populate EffectiveQuota to allow admission
-		gomega.Eventually(func(g gomega.Gomega) {
-			var cq kueue.ClusterQueue
-			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(clusterQueue), &cq)).To(gomega.Succeed())
-			cq.Status.EffectiveQuota = &kueue.EffectiveQuotaStatus{
-				LastUpdateTime: metav1.Now(),
-				ManagerRef: kueue.EffectiveQuotaStatusManagerRef{
-					Kind: "DynamicQuotaOrchestrator",
-					Name: "dqo-test",
-				},
-				ResourceGroups: []kueue.ResourceGroup{
-					{
-						CoveredResources: []corev1.ResourceName{corev1.ResourceCPU},
-						Flavors: []kueue.FlavorQuotas{
+		ginkgo.By("populating EffectiveQuota to allow initial admission", func() {
+			gomega.Eventually(func(g gomega.Gomega) {
+				var cq kueue.ClusterQueue
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(clusterQueue), &cq)).To(gomega.Succeed())
+				cq.Status.EffectiveQuota = &kueue.EffectiveQuotaStatus{
+					LastUpdateTime: metav1.Now(),
+					ManagerRef: kueue.EffectiveQuotaStatusManagerRef{
+						Kind: "DynamicQuotaOrchestrator",
+						Name: "dqo-test",
+					},
+					ResourceGroups: []kueue.ResourceGroup{
+						utiltestingapi.ResourceGroup(
 							*utiltestingapi.MakeFlavorQuotas(flavor.Name).
 								Resource(corev1.ResourceCPU, "5").
 								Obj(),
-						},
+						),
 					},
-				},
-			}
-			g.Expect(k8sClient.Status().Update(ctx, &cq)).To(gomega.Succeed())
-		}, util.Timeout, util.Interval).Should(gomega.Succeed())
+				}
+				g.Expect(k8sClient.Status().Update(ctx, &cq)).To(gomega.Succeed())
+			}, util.Timeout, util.Interval).Should(gomega.Succeed())
 
-		wl1 := utiltestingapi.MakeWorkload("wl1", ns.Name).
-			Queue(kueue.LocalQueueName(localQueue.Name)).
-			Request(corev1.ResourceCPU, "2").
-			Obj()
-		util.MustCreate(ctx, k8sClient, wl1)
-		util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wl1)
+			wl1 := utiltestingapi.MakeWorkload("wl1", ns.Name).
+				Queue(kueue.LocalQueueName(localQueue.Name)).
+				Request(corev1.ResourceCPU, "2").
+				Obj()
+			util.MustCreate(ctx, k8sClient, wl1)
+			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wl1)
+		})
 
-		// Clear EffectiveQuota in status
-		gomega.Eventually(func(g gomega.Gomega) {
-			var cq kueue.ClusterQueue
-			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(clusterQueue), &cq)).To(gomega.Succeed())
-			cq.Status.EffectiveQuota = nil
-			g.Expect(k8sClient.Status().Update(ctx, &cq)).To(gomega.Succeed())
-		}, util.Timeout, util.Interval).Should(gomega.Succeed())
+		ginkgo.By("clearing EffectiveQuota in status", func() {
+			gomega.Eventually(func(g gomega.Gomega) {
+				var cq kueue.ClusterQueue
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(clusterQueue), &cq)).To(gomega.Succeed())
+				cq.Status.EffectiveQuota = nil
+				g.Expect(k8sClient.Status().Update(ctx, &cq)).To(gomega.Succeed())
+			}, util.Timeout, util.Interval).Should(gomega.Succeed())
+		})
 
-		// Subsequent workload should fall back to spec (0 quota) and stay pending
-		wl2 := utiltestingapi.MakeWorkload("wl2", ns.Name).
-			Queue(kueue.LocalQueueName(localQueue.Name)).
-			Request(corev1.ResourceCPU, "2").
-			Obj()
-		util.MustCreate(ctx, k8sClient, wl2)
-		util.ExpectWorkloadsToBePending(ctx, k8sClient, wl2)
+		ginkgo.By("verifying subsequent workload falls back to spec and stays pending", func() {
+			wl2 := utiltestingapi.MakeWorkload("wl2", ns.Name).
+				Queue(kueue.LocalQueueName(localQueue.Name)).
+				Request(corev1.ResourceCPU, "2").
+				Obj()
+			util.MustCreate(ctx, k8sClient, wl2)
+			util.ExpectWorkloadsToBePending(ctx, k8sClient, wl2)
+		})
 	})
 
 	ginkgo.It("should ignore EffectiveQuota status when DynamicQuota feature gate is disabled", func() {
@@ -188,14 +184,11 @@ var _ = ginkgo.Describe("Scheduler DynamicQuota", ginkgo.Ordered, func() {
 					Name: "dqo-test",
 				},
 				ResourceGroups: []kueue.ResourceGroup{
-					{
-						CoveredResources: []corev1.ResourceName{corev1.ResourceCPU},
-						Flavors: []kueue.FlavorQuotas{
-							*utiltestingapi.MakeFlavorQuotas(flavor.Name).
-								Resource(corev1.ResourceCPU, "5").
-								Obj(),
-						},
-					},
+					utiltestingapi.ResourceGroup(
+						*utiltestingapi.MakeFlavorQuotas(flavor.Name).
+							Resource(corev1.ResourceCPU, "5").
+							Obj(),
+					),
 				},
 			}
 			g.Expect(k8sClient.Status().Update(ctx, &cq)).To(gomega.Succeed())

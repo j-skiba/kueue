@@ -245,14 +245,16 @@ func (h *cqHandler) Generic(_ context.Context, e event.GenericEvent, q workqueue
 		return
 	}
 
-	for flavorName := range resourceFlavors(cq) {
-		if cqs := h.cache.ClusterQueuesUsingFlavor(flavorName); len(cqs) == 0 {
-			req := reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name: string(flavorName),
-				},
+	for _, rg := range resourcegroups.EffectiveResourceGroups(cq) {
+		for _, flavor := range rg.Flavors {
+			if cqs := h.cache.ClusterQueuesUsingFlavor(flavor.Name); len(cqs) == 0 {
+				req := reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Name: string(flavor.Name),
+					},
+				}
+				q.Add(req)
 			}
-			q.Add(req)
 		}
 	}
 }
