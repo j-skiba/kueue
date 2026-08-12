@@ -71,6 +71,9 @@ type clusterQueue struct {
 	// deleted, or the resource groups are changed.
 	AllocatableResourceGeneration int64
 
+	HasEffectiveQuota     bool
+	EffectiveQuotaManager string
+
 	AdmittedUsage resources.FlavorResourceQuantities
 	// localQueues by (namespace/name).
 	localQueues                        map[queue.LocalQueueReference]*LocalQueue
@@ -206,6 +209,12 @@ func (c *clusterQueue) updateClusterQueue(
 	c.AdmissionScope = in.Spec.AdmissionScope
 	if features.Enabled(features.ConcurrentAdmission) {
 		c.ConcurrentAdmissionPolicy = in.Spec.ConcurrentAdmissionPolicy
+	}
+	c.HasEffectiveQuota = false
+	c.EffectiveQuotaManager = ""
+	if features.Enabled(features.DynamicQuota) && in.Status.EffectiveQuota != nil {
+		c.HasEffectiveQuota = true
+		c.EffectiveQuotaManager = in.Status.EffectiveQuota.ManagerRef.Name
 	}
 	return nil
 }
