@@ -1433,7 +1433,7 @@ Dynamic Quota Orchestration (DQO).</p>
    <p>lastUpdateTime is the time at which the effective quota was last updated.</p>
 </td>
 </tr>
-<tr><td><code>managerRef</code> <B>[Required]</B><br/>
+<tr><td><code>managerRef,omitzero</code> <B>[Required]</B><br/>
 <a href="#kueue-x-k8s-io-v1beta2-EffectiveQuotaStatusManagerRef"><code>EffectiveQuotaStatusManagerRef</code></a>
 </td>
 <td>

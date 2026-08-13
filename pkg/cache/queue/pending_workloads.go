@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/util/heap"
 	utilqueue "sigs.k8s.io/kueue/pkg/util/queue"
+	"sigs.k8s.io/kueue/pkg/util/resourcegroups"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
@@ -269,13 +270,13 @@ func (p *PendingWorkloads) subtractPendingResources(wInfo *workload.Info) {
 
 // UpdateConfiguredResources seeds pendingResourcesTotal with 0 for newly configured
 // resources so they appear in metrics even when no workloads are pending, and prunes
-// zero entries for resources removed from the spec.
+// zero entries for resources removed from the effective resource groups.
 func (p *PendingWorkloads) UpdateConfiguredResources(apiCQ *kueue.ClusterQueue) {
 	p.Lock()
 	defer p.Unlock()
 
 	newConfigured := sets.New[corev1.ResourceName]()
-	for _, rg := range apiCQ.Spec.ResourceGroups {
+	for _, rg := range resourcegroups.EffectiveResourceGroups(apiCQ) {
 		for _, fq := range rg.Flavors {
 			for _, r := range fq.Resources {
 				newConfigured.Insert(r.Name)

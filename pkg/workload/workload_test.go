@@ -3717,3 +3717,56 @@ func TestTotalExecutionTime(t *testing.T) {
 		})
 	}
 }
+
+func TestAdmissionChecksForWorkloadDynamicQuota(t *testing.T) {
+	cases := map[string]struct {
+		wl           *kueue.Workload
+		cq           *kueue.ClusterQueue
+		dynamicQuota bool
+		wantChecks   sets.Set[kueue.AdmissionCheckReference]
+	}{
+		"unadmitted workload uses cq.Spec.ResourceGroups when DynamicQuota is disabled": {
+			wl: utiltestingapi.MakeWorkload("wl", "ns").Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor-a").Resource("cpu", "1").Obj()).
+				EffectiveResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor-b").Resource("cpu", "1").Obj()).
+				AdmissionCheckStrategy(kueue.AdmissionCheckStrategyRule{
+					Name:      "ac1",
+					OnFlavors: []kueue.ResourceFlavorReference{"flavor-a"},
+				}, kueue.AdmissionCheckStrategyRule{
+					Name:      "ac2",
+					OnFlavors: []kueue.ResourceFlavorReference{"flavor-b"},
+				}).
+				Obj(),
+			dynamicQuota: false,
+			wantChecks:   sets.New[kueue.AdmissionCheckReference]("ac1"),
+		},
+		"unadmitted workload uses cq.Status.EffectiveQuota when DynamicQuota is enabled": {
+			wl: utiltestingapi.MakeWorkload("wl", "ns").Obj(),
+			cq: utiltestingapi.MakeClusterQueue("cq").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor-a").Resource("cpu", "1").Obj()).
+				EffectiveResourceGroup(*utiltestingapi.MakeFlavorQuotas("flavor-b").Resource("cpu", "1").Obj()).
+				AdmissionCheckStrategy(kueue.AdmissionCheckStrategyRule{
+					Name:      "ac1",
+					OnFlavors: []kueue.ResourceFlavorReference{"flavor-a"},
+				}, kueue.AdmissionCheckStrategyRule{
+					Name:      "ac2",
+					OnFlavors: []kueue.ResourceFlavorReference{"flavor-b"},
+				}).
+				Obj(),
+			dynamicQuota: true,
+			wantChecks:   sets.New[kueue.AdmissionCheckReference]("ac2"),
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGateDuringTest(t, features.DynamicQuotaOrchestration, tc.dynamicQuota)
+			_, log := utiltesting.ContextWithLog(t)
+			got := AdmissionChecksForWorkload(log, tc.wl, tc.cq)
+			if diff := cmp.Diff(tc.wantChecks, got); diff != "" {
+				t.Errorf("AdmissionChecksForWorkload() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
