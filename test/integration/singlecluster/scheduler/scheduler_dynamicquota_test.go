@@ -326,7 +326,58 @@ var _ = ginkgo.Describe("Scheduler DynamicQuotaOrchestration", ginkgo.Ordered, f
 				Request(corev1.ResourceCPU, "3").
 				Obj()
 			util.MustCreate(ctx, k8sClient, wl)
-			util.ExpectWorkloadsToBePending(ctx, k8sClient, wl)
+			util.ExpectWorkloadsToBeAdmitted(ctx, k8sClient, wl)
+		})
+	})
+
+	ginkgo.It("should report effective quota in cluster queue info metric", func() {
+		ginkgo.By("verifying initial info metric has_effective_quota='false'", func() {
+			util.ExpectClusterQueueInfoWithEffectiveQuotaMetric(clusterQueue.Name, "", "", "false", "", 1)
+		})
+
+		ginkgo.By("updating ClusterQueue status with EffectiveQuota providing 10 CPU and manager 'dqo-mgr'", func() {
+			updateCQEffectiveQuota(ctx, k8sClient, clusterQueue, flavor, "10", "dqo-mgr")
+		})
+
+		ginkgo.By("verifying info metric reports has_effective_quota='true' and manager name", func() {
+			util.ExpectClusterQueueInfoWithEffectiveQuotaMetric(clusterQueue.Name, "", "", "true", "dqo-mgr", 1)
+		})
+
+		ginkgo.By("clearing EffectiveQuota in status", func() {
+			updateCQEffectiveQuota(ctx, k8sClient, clusterQueue, flavor, "", "")
+		})
+
+		ginkgo.By("verifying info metric reverts to has_effective_quota='false'", func() {
+			util.ExpectClusterQueueInfoWithEffectiveQuotaMetric(clusterQueue.Name, "", "", "false", "", 1)
+		})
+	})
+
+	ginkgo.It("should report effective quota in cohort info metric", func() {
+		cohort = utiltestingapi.MakeCohort("dynquota-cohort").
+			ResourceGroup(*utiltestingapi.MakeFlavorQuotas(flavor.Name).
+				Resource(corev1.ResourceCPU, "0").
+				Obj()).
+			Obj()
+		util.MustCreate(ctx, k8sClient, cohort)
+
+		ginkgo.By("verifying initial cohort info metric has_effective_quota='false'", func() {
+			util.ExpectCohortInfoWithEffectiveQuotaMetric(cohort.Name, "", cohort.Name, "false", "", 1)
+		})
+
+		ginkgo.By("updating Cohort status with EffectiveQuota", func() {
+			updateCohortEffectiveQuota(ctx, k8sClient, cohort, flavor, "20", "dqo-cohort-mgr")
+		})
+
+		ginkgo.By("verifying cohort info metric reports has_effective_quota='true' and manager name", func() {
+			util.ExpectCohortInfoWithEffectiveQuotaMetric(cohort.Name, "", cohort.Name, "true", "dqo-cohort-mgr", 1)
+		})
+
+		ginkgo.By("clearing Cohort EffectiveQuota in status", func() {
+			updateCohortEffectiveQuota(ctx, k8sClient, cohort, flavor, "", "")
+		})
+
+		ginkgo.By("verifying cohort info metric reverts to has_effective_quota='false'", func() {
+			util.ExpectCohortInfoWithEffectiveQuotaMetric(cohort.Name, "", cohort.Name, "false", "", 1)
 		})
 	})
 })
