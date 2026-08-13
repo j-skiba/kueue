@@ -22,6 +22,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	corev1 "k8s.io/api/core/v1"
 
+	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/resources"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
@@ -63,5 +64,46 @@ func TestCohortLendable(t *testing.T) {
 	lendable := calculateLendable(cache.hm.Cohort("test-cohort"))
 	if diff := cmp.Diff(wantLendable, lendable); diff != "" {
 		t.Errorf("Unexpected cohort lendable (-want,+got):\n%s", diff)
+	}
+}
+
+func TestCohortEffectiveQuotas(t *testing.T) {
+	cohort := utiltestingapi.MakeCohort("test-cohort").
+		ResourceGroup(
+			*utiltestingapi.MakeFlavorQuotas("default").Resource(corev1.ResourceCPU, "10").Obj(),
+		).
+		EffectiveResourceGroup(
+			*utiltestingapi.MakeFlavorQuotas("default").Resource(corev1.ResourceCPU, "500").Obj(),
+		).
+		Obj()
+
+	cases := map[string]struct {
+		dynamicQuota bool
+		wantNominal  int64
+	}{
+		"DynamicQuota disabled uses spec quotas for cohort": {
+			dynamicQuota: false,
+			wantNominal:  10000,
+		},
+		"DynamicQuota enabled uses effective quotas for cohort": {
+			dynamicQuota: true,
+			wantNominal:  500000,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGateDuringTest(t, features.DynamicQuotaOrchestration, tc.dynamicQuota)
+
+			c := newCohort("test-cohort")
+			if err := c.updateCohort(cohort, nil); err != nil {
+				t.Fatalf("unexpected error updating cohort: %v", err)
+			}
+
+			fr := resources.FlavorResource{Flavor: "default", Resource: corev1.ResourceCPU}
+			if got := c.resourceNode.Quotas[fr].Nominal.Int64(); got != tc.wantNominal {
+				t.Errorf("Expected nominal quota %d, got %d", tc.wantNominal, got)
+			}
+		})
 	}
 }

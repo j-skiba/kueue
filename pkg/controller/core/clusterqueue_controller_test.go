@@ -30,11 +30,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
+	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/metrics"
+	"sigs.k8s.io/kueue/pkg/resources"
 	preemptexpectations "sigs.k8s.io/kueue/pkg/scheduler/preemption/expectations"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
@@ -696,6 +699,130 @@ func TestRecordResourceMetrics(t *testing.T) {
 			endMetrics := allMetricsForQueue(tc.queue.Name)
 			if len(endMetrics.NominalDPs) != 0 || len(endMetrics.BorrowingDPs) != 0 || len(endMetrics.UsageDPs) != 0 {
 				t.Errorf("Unexpected metrics after cleanup:\n%v", endMetrics)
+			}
+		})
+	}
+}
+
+func TestClusterQueueReconcilerUpdate(t *testing.T) {
+	cqName := "test-cq"
+	flavorName := "default"
+	specFlavor := utiltestingapi.MakeFlavorQuotas(flavorName).Resource(corev1.ResourceCPU, "5").FlavorQuotas
+	effectiveFlavor := utiltestingapi.MakeFlavorQuotas(flavorName).Resource(corev1.ResourceCPU, "10").FlavorQuotas
+
+	cases := map[string]struct {
+		dynamicQuota bool
+		oldCQ        *kueue.ClusterQueue
+		newCQ        *kueue.ClusterQueue
+		wantNominal  int64
+	}{
+		"updating status.effectiveQuotas with DynamicQuota enabled updates cache": {
+			dynamicQuota: true,
+			oldCQ: utiltestingapi.MakeClusterQueue(cqName).
+				ResourceGroup(specFlavor).
+				Condition(kueue.ClusterQueueActive, metav1.ConditionTrue, "Ready", "Ready").
+				Obj(),
+			newCQ: utiltestingapi.MakeClusterQueue(cqName).
+				ResourceGroup(specFlavor).
+				Condition(kueue.ClusterQueueActive, metav1.ConditionTrue, "Ready", "Ready").
+				EffectiveResourceGroup(effectiveFlavor).
+				Obj(),
+			wantNominal: 10000,
+		},
+		"updating status.effectiveQuotas with DynamicQuota disabled ignores effective quota": {
+			dynamicQuota: false,
+			oldCQ: utiltestingapi.MakeClusterQueue(cqName).
+				ResourceGroup(specFlavor).
+				Condition(kueue.ClusterQueueActive, metav1.ConditionTrue, "Ready", "Ready").
+				Obj(),
+			newCQ: utiltestingapi.MakeClusterQueue(cqName).
+				ResourceGroup(specFlavor).
+				Condition(kueue.ClusterQueueActive, metav1.ConditionTrue, "Ready", "Ready").
+				EffectiveResourceGroup(effectiveFlavor).
+				Obj(),
+			wantNominal: 5000,
+		},
+		"updating unrelated condition does not update quota": {
+			dynamicQuota: true,
+			oldCQ: utiltestingapi.MakeClusterQueue(cqName).
+				ResourceGroup(specFlavor).
+				Condition(kueue.ClusterQueueActive, metav1.ConditionTrue, "Ready", "Ready").
+				Obj(),
+			newCQ: func() *kueue.ClusterQueue {
+				cq := utiltestingapi.MakeClusterQueue(cqName).
+					ResourceGroup(specFlavor).
+					Condition(kueue.ClusterQueueActive, metav1.ConditionTrue, "Ready", "Ready").
+					Obj()
+				cq.Status.Conditions = append(cq.Status.Conditions, metav1.Condition{
+					Type:   "CustomCondition",
+					Status: metav1.ConditionTrue,
+					Reason: "CustomReason",
+				})
+				return cq
+			}(),
+			wantNominal: 5000,
+		},
+		"deleting cluster queue returns true": {
+			dynamicQuota: true,
+			oldCQ: utiltestingapi.MakeClusterQueue(cqName).
+				ResourceGroup(specFlavor).
+				Condition(kueue.ClusterQueueActive, metav1.ConditionTrue, "Ready", "Ready").
+				Obj(),
+			newCQ: func() *kueue.ClusterQueue {
+				cq := utiltestingapi.MakeClusterQueue(cqName).
+					ResourceGroup(specFlavor).
+					Condition(kueue.ClusterQueueActive, metav1.ConditionTrue, "Ready", "Ready").
+					Obj()
+				now := metav1.Now()
+				cq.DeletionTimestamp = &now
+				return cq
+			}(),
+			wantNominal: 5000,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGateDuringTest(t, features.DynamicQuotaOrchestration, tc.dynamicQuota)
+			ctx, log := utiltesting.ContextWithLog(t)
+			cl := utiltesting.NewClientBuilder().Build()
+			cache := schdcache.New(cl)
+			qManager := qcache.NewManagerForUnitTests(cl, cache)
+			r := NewClusterQueueReconciler(cl, qManager, cache)
+
+			rf := utiltestingapi.MakeResourceFlavor(flavorName).Obj()
+			cache.AddOrUpdateResourceFlavor(log, rf)
+
+			if err := cache.AddClusterQueue(ctx, tc.oldCQ); err != nil {
+				t.Fatalf("Failed to add CQ to cache: %v", err)
+			}
+			if err := qManager.AddClusterQueue(ctx, tc.oldCQ); err != nil {
+				t.Fatalf("Failed to add CQ to queue manager: %v", err)
+			}
+
+			e := event.TypedUpdateEvent[*kueue.ClusterQueue]{
+				ObjectOld: tc.oldCQ,
+				ObjectNew: tc.newCQ,
+			}
+			if !r.Update(e) {
+				t.Errorf("r.Update() returned false, want true")
+			}
+
+			if tc.newCQ.DeletionTimestamp != nil {
+				return
+			}
+
+			snap, err := cache.Snapshot(ctx)
+			if err != nil {
+				t.Fatalf("Failed to build snapshot: %v", err)
+			}
+			cqSnap := snap.ClusterQueue(kueue.ClusterQueueReference(cqName))
+			if cqSnap == nil {
+				t.Fatalf("Expected cluster queue %s in snapshot", cqName)
+			}
+			fr := resources.FlavorResource{Flavor: kueue.ResourceFlavorReference(flavorName), Resource: corev1.ResourceCPU}
+			if got := cqSnap.ResourceNode.Quotas[fr].Nominal.Int64(); got != tc.wantNominal {
+				t.Errorf("Expected nominal quota %d, got %d", tc.wantNominal, got)
 			}
 		})
 	}

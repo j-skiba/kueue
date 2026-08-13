@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/component-base/featuregate"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -51,12 +52,12 @@ func TestCQReconcile(t *testing.T) {
 	features.SetFeatureGateDuringTest(t, features.MultiKueueManagerQuotaAutomation, true)
 
 	cases := map[string]struct {
-		cq      *kueue.ClusterQueue
-		lqs     []*kueue.LocalQueue
-		acs     []*kueue.AdmissionCheck
-		configs []*kueue.MultiKueueConfig
-		workers map[string]workerState
-
+		featureGates       map[featuregate.Feature]bool
+		cq                 *kueue.ClusterQueue
+		lqs                []*kueue.LocalQueue
+		acs                []*kueue.AdmissionCheck
+		configs            []*kueue.MultiKueueConfig
+		workers            map[string]workerState
 		wantQuotaAutomated bool
 		wantNominalQuotas  map[string]string // Ignored if wantQuotaAutomated == false
 		wantCondition      *metav1.Condition
@@ -100,6 +101,55 @@ func TestCQReconcile(t *testing.T) {
 			wantNominalQuotas: map[string]string{
 				"cpu":    "15",
 				"memory": "30Gi",
+			},
+			wantCondition: &metav1.Condition{
+				Type:    kueue.MultiKueueManagerQuotaAutomation,
+				Status:  metav1.ConditionTrue,
+				Reason:  "QuotaAutomated",
+				Message: "ClusterQueue quota is automatically managed based on MultiKueue workers.",
+			},
+		},
+		"worker effective quota is aggregated when DynamicQuota is enabled": {
+			featureGates: map[featuregate.Feature]bool{features.DynamicQuotaOrchestration: true},
+			cq: utiltestingapi.MakeClusterQueue("cq1").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").Resource("cpu", "0").Resource("memory", "0").Obj()).
+				AdmissionChecks("ac1").
+				Obj(),
+			lqs: []*kueue.LocalQueue{
+				utiltestingapi.MakeLocalQueue("lq1", TestNamespace).ClusterQueue("cq1").Obj(),
+			},
+			acs: []*kueue.AdmissionCheck{
+				utiltestingapi.MakeAdmissionCheck("ac1").
+					ControllerName(kueue.MultiKueueControllerName).
+					Parameters(kueue.SchemeGroupVersion.Group, "MultiKueueConfig", "config1").
+					Obj(),
+			},
+			configs: []*kueue.MultiKueueConfig{
+				utiltestingapi.MakeMultiKueueConfig("config1").Clusters("worker1", "worker2").QuotaManagement(kueue.QuotaManagementAutomated).Obj(),
+			},
+			workers: map[string]workerState{
+				"worker1": {
+					lqs: []*kueue.LocalQueue{utiltestingapi.MakeLocalQueue("lq1", TestNamespace).ClusterQueue("w1-cq1").Obj()},
+					cqs: []*kueue.ClusterQueue{
+						utiltestingapi.MakeClusterQueue("w1-cq1").
+							ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").Resource("cpu", "10").Resource("memory", "20Gi").Obj()).
+							EffectiveResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").Resource("cpu", "30").Resource("memory", "40Gi").Obj()).
+							Obj(),
+					},
+				},
+				"worker2": {
+					lqs: []*kueue.LocalQueue{utiltestingapi.MakeLocalQueue("lq1", TestNamespace).ClusterQueue("w2-cq1").Obj()},
+					cqs: []*kueue.ClusterQueue{
+						utiltestingapi.MakeClusterQueue("w2-cq1").
+							ResourceGroup(*utiltestingapi.MakeFlavorQuotas("default").Resource("cpu", "5").Resource("memory", "10Gi").Obj()).
+							Obj(),
+					},
+				},
+			},
+			wantQuotaAutomated: true,
+			wantNominalQuotas: map[string]string{
+				"cpu":    "35",
+				"memory": "50Gi",
 			},
 			wantCondition: &metav1.Condition{
 				Type:    kueue.MultiKueueManagerQuotaAutomation,
@@ -443,6 +493,7 @@ func TestCQReconcile(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGatesDuringTest(t, tc.featureGates)
 			ctx, _ := utiltesting.ContextWithLog(t)
 			c := utiltesting.NewClientBuilder().
 				WithObjects(tc.cq).

@@ -25,6 +25,7 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueueapi "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	"sigs.k8s.io/kueue/pkg/util/resourcegroups"
 )
 
 // ResourceFlavorsWebSocketHandler streams all resource flavors
@@ -97,7 +98,7 @@ func (h *Handlers) fetchResourceFlavorDetails(ctx context.Context, flavorName st
 	// Iterate through each cluster queue to find queues using the specified flavor
 	for _, item := range cql.Items {
 		queueName := item.GetName()
-		resourceGroups := item.Spec.ResourceGroups
+		resourceGroups := resourcegroups.EffectiveResourceGroups(&item)
 
 		for _, group := range resourceGroups {
 			for _, fl := range group.Flavors {
