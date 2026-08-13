@@ -418,13 +418,25 @@ func ExpectCohortSubtreeAdmittedActiveWorkloadsGaugeMetric(cohortName kueue.Coho
 
 func ExpectCohortInfoMetric(cohortName, parentCohort, rootCohort string, count float64, customLabels ...string) {
 	ginkgo.GinkgoHelper()
-	lvs := append([]string{cohortName, parentCohort, rootCohort, roletracker.RoleStandalone}, customLabels...)
+	lvs := append([]string{cohortName, parentCohort, rootCohort, "false", "", roletracker.RoleStandalone}, customLabels...)
+	expectGaugeMetric(metrics.CohortInfo, lvs, gomega.Equal(count))
+}
+
+func ExpectCohortInfoWithEffectiveQuotaMetric(cohortName, parentCohort, rootCohort, hasEffectiveQuota, effectiveQuotaManager string, count float64, customLabels ...string) {
+	ginkgo.GinkgoHelper()
+	lvs := append([]string{cohortName, parentCohort, rootCohort, hasEffectiveQuota, effectiveQuotaManager, roletracker.RoleStandalone}, customLabels...)
 	expectGaugeMetric(metrics.CohortInfo, lvs, gomega.Equal(count))
 }
 
 func ExpectClusterQueueInfoMetric(cqName, parentCohort, rootCohort string, count float64, customLabels ...string) {
 	ginkgo.GinkgoHelper()
-	lvs := append([]string{cqName, parentCohort, rootCohort, roletracker.RoleStandalone}, customLabels...)
+	lvs := append([]string{cqName, parentCohort, rootCohort, "false", "", roletracker.RoleStandalone}, customLabels...)
+	expectGaugeMetric(metrics.ClusterQueueInfo, lvs, gomega.Equal(count))
+}
+
+func ExpectClusterQueueInfoWithEffectiveQuotaMetric(cqName, parentCohort, rootCohort, hasEffectiveQuota, effectiveQuotaManager string, count float64, customLabels ...string) {
+	ginkgo.GinkgoHelper()
+	lvs := append([]string{cqName, parentCohort, rootCohort, hasEffectiveQuota, effectiveQuotaManager, roletracker.RoleStandalone}, customLabels...)
 	expectGaugeMetric(metrics.ClusterQueueInfo, lvs, gomega.Equal(count))
 }
 

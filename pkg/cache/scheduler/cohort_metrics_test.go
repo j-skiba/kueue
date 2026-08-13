@@ -684,19 +684,23 @@ func cohortQuotaMetricLabels(cohortName kueue.CohortReference, fr resources.Flav
 
 func cohortMetricInfoLabels(cohortName kueue.CohortReference, parentCohort, rootCohort string) map[string]string {
 	return map[string]string{
-		"cohort":        string(cohortName),
-		"parent_cohort": parentCohort,
-		"root_cohort":   rootCohort,
-		"replica_role":  "standalone",
+		"cohort":                  string(cohortName),
+		"parent_cohort":           parentCohort,
+		"root_cohort":             rootCohort,
+		"has_effective_quota":     "false",
+		"effective_quota_manager": "",
+		"replica_role":            "standalone",
 	}
 }
 
 func cqMetricInfoLabels(cqName kueue.ClusterQueueReference, parentCohort, rootCohort string) map[string]string {
 	return map[string]string{
-		"cluster_queue": string(cqName),
-		"parent_cohort": parentCohort,
-		"root_cohort":   rootCohort,
-		"replica_role":  "standalone",
+		"cluster_queue":           string(cqName),
+		"parent_cohort":           parentCohort,
+		"root_cohort":             rootCohort,
+		"has_effective_quota":     "false",
+		"effective_quota_manager": "",
+		"replica_role":            "standalone",
 	}
 }
 

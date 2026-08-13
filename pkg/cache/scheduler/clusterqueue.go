@@ -102,6 +102,9 @@ type clusterQueue struct {
 
 	ConcurrentAdmissionPolicy *kueue.ConcurrentAdmissionPolicy
 
+	HasEffectiveQuota     bool
+	EffectiveQuotaManager string
+
 	roleTracker *roletracker.RoleTracker
 
 	// allows access to values extracted from K8s labels/annotations, used as custom Prometheus metric labels
@@ -206,6 +209,12 @@ func (c *clusterQueue) updateClusterQueue(
 	c.AdmissionScope = in.Spec.AdmissionScope
 	if features.Enabled(features.ConcurrentAdmission) {
 		c.ConcurrentAdmissionPolicy = in.Spec.ConcurrentAdmissionPolicy
+	}
+	c.HasEffectiveQuota = false
+	c.EffectiveQuotaManager = ""
+	if features.Enabled(features.DynamicQuota) && in.Status.EffectiveQuota != nil {
+		c.HasEffectiveQuota = true
+		c.EffectiveQuotaManager = in.Status.EffectiveQuota.ManagerRef.Name
 	}
 	return nil
 }
