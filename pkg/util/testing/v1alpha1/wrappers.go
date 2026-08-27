@@ -17,9 +17,12 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	kueuealpha "sigs.k8s.io/kueue/apis/kueue/v1alpha1"
 )
@@ -64,6 +67,27 @@ func (w *DynamicQuotaOrchestratorWrapper) EffectiveCapacity(flavors ...kueuealph
 	w.Status.EffectiveCapacity = &kueuealpha.EffectiveCapacity{
 		Flavors: flavors,
 	}
+	return w
+}
+
+func (w *DynamicQuotaOrchestratorWrapper) EffectiveFlavor(name kueuealpha.ResourceFlavorReference, resources corev1.ResourceList) *DynamicQuotaOrchestratorWrapper {
+	if w.Status.EffectiveCapacity == nil {
+		w.Status.EffectiveCapacity = &kueuealpha.EffectiveCapacity{}
+	}
+	w.Status.EffectiveCapacity.Flavors = append(w.Status.EffectiveCapacity.Flavors, kueuealpha.EffectiveCapacityFlavor{
+		Name:      name,
+		Resources: resources,
+	})
+	return w
+}
+
+func (w *DynamicQuotaOrchestratorWrapper) CreationTimestamp(t time.Time) *DynamicQuotaOrchestratorWrapper {
+	w.ObjectMeta.CreationTimestamp = metav1.NewTime(t)
+	return w
+}
+
+func (w *DynamicQuotaOrchestratorWrapper) UID(uid types.UID) *DynamicQuotaOrchestratorWrapper {
+	w.ObjectMeta.UID = uid
 	return w
 }
 
@@ -141,4 +165,24 @@ func (w *CapacityProviderNormalizedCapacityWrapper) Flavor(name kueuealpha.Resou
 
 func (w *CapacityProviderNormalizedCapacityWrapper) Obj() *kueuealpha.CapacityProviderNormalizedCapacity {
 	return &w.CapacityProviderNormalizedCapacity
+}
+
+type EffectiveCapacityWrapper struct {
+	kueuealpha.EffectiveCapacity
+}
+
+func MakeEffectiveCapacity() *EffectiveCapacityWrapper {
+	return &EffectiveCapacityWrapper{}
+}
+
+func (w *EffectiveCapacityWrapper) Flavor(name kueuealpha.ResourceFlavorReference, resources corev1.ResourceList) *EffectiveCapacityWrapper {
+	w.Flavors = append(w.Flavors, kueuealpha.EffectiveCapacityFlavor{
+		Name:      name,
+		Resources: resources,
+	})
+	return w
+}
+
+func (w *EffectiveCapacityWrapper) Obj() *kueuealpha.EffectiveCapacity {
+	return &w.EffectiveCapacity
 }

@@ -49,6 +49,10 @@ const (
 	WorkloadExtendedResourceKey                 = "spec.extendedResources"
 	DynamicQuotaOrchestratorCapacityProviderKey = "spec.capacityDiscovery.providers.name"
 	DynamicQuotaOrchestratorIsDistributingKey   = "spec.capacityDistribution.isDistributing"
+	ClusterQueueCohortKey                       = "spec.cohortName"
+	CohortParentKey                             = "spec.parentName"
+	ClusterQueueEffectiveQuotaOrchestratorKey   = "status.effectiveQuotas.orchestratorRef.name"
+	CohortEffectiveQuotaOrchestratorKey         = "status.effectiveQuotas.orchestratorRef.name"
 	// WorkloadSliceNameKey is an index for pods by their workload slice name annotation.
 	// Used to find pods belonging to an elastic workload slice chain.
 	WorkloadSliceNameKey = "metadata.workloadSliceName"
@@ -282,6 +286,42 @@ func IndexDynamicQuotaOrchestratorIsDistributing(obj client.Object) []string {
 	return nil
 }
 
+// IndexClusterQueueCohort indexes ClusterQueue by spec.cohortName.
+func IndexClusterQueueCohort(obj client.Object) []string {
+	cq, ok := obj.(*kueue.ClusterQueue)
+	if !ok || cq.Spec.CohortName == "" {
+		return nil
+	}
+	return []string{string(cq.Spec.CohortName)}
+}
+
+// IndexCohortParent indexes Cohort by spec.parentName.
+func IndexCohortParent(obj client.Object) []string {
+	cohort, ok := obj.(*kueue.Cohort)
+	if !ok || cohort.Spec.ParentName == "" {
+		return nil
+	}
+	return []string{string(cohort.Spec.ParentName)}
+}
+
+// IndexClusterQueueEffectiveQuotaOrchestrator indexes ClusterQueue by status.effectiveQuotas.orchestratorRef.name.
+func IndexClusterQueueEffectiveQuotaOrchestrator(obj client.Object) []string {
+	cq, ok := obj.(*kueue.ClusterQueue)
+	if !ok || cq.Status.EffectiveQuotas == nil || cq.Status.EffectiveQuotas.OrchestratorRef.Name == "" {
+		return nil
+	}
+	return []string{cq.Status.EffectiveQuotas.OrchestratorRef.Name}
+}
+
+// IndexCohortEffectiveQuotaOrchestrator indexes Cohort by status.effectiveQuotas.orchestratorRef.name.
+func IndexCohortEffectiveQuotaOrchestrator(obj client.Object) []string {
+	cohort, ok := obj.(*kueue.Cohort)
+	if !ok || cohort.Status.EffectiveQuotas == nil || cohort.Status.EffectiveQuotas.OrchestratorRef.Name == "" {
+		return nil
+	}
+	return []string{cohort.Status.EffectiveQuotas.OrchestratorRef.Name}
+}
+
 // Setup sets the index with the given fields for core apis.
 func Setup(ctx context.Context, indexer client.FieldIndexer) error {
 	if err := indexer.IndexField(ctx, &kueue.Workload{}, WorkloadQueueKey, IndexWorkloadQueue); err != nil {
@@ -334,6 +374,18 @@ func Setup(ctx context.Context, indexer client.FieldIndexer) error {
 		}
 		if err := indexer.IndexField(ctx, &kueuealpha.DynamicQuotaOrchestrator{}, DynamicQuotaOrchestratorIsDistributingKey, IndexDynamicQuotaOrchestratorIsDistributing); err != nil {
 			return fmt.Errorf("setting index on isDistributing for DynamicQuotaOrchestrator: %w", err)
+		}
+		if err := indexer.IndexField(ctx, &kueue.ClusterQueue{}, ClusterQueueCohortKey, IndexClusterQueueCohort); err != nil {
+			return fmt.Errorf("setting index on cohort for ClusterQueue: %w", err)
+		}
+		if err := indexer.IndexField(ctx, &kueue.Cohort{}, CohortParentKey, IndexCohortParent); err != nil {
+			return fmt.Errorf("setting index on parent for Cohort: %w", err)
+		}
+		if err := indexer.IndexField(ctx, &kueue.ClusterQueue{}, ClusterQueueEffectiveQuotaOrchestratorKey, IndexClusterQueueEffectiveQuotaOrchestrator); err != nil {
+			return fmt.Errorf("setting index on effective quota orchestrator for ClusterQueue: %w", err)
+		}
+		if err := indexer.IndexField(ctx, &kueue.Cohort{}, CohortEffectiveQuotaOrchestratorKey, IndexCohortEffectiveQuotaOrchestrator); err != nil {
+			return fmt.Errorf("setting index on effective quota orchestrator for Cohort: %w", err)
 		}
 	}
 	return nil

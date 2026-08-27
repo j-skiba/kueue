@@ -881,3 +881,143 @@ func TestIndexDynamicQuotaOrchestratorIsDistributing(t *testing.T) {
 		})
 	}
 }
+
+func TestIndexClusterQueueCohort(t *testing.T) {
+	cases := map[string]struct {
+		obj  client.Object
+		want []string
+	}{
+		"not ClusterQueue": {
+			obj:  &kueue.Workload{},
+			want: nil,
+		},
+		"empty cohort": {
+			obj:  &kueue.ClusterQueue{},
+			want: nil,
+		},
+		"with cohort": {
+			obj: &kueue.ClusterQueue{
+				Spec: kueue.ClusterQueueSpec{
+					CohortName: "my-cohort",
+				},
+			},
+			want: []string{"my-cohort"},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := IndexClusterQueueCohort(tc.obj)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestIndexCohortParent(t *testing.T) {
+	cases := map[string]struct {
+		obj  client.Object
+		want []string
+	}{
+		"not Cohort": {
+			obj:  &kueue.Workload{},
+			want: nil,
+		},
+		"empty parent": {
+			obj:  &kueue.Cohort{},
+			want: nil,
+		},
+		"with parent": {
+			obj: &kueue.Cohort{
+				Spec: kueue.CohortSpec{
+					ParentName: "root-cohort",
+				},
+			},
+			want: []string{"root-cohort"},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := IndexCohortParent(tc.obj)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestIndexClusterQueueEffectiveQuotaOrchestrator(t *testing.T) {
+	cases := map[string]struct {
+		obj  client.Object
+		want []string
+	}{
+		"not ClusterQueue": {
+			obj:  &kueue.Workload{},
+			want: nil,
+		},
+		"nil effective quotas": {
+			obj:  &kueue.ClusterQueue{},
+			want: nil,
+		},
+		"with effective quota orchestrator": {
+			obj: &kueue.ClusterQueue{
+				Status: kueue.ClusterQueueStatus{
+					EffectiveQuotas: &kueue.EffectiveQuotaStatus{
+						OrchestratorRef: kueue.EffectiveQuotaStatusOrchestratorRef{
+							Name: "my-dqo",
+						},
+					},
+				},
+			},
+			want: []string{"my-dqo"},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := IndexClusterQueueEffectiveQuotaOrchestrator(tc.obj)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestIndexCohortEffectiveQuotaOrchestrator(t *testing.T) {
+	cases := map[string]struct {
+		obj  client.Object
+		want []string
+	}{
+		"not Cohort": {
+			obj:  &kueue.Workload{},
+			want: nil,
+		},
+		"nil effective quotas": {
+			obj:  &kueue.Cohort{},
+			want: nil,
+		},
+		"with effective quota orchestrator": {
+			obj: &kueue.Cohort{
+				Status: kueue.CohortStatus{
+					EffectiveQuotas: &kueue.EffectiveQuotaStatus{
+						OrchestratorRef: kueue.EffectiveQuotaStatusOrchestratorRef{
+							Name: "my-dqo",
+						},
+					},
+				},
+			},
+			want: []string{"my-dqo"},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := IndexCohortEffectiveQuotaOrchestrator(tc.obj)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

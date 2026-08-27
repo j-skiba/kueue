@@ -23,15 +23,41 @@ import (
 )
 
 const (
-	DynamicQuotaOrchestratorActive      = "Active"
+	// DynamicQuotaOrchestratorKind is the Kind string for the DynamicQuotaOrchestrator resource.
+	DynamicQuotaOrchestratorKind = "DynamicQuotaOrchestrator"
+
+	// DynamicQuotaOrchestratorEffectiveCapacityComputed indicates whether status.effectiveCapacity
+	// is successfully aggregated from all referenced CapacityProviders.
+	DynamicQuotaOrchestratorEffectiveCapacityComputed = "EffectiveCapacityComputed"
+
+	// DynamicQuotaOrchestratorReasonComputed indicates that effective capacity was aggregated successfully.
+	DynamicQuotaOrchestratorReasonComputed = "Computed"
+
+	// DynamicQuotaOrchestratorReasonProviderNotReady indicates a referenced CapacityProvider does not have CapacitySynchronized=True.
+	DynamicQuotaOrchestratorReasonProviderNotReady = "ProviderNotReady"
+
+	// DynamicQuotaOrchestratorReasonAggregationFailed indicates aggregation failed (e.g. multiplier application error, math overflow, or capacity limits exceeded).
+	DynamicQuotaOrchestratorReasonAggregationFailed = "AggregationFailed"
+
+	// DynamicQuotaOrchestratorDistributed indicates whether status.effectiveQuotas has been
+	// successfully computed and distributed across the referenced subtree.
+	// This condition is only present when spec.capacityDistribution is configured.
 	DynamicQuotaOrchestratorDistributed = "Distributed"
 
-	DynamicQuotaOrchestratorReasonActive                               = "Active"
-	DynamicQuotaOrchestratorReasonConflictingDynamicQuotaOrchestrator  = "ConflictingDynamicQuotaOrchestrator"
-	DynamicQuotaOrchestratorReasonTooManyFlavorsInAggregatedCapacity   = "TooManyFlavorsInAggregatedCapacity"
-	DynamicQuotaOrchestratorReasonTooManyResourcesInAggregatedCapacity = "TooManyResourcesInAggregatedCapacity"
-	DynamicQuotaOrchestratorReasonQuotaDistributed                     = "QuotaDistributed"
-	DynamicQuotaOrchestratorReasonSubtreeRootNotFound                  = "SubtreeRootNotFound"
+	// DynamicQuotaOrchestratorReasonQuotasDistributed indicates all effective quotas were successfully applied.
+	DynamicQuotaOrchestratorReasonQuotasDistributed = "QuotasDistributed"
+
+	// DynamicQuotaOrchestratorReasonEffectiveCapacityNotComputed indicates distribution was skipped because Phase 1 discovery is not ready.
+	DynamicQuotaOrchestratorReasonEffectiveCapacityNotComputed = "EffectiveCapacityNotComputed"
+
+	// DynamicQuotaOrchestratorReasonConflictingDynamicQuotaOrchestrator indicates this DQO was deactivated by soft validation.
+	DynamicQuotaOrchestratorReasonConflictingDynamicQuotaOrchestrator = "ConflictingDynamicQuotaOrchestrator"
+
+	// DynamicQuotaOrchestratorReasonEffectiveQuotasConflict indicates another controller owns status.effectiveQuotas on a target queue.
+	DynamicQuotaOrchestratorReasonEffectiveQuotasConflict = "EffectiveQuotasConflict"
+
+	// DynamicQuotaOrchestratorReasonMisconfigured indicates a configuration or reference error in spec.
+	DynamicQuotaOrchestratorReasonMisconfigured = "Misconfigured"
 )
 
 type DynamicQuotaOrchestratorSpec struct {
@@ -67,6 +93,7 @@ type CapacityDiscoveryProviderContribution struct {
 	//
 	// +optional
 	// +kubebuilder:default="1"
+	// +kubebuilder:validation:XValidation:rule="sign(quantity(self)) >= 0",message="effectiveCapacityMultiplier must be non-negative"
 	EffectiveCapacityMultiplier *resource.Quantity `json:"effectiveCapacityMultiplier,omitempty"`
 }
 

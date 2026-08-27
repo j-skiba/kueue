@@ -959,6 +959,11 @@ func (c *CohortWrapper) GeneratedName(name string) *CohortWrapper {
 	return c
 }
 
+func (c *CohortWrapper) EffectiveQuotas(eq *kueue.EffectiveQuotaStatus) *CohortWrapper {
+	c.Status.EffectiveQuotas = eq
+	return c
+}
+
 // ClusterQueueWrapper wraps a ClusterQueue.
 type ClusterQueueWrapper struct{ kueue.ClusterQueue }
 
@@ -1190,6 +1195,49 @@ func (c *ClusterQueueWrapper) PendingWorkloads(n int32) *ClusterQueueWrapper {
 func (c *ClusterQueueWrapper) AdmittedWorkloads(n int32) *ClusterQueueWrapper {
 	c.Status.AdmittedWorkloads = n
 	return c
+}
+
+func (c *ClusterQueueWrapper) EffectiveQuotas(eq *kueue.EffectiveQuotaStatus) *ClusterQueueWrapper {
+	c.Status.EffectiveQuotas = eq
+	return c
+}
+
+// EffectiveQuotaStatusWrapper wraps an EffectiveQuotaStatus object.
+type EffectiveQuotaStatusWrapper struct{ kueue.EffectiveQuotaStatus }
+
+// MakeEffectiveQuotas creates a wrapper for an EffectiveQuotaStatus.
+func MakeEffectiveQuotas(orchestratorName string) *EffectiveQuotaStatusWrapper {
+	return &EffectiveQuotaStatusWrapper{kueue.EffectiveQuotaStatus{
+		OrchestratorRef: kueue.EffectiveQuotaStatusOrchestratorRef{
+			APIGroup: "kueue.x-k8s.io",
+			Kind:     "DynamicQuotaOrchestrator",
+			Name:     orchestratorName,
+		},
+	}}
+}
+
+func (e *EffectiveQuotaStatusWrapper) Ref(ref kueue.EffectiveQuotaStatusOrchestratorRef) *EffectiveQuotaStatusWrapper {
+	e.EffectiveQuotaStatus.OrchestratorRef = ref
+	return e
+}
+
+func (e *EffectiveQuotaStatusWrapper) Kind(kind string) *EffectiveQuotaStatusWrapper {
+	e.EffectiveQuotaStatus.OrchestratorRef.Kind = kind
+	return e
+}
+
+func (e *EffectiveQuotaStatusWrapper) APIGroup(group string) *EffectiveQuotaStatusWrapper {
+	e.EffectiveQuotaStatus.OrchestratorRef.APIGroup = group
+	return e
+}
+
+func (e *EffectiveQuotaStatusWrapper) ResourceGroup(flavors ...kueue.FlavorQuotas) *EffectiveQuotaStatusWrapper {
+	e.ResourceGroups = append(e.ResourceGroups, ResourceGroup(flavors...))
+	return e
+}
+
+func (e *EffectiveQuotaStatusWrapper) Obj() *kueue.EffectiveQuotaStatus {
+	return &e.EffectiveQuotaStatus
 }
 
 // FlavorQuotasWrapper wraps a FlavorQuotas object.
