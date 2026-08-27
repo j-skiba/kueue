@@ -547,6 +547,12 @@ const (
 	// for the considered workload to get it. We don't immediately admit this workload as we have
 	// to wait for these preemptions to complete.
 	RecomputeAssignmentUponPreemptionTargetsOverlap featuregate.Feature = "RecomputeAssignmentUponPreemptionTargetsOverlap"
+
+	// owner: @mimowo
+	// kep: https://github.com/kubernetes-sigs/kueue/tree/main/keps/12382-dynamic-quota-orchestration
+	//
+	// Enables Dynamic Quota Orchestration.
+	DynamicQuotaOrchestration featuregate.Feature = "DynamicQuotaOrchestration"
 )
 
 func init() {
@@ -851,6 +857,10 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 
 	RecomputeAssignmentUponPreemptionTargetsOverlap: {
 		{Version: version.MustParse("0.20"), Default: true, PreRelease: featuregate.Beta},
+	},
+
+	DynamicQuotaOrchestration: {
+		{Version: version.MustParse("0.20"), Default: false, PreRelease: featuregate.Alpha},
 	},
 }
 
