@@ -1087,6 +1087,15 @@ func (c *ClusterQueueWrapper) ResourceGroup(flavors ...kueue.FlavorQuotas) *Clus
 	return c
 }
 
+// EffectiveQuotas adds a ResourceGroup with flavors to status.effectiveQuotas.
+func (c *ClusterQueueWrapper) EffectiveQuotas(flavors ...kueue.FlavorQuotas) *ClusterQueueWrapper {
+	if c.Status.EffectiveQuotas == nil {
+		c.Status.EffectiveQuotas = &kueue.EffectiveQuotaStatus{}
+	}
+	c.Status.EffectiveQuotas.ResourceGroups = append(c.Status.EffectiveQuotas.ResourceGroups, ResourceGroup(flavors...))
+	return c
+}
+
 // AdmissionChecks replaces the queue additional checks.
 // This is a convenience wrapper that converts to the AdmissionChecksStrategy format.
 func (c *ClusterQueueWrapper) AdmissionChecks(checks ...kueue.AdmissionCheckReference) *ClusterQueueWrapper {
