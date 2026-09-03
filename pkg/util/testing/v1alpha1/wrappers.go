@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -100,6 +101,17 @@ func MakeCapacityProvider(name string) *CapacityProviderWrapper {
 	}
 }
 
+// MakeCapacityProviderWithGenerateName creates a CapacityProvider wrapper with a generateName prefix.
+func MakeCapacityProviderWithGenerateName(prefix string) *CapacityProviderWrapper {
+	return MakeCapacityProvider("").GenerateName(prefix)
+}
+
+// GenerateName sets the generateName in the CapacityProvider.
+func (w *CapacityProviderWrapper) GenerateName(prefix string) *CapacityProviderWrapper {
+	w.ObjectMeta.GenerateName = prefix
+	return w
+}
+
 // Obj returns the CapacityProvider.
 func (w *CapacityProviderWrapper) Obj() *kueuealpha.CapacityProvider {
 	return &w.CapacityProvider
@@ -142,4 +154,26 @@ func (w *CapacityProviderWrapper) Capacity(capacity *kueuealpha.CapacityProvider
 func (w *CapacityProviderWrapper) Condition(condition metav1.Condition) *CapacityProviderWrapper {
 	w.Status.Conditions = append(w.Status.Conditions, condition)
 	return w
+}
+
+// CapacityProviderNormalizedCapacityWrapper wraps a CapacityProviderNormalizedCapacity.
+type CapacityProviderNormalizedCapacityWrapper struct {
+	kueuealpha.CapacityProviderNormalizedCapacity
+}
+
+// MakeNormalizedCapacity creates a CapacityProviderNormalizedCapacity wrapper.
+func MakeNormalizedCapacity() *CapacityProviderNormalizedCapacityWrapper {
+	return &CapacityProviderNormalizedCapacityWrapper{}
+}
+
+func (w *CapacityProviderNormalizedCapacityWrapper) Flavor(name kueuealpha.ResourceFlavorReference, resources corev1.ResourceList) *CapacityProviderNormalizedCapacityWrapper {
+	w.Flavors = append(w.Flavors, kueuealpha.CapacityProviderNormalizedCapacityFlavor{
+		Name:      name,
+		Resources: resources,
+	})
+	return w
+}
+
+func (w *CapacityProviderNormalizedCapacityWrapper) Obj() *kueuealpha.CapacityProviderNormalizedCapacity {
+	return &w.CapacityProviderNormalizedCapacity
 }
