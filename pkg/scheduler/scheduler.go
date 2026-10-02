@@ -835,11 +835,27 @@ func (s *Scheduler) updateAssignmentIfNeeded(
 		return usage, schdcache.FitsCheckOk == fitsCheck
 	}
 	// Clear the flavor scan state so that we can start from the first flavor again and
-	// reach all flavors from the nomination.
+	// reach all flavors from the nomination. Preserve the nomination's scan state across
+	// this in-cycle recompute when quota still accepts the nominated flavor, so that a
+	// workload whose TAS placement is invalidated mid-cycle resumes the next cycle with
+	// its nomination scan state intact.
+	var nominationScanState *workload.FlavorScanState
+	if e.FlavorScanState != nil {
+		nominationScanState = e.FlavorScanState.Clone()
+	}
 	e.FlavorScanState = nil
 	e.NominationMapping = e.readResourceToFlavorMapping()
 	newAssignment, newTargets := s.getAssignments(ctx, &e.Info, snapshot)
 	e.recordAssignment(newAssignment, newTargets)
+	if nominationScanState != nil {
+		for ps, resFlavors := range e.assignment.FlavorScanState.TriedFlavors {
+			for res, flavors := range resFlavors {
+				if len(flavors) > 0 {
+					resFlavors[res] = nominationScanState.TriedFlavorsForPodSetResource(ps, res)
+				}
+			}
+		}
+	}
 	if needsOverlapRecompute {
 		if revertRemoval != nil {
 			revertRemoval()
