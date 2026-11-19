@@ -105,6 +105,7 @@ var (
 		kueue.WorkloadQuotaReservedReasonUnrecordableResourceUsage,
 		kueue.WorkloadQuotaReservedReasonTopologyPlacementFailed,
 		kueue.WorkloadQuotaReservedReasonSimulationFailed,
+		kueue.WorkloadQuotaReservedReasonAssignmentError,
 		kueue.WorkloadQuotaReservedReasonWaitingForPreemptedWorkloads,
 		kueue.WorkloadQuotaReservedReasonWaitingForPodsReady,
 		kueue.WorkloadQuotaReservedReasonPendingEvaluation,

@@ -3192,6 +3192,24 @@ func TestUpdateUnadmittedWorkload(t *testing.T) {
 				UnderlyingCause:     kueue.WorkloadQuotaReservedReasonWaitingForQuota,
 			},
 		},
+		"workload pending with QuotaReserved=False/AssignmentError and missing Admitted condition": {
+			workload: utiltestingapi.MakeWorkload("wl-2a", "ns").
+				Queue("lq").
+				Condition(metav1.Condition{
+					Type:    kueue.WorkloadQuotaReserved,
+					Status:  metav1.ConditionFalse,
+					Reason:  kueue.WorkloadQuotaReservedReasonAssignmentError,
+					Message: "failed to schedule workload: planner error",
+				}).
+				Obj(),
+			expectedStatus: unadmittedWorkloadStatus{
+				ClusterQueue:        "cq",
+				LocalQueueName:      "lq",
+				LocalQueueNamespace: "ns",
+				Reason:              kueue.WorkloadAdmittedReasonNoReservation,
+				UnderlyingCause:     kueue.WorkloadQuotaReservedReasonAssignmentError,
+			},
+		},
 		"workload unadmitted due to unsatisfied checks": {
 			workload: utiltestingapi.MakeWorkload("wl-3", "ns").
 				Queue("lq").

@@ -271,6 +271,90 @@ var _ = ginkgo.Describe("Workload Unadmitted Observability Status and Metrics", 
 				}, behavioral.Timeout, behavioral.Interval).Should(gomega.Succeed())
 			})
 		})
+
+		ginkgo.It("Should preserve AssignmentError status and unadmitted workload metrics when planner returns an error", func() {
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.SchedulerLibraryDeepIntegration, true)
+
+			cq := utiltestingapi.MakeClusterQueue("assignment-error-cq").
+				QueueingStrategy(kueue.BestEffortFIFO).
+				ResourceGroup(
+					*utiltestingapi.MakeFlavorQuotas("on-demand").Resource(corev1.ResourceCPU, "1").Obj(),
+				).Obj()
+			behavioral.CreateClusterQueuesAndWaitForActive(ctx, k8sClient, cq)
+			cqs = append(cqs, cq)
+
+			lq := utiltestingapi.MakeLocalQueue("assignment-error-q", ns.Name).ClusterQueue(cq.Name).Obj()
+			behavioral.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, lq)
+
+			var wl *kueue.Workload
+			ginkgo.By("Submit a workload against a non-TAS flavor so wasPlanner returns an assignment error", func() {
+				wl = utiltestingapi.MakeWorkload("assignment-error-wl", ns.Name).
+					Queue(kueue.LocalQueueName(lq.Name)).
+					Request(corev1.ResourceCPU, "1").Obj()
+				behavioral.MustCreate(ctx, k8sClient, wl)
+			})
+
+			ginkgo.By("Verify AssignmentError condition and unadmitted workload metrics persist across reconcile", func() {
+				behavioral.ExpectPendingWorkloadsMetric(cq, 0, 1)
+				behavioral.ExpectWorkloadToHaveConditions(ctx, k8sClient, client.ObjectKeyFromObject(wl),
+					metav1.Condition{
+						Type:    kueue.WorkloadQuotaReserved,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadQuotaReservedReasonAssignmentError,
+						Message: `virtualization error: unable to build virtual pods: failed to get TAS flavor for PodSet "main": no TAS flavor assigned`,
+					},
+					metav1.Condition{
+						Type:    kueue.WorkloadAdmitted,
+						Status:  metav1.ConditionFalse,
+						Reason:  kueue.WorkloadAdmittedReasonNoReservation,
+						Message: "The workload has no reservation",
+					},
+				)
+
+				assertAssignmentErrorMetrics := func(g gomega.Gomega) {
+					metric := kueuemetrics.UnadmittedWorkloads.WithLabelValues(
+						cq.Name,
+						kueue.WorkloadAdmittedReasonNoReservation,
+						kueue.WorkloadQuotaReservedReasonAssignmentError,
+						roletracker.RoleStandalone,
+					)
+					v, err := testutil.GetGaugeMetricValue(metric)
+					g.Expect(err).NotTo(gomega.HaveOccurred())
+					g.Expect(v).To(gomega.Equal(float64(1)))
+
+					metricLQ := kueuemetrics.LocalQueueUnadmittedWorkloads.WithLabelValues(
+						lq.Name,
+						ns.Name,
+						cq.Name,
+						kueue.WorkloadAdmittedReasonNoReservation,
+						kueue.WorkloadQuotaReservedReasonAssignmentError,
+						roletracker.RoleStandalone,
+					)
+					vLQ, errLQ := testutil.GetGaugeMetricValue(metricLQ)
+					g.Expect(errLQ).NotTo(gomega.HaveOccurred())
+					g.Expect(vLQ).To(gomega.Equal(float64(1)))
+
+					g.Expect(testingmetrics.CollectFilteredGaugeVec(kueuemetrics.UnadmittedWorkloads, map[string]string{
+						"cluster_queue":    cq.Name,
+						"reason":           kueue.WorkloadAdmittedReasonNoReservation,
+						"underlying_cause": kueue.WorkloadQuotaReservedReasonPendingEvaluation,
+					})).To(gomega.BeEmpty())
+				}
+
+				gomega.Eventually(assertAssignmentErrorMetrics, behavioral.Timeout, behavioral.Interval).Should(gomega.Succeed())
+
+				var got kueue.Workload
+				gomega.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wl), &got)).To(gomega.Succeed())
+				resourceVersion := got.ResourceVersion
+
+				gomega.Consistently(func(g gomega.Gomega) {
+					var current kueue.Workload
+					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wl), &current)).To(gomega.Succeed())
+					g.Expect(current.ResourceVersion).To(gomega.Equal(resourceVersion))
+					assertAssignmentErrorMetrics(g)
+				}, behavioral.ConsistentDuration, behavioral.ShortInterval).Should(gomega.Succeed())
+			})
+		})
 	})
 
 	ginkgo.Context("with UnadmittedWorkloadsExplicitStatus disabled", func() {
