@@ -27,10 +27,163 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/util/queue"
+	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	"sigs.k8s.io/kueue/pkg/workload"
 	"sigs.k8s.io/kueue/pkg/workload/concurrentadmission"
 	workloadfinish "sigs.k8s.io/kueue/pkg/workload/finish"
 )
+
+type cqKeyed interface {
+	comparable
+	clusterQueue() kueue.ClusterQueueReference
+}
+
+type workloadStatus[C cqKeyed] interface {
+	comparable
+	cqStatus() C
+}
+
+// cqStatusTracker encapsulates internal state for tracking per-workload statuses
+// and their aggregated metric counts per ClusterQueue.
+//
+// Callers of methods taking *Manager MUST hold at least m.RLock() so reading
+// m.hm.ClusterQueue(...) and m.customLabels.CQGet(...) is race-free.
+type cqStatusTracker[S workloadStatus[C], C cqKeyed] struct {
+	rwm sync.RWMutex
+	// statuses maps each currently tracked workload to its last recorded status S,
+	// so updates can skip no-ops and decrement the previous bucket on transitions.
+	statuses map[workload.Reference]S
+	// perCQ holds the current workload count for each ClusterQueue metric label set C,
+	// used to update, clear, and resync the ClusterQueue gauge.
+	perCQ map[C]int
+
+	metricName string
+	report     func(C, []string, *roletracker.RoleTracker, int)
+	clear      func(C, []string, *roletracker.RoleTracker)
+	// onDelta, when set, is called under rwm.Lock() on every add (+1) or remove (-1)
+	// so secondary counts (such as LocalQueue metrics) share the same mutex.
+	onDelta func(log logr.Logger, status S, diff int, m *Manager)
+}
+
+func newCQStatusTracker[S workloadStatus[C], C cqKeyed](
+	metricName string,
+	report func(C, []string, *roletracker.RoleTracker, int),
+	clearFn func(C, []string, *roletracker.RoleTracker),
+	onDelta func(log logr.Logger, status S, diff int, m *Manager),
+) *cqStatusTracker[S, C] {
+	return &cqStatusTracker[S, C]{
+		statuses:   make(map[workload.Reference]S),
+		perCQ:      make(map[C]int),
+		metricName: metricName,
+		report:     report,
+		clear:      clearFn,
+		onDelta:    onDelta,
+	}
+}
+
+// set records the workload's status and updates the metric.
+// Returns true iff the workload's tracked status actually changed.
+// Caller MUST hold at least m.RLock().
+func (t *cqStatusTracker[S, C]) set(
+	log logr.Logger,
+	wlKey workload.Reference,
+	newStatus S,
+	m *Manager,
+) bool {
+	t.rwm.Lock()
+	defer t.rwm.Unlock()
+
+	oldStatus, ok := t.statuses[wlKey]
+	if ok && oldStatus == newStatus {
+		log.V(5).Info("Workload metric status unchanged, skipping update", "metric", t.metricName, "workload", wlKey, "status", newStatus)
+		return false
+	}
+
+	log.V(4).Info("Updating workload metric tracking", "metric", t.metricName, "workload", wlKey, "oldStatus", oldStatus, "newStatus", newStatus)
+
+	if ok {
+		t.applyDeltaLocked(log, oldStatus, -1, m)
+	}
+	t.statuses[wlKey] = newStatus
+	t.applyDeltaLocked(log, newStatus, 1, m)
+	return true
+}
+
+// remove clears a workload from tracking and updates the metric.
+// Caller MUST hold at least m.RLock().
+func (t *cqStatusTracker[S, C]) remove(
+	log logr.Logger,
+	wlKey workload.Reference,
+	m *Manager,
+) {
+	t.rwm.Lock()
+	defer t.rwm.Unlock()
+
+	t.removeLocked(log, wlKey, m)
+}
+
+func (t *cqStatusTracker[S, C]) removeLocked(
+	log logr.Logger,
+	wlKey workload.Reference,
+	m *Manager,
+) {
+	oldStatus, ok := t.statuses[wlKey]
+	if !ok {
+		log.V(4).Info("Workload to remove was not tracked", "metric", t.metricName, "workload", wlKey)
+		return
+	}
+	log.V(4).Info("Removing workload from metric tracking", "metric", t.metricName, "workload", wlKey, "status", oldStatus)
+	t.applyDeltaLocked(log, oldStatus, -1, m)
+	delete(t.statuses, wlKey)
+}
+
+func (t *cqStatusTracker[S, C]) applyDeltaLocked(
+	log logr.Logger,
+	status S,
+	diff int,
+	m *Manager,
+) {
+	cqKey := status.cqStatus()
+	cqName := cqKey.clusterQueue()
+	t.perCQ[cqKey] += diff
+	count := t.perCQ[cqKey]
+
+	if count <= 0 {
+		delete(t.perCQ, cqKey)
+	}
+	// The status may belong to a deleted ClusterQueue, whose series must not be reported again.
+	// Callers hold at least the Manager RLock, so reading the ClusterQueues is safe.
+	if cqName != "" && m.hm.ClusterQueue(cqName) != nil {
+		cqCustomLabels := m.customLabels.CQGet(cqName)
+		if count <= 0 {
+			log.V(4).Info("Clearing CQ workload metric", "metric", t.metricName, "clusterQueue", cqName, "status", cqKey)
+			t.clear(cqKey, cqCustomLabels, m.roleTracker)
+		} else {
+			log.V(4).Info("Reporting CQ workload metric", "metric", t.metricName, "clusterQueue", cqName, "status", cqKey, "count", count)
+			t.report(cqKey, cqCustomLabels, m.roleTracker, count)
+		}
+	} else {
+		log.V(4).Info("Skipping CQ workload metric report due to missing ClusterQueue", "metric", t.metricName, "status", status)
+	}
+
+	if t.onDelta != nil {
+		t.onDelta(log, status, diff, m)
+	}
+}
+
+// resyncCQMetrics re-reports all tracked counts for cqName.
+// Caller MUST hold at least m.RLock().
+func (t *cqStatusTracker[S, C]) resyncCQMetrics(cqName kueue.ClusterQueueReference, m *Manager) {
+	t.rwm.RLock()
+	defer t.rwm.RUnlock()
+
+	for cqKey, count := range t.perCQ {
+		if cqKey.clusterQueue() == cqName {
+			cqCustomLabels := m.customLabels.CQGet(cqName)
+			t.report(cqKey, cqCustomLabels, m.roleTracker, count)
+		}
+	}
+}
 
 type unadmittedWorkloadStatus struct {
 	ClusterQueue        kueue.ClusterQueueReference
@@ -46,6 +199,10 @@ type unadmittedCQStatus struct {
 	UnderlyingCause string
 }
 
+func (s unadmittedCQStatus) clusterQueue() kueue.ClusterQueueReference {
+	return s.ClusterQueue
+}
+
 func (s unadmittedWorkloadStatus) ClusterQueueStatus() unadmittedCQStatus {
 	return unadmittedCQStatus{
 		ClusterQueue:    s.ClusterQueue,
@@ -54,21 +211,35 @@ func (s unadmittedWorkloadStatus) ClusterQueueStatus() unadmittedCQStatus {
 	}
 }
 
+func (s unadmittedWorkloadStatus) cqStatus() unadmittedCQStatus {
+	return s.ClusterQueueStatus()
+}
+
 // unadmittedWorkloads encapsulates internal state for tracking unadmitted workloads
 // and their metric counts per ClusterQueue and LocalQueue.
 type unadmittedWorkloads struct {
-	rwm      sync.RWMutex
-	statuses map[workload.Reference]unadmittedWorkloadStatus
-	perCQ    map[unadmittedCQStatus]int
-	perLQ    map[unadmittedWorkloadStatus]int
+	*cqStatusTracker[unadmittedWorkloadStatus, unadmittedCQStatus]
+	// perLQ is guarded by the embedded cqStatusTracker.rwm: writes happen
+	// exclusively via the onDelta callback (updateLQMetricLocked) under Lock,
+	// and reads in resyncLQMetrics acquire RLock.
+	perLQ map[unadmittedWorkloadStatus]int
 }
 
 func newUnadmittedWorkloads() *unadmittedWorkloads {
-	return &unadmittedWorkloads{
-		statuses: make(map[workload.Reference]unadmittedWorkloadStatus),
-		perCQ:    make(map[unadmittedCQStatus]int),
-		perLQ:    make(map[unadmittedWorkloadStatus]int),
+	u := &unadmittedWorkloads{
+		perLQ: make(map[unadmittedWorkloadStatus]int),
 	}
+	u.cqStatusTracker = newCQStatusTracker(
+		"unadmitted",
+		func(s unadmittedCQStatus, customLabels []string, tracker *roletracker.RoleTracker, count int) {
+			metrics.ReportUnadmittedWorkload(s.ClusterQueue, s.Reason, s.UnderlyingCause, customLabels, tracker, count)
+		},
+		func(s unadmittedCQStatus, customLabels []string, tracker *roletracker.RoleTracker) {
+			metrics.ClearUnadmittedWorkloadLabelValues(s.ClusterQueue, s.Reason, s.UnderlyingCause, customLabels, tracker)
+		},
+		u.updateLQMetricLocked,
+	)
+	return u
 }
 
 func (u *unadmittedWorkloads) update(
@@ -77,113 +248,27 @@ func (u *unadmittedWorkloads) update(
 	cqName kueue.ClusterQueueReference,
 	m *Manager,
 ) {
-	u.rwm.Lock()
-	defer u.rwm.Unlock()
-
 	log = log.WithValues("workload", klog.KObj(wl))
 	status := getUnadmittedWorkloadStatus(log, wl)
 	wlKey := workload.Key(wl)
-	oldStatus, ok := u.statuses[wlKey]
-
-	if status != nil {
-		if cqName != "" {
-			status.ClusterQueue = cqName
-		} else {
-			log.V(3).Info("Failed to resolve ClusterQueue for unadmitted workload", "queue", wl.Spec.QueueName)
-		}
-		if ok && oldStatus == *status {
-			log.V(5).Info("Workload unadmitted status unchanged, skipping update")
-			return
-		}
+	if status == nil {
+		u.remove(log, wlKey, m)
+		return
 	}
-
-	log.V(4).Info("Updating unadmitted workload tracking", "oldStatus", oldStatus, "newStatus", status)
-
-	if ok {
-		u.decrementStatusCounts(log, oldStatus, m)
-		delete(u.statuses, wlKey)
-	}
-	if status != nil {
-		u.statuses[wlKey] = *status
-		u.incrementStatusCounts(log, *status, m)
-	}
-}
-
-func (u *unadmittedWorkloads) remove(
-	log logr.Logger,
-	wlKey workload.Reference,
-	m *Manager,
-) {
-	u.rwm.Lock()
-	defer u.rwm.Unlock()
-
-	oldStatus, ok := u.statuses[wlKey]
-	if ok {
-		log.V(4).Info("Removing workload from unadmitted tracking", "workload", wlKey, "status", oldStatus)
-		u.decrementStatusCounts(log, oldStatus, m)
-		delete(u.statuses, wlKey)
+	if cqName != "" {
+		status.ClusterQueue = cqName
 	} else {
-		log.V(4).Info("Workload to remove was not tracked as unadmitted", "workload", wlKey)
+		log.V(3).Info("Failed to resolve ClusterQueue for unadmitted workload", "queue", wl.Spec.QueueName)
 	}
+	u.set(log, wlKey, *status, m)
 }
 
-func (u *unadmittedWorkloads) incrementStatusCounts(
-	log logr.Logger,
-	status unadmittedWorkloadStatus,
-	m *Manager,
-) {
-	u.updateUnadmittedWorkloadMetric(log, status, 1, m)
-}
-
-func (u *unadmittedWorkloads) decrementStatusCounts(
-	log logr.Logger,
-	status unadmittedWorkloadStatus,
-	m *Manager,
-) {
-	u.updateUnadmittedWorkloadMetric(log, status, -1, m)
-}
-
-func (u *unadmittedWorkloads) updateUnadmittedWorkloadMetric(
+func (u *unadmittedWorkloads) updateLQMetricLocked(
 	log logr.Logger,
 	status unadmittedWorkloadStatus,
 	diff int,
 	m *Manager,
 ) {
-	cqKey := status.ClusterQueueStatus()
-	u.perCQ[cqKey] += diff
-	count := u.perCQ[cqKey]
-
-	if count <= 0 {
-		delete(u.perCQ, cqKey)
-	}
-	// The status may belong to a deleted ClusterQueue, whose series must not be reported again.
-	// Callers hold the Manager lock, so reading the ClusterQueues is safe.
-	if status.ClusterQueue != "" && m.hm.ClusterQueue(status.ClusterQueue) != nil {
-		cqCustomLabels := m.customLabels.CQGet(status.ClusterQueue)
-		if count <= 0 {
-			log.V(4).Info("Clearing CQ unadmitted workload metric", "clusterQueue", status.ClusterQueue, "status", cqKey)
-			metrics.ClearUnadmittedWorkloadLabelValues(
-				status.ClusterQueue,
-				status.Reason,
-				status.UnderlyingCause,
-				cqCustomLabels,
-				m.roleTracker,
-			)
-		} else {
-			log.V(4).Info("Reporting CQ unadmitted workload metric", "clusterQueue", status.ClusterQueue, "status", cqKey, "count", count)
-			metrics.ReportUnadmittedWorkload(
-				status.ClusterQueue,
-				status.Reason,
-				status.UnderlyingCause,
-				cqCustomLabels,
-				m.roleTracker,
-				count,
-			)
-		}
-	} else {
-		log.V(4).Info("Skipping CQ unadmitted metric report due to missing ClusterQueue", "status", status)
-	}
-
 	if !m.lqMetrics.IsEnabled() {
 		return
 	}
@@ -227,26 +312,8 @@ func (u *unadmittedWorkloads) updateUnadmittedWorkloadMetric(
 	}
 }
 
-func (u *unadmittedWorkloads) resyncCQMetrics(cqName kueue.ClusterQueueReference, m *Manager) {
-	u.rwm.RLock()
-	defer u.rwm.RUnlock()
-
-	for status, count := range u.perCQ {
-		if status.ClusterQueue == cqName {
-			cqCustomLabels := m.customLabels.CQGet(cqName)
-			metrics.ReportUnadmittedWorkload(
-				status.ClusterQueue,
-				status.Reason,
-				status.UnderlyingCause,
-				cqCustomLabels,
-				m.roleTracker,
-				count,
-			)
-		}
-	}
-}
-
 func (u *unadmittedWorkloads) resyncLQMetrics(lqRef queue.LocalQueueReference, m *Manager) {
+	// Acquire the embedded cqStatusTracker.rwm that guards perLQ.
 	u.rwm.RLock()
 	defer u.rwm.RUnlock()
 
