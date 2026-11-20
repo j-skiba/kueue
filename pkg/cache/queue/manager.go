@@ -168,6 +168,9 @@ type Manager struct {
 	// Tracks unadmitted workload statuses and counts.
 	unadmittedWorkloads *unadmittedWorkloads
 
+	// Tracks queued workloads that could not be scheduled by WAS and their per-CQ counts.
+	wasUnsupportedWorkloads *wasUnsupportedWorkloads
+
 	workloadOrdering workload.Ordering
 
 	workloadInfoOptions []workload.InfoOption
@@ -204,13 +207,14 @@ type Manager struct {
 // NewManagerForUnitTests or integration.NewManager should be used.
 func NewManager(client client.Client, checker StatusChecker, requeuer inadmissibleRequeuer, options ...Option) *Manager {
 	m := &Manager{
-		clock:                  realClock,
-		client:                 client,
-		statusChecker:          checker,
-		localQueues:            make(map[queue.LocalQueueReference]*LocalQueue),
-		workloadAssignedQueues: make(map[workload.Reference]queue.LocalQueueReference),
-		finishedWorkloads:      make(map[workload.Reference]queue.LocalQueueReference),
-		unadmittedWorkloads:    newUnadmittedWorkloads(),
+		clock:                   realClock,
+		client:                  client,
+		statusChecker:           checker,
+		localQueues:             make(map[queue.LocalQueueReference]*LocalQueue),
+		workloadAssignedQueues:  make(map[workload.Reference]queue.LocalQueueReference),
+		finishedWorkloads:       make(map[workload.Reference]queue.LocalQueueReference),
+		unadmittedWorkloads:     newUnadmittedWorkloads(),
+		wasUnsupportedWorkloads: newWASUnsupportedWorkloads(),
 		workloadOrdering: workload.Ordering{
 			PodsReadyRequeuingTimestamp: config.EvictionTimestamp,
 		},
@@ -464,6 +468,7 @@ func (m *Manager) DeleteClusterQueue(log logr.Logger, cq *kueue.ClusterQueue) {
 	cqName := kueue.ClusterQueueReference(cq.Name)
 	m.hm.DeleteClusterQueue(cqName)
 	clearCQMetrics(cqName)
+	m.wasUnsupportedWorkloads.deleteClusterQueue(cqName)
 	for _, lq := range m.localQueues {
 		if lq.ClusterQueue == cqName {
 			reportLQPendingWorkloads(m, lq)
@@ -598,6 +603,9 @@ func (m *Manager) UpdateLocalQueue(log logr.Logger, q *kueue.LocalQueue) error {
 	if newCQ := m.hm.ClusterQueue(q.Spec.ClusterQueue); newCQ != nil {
 		newCQ.UpdateLocalQueueWeight(queue.Key(q), afs.LQWeightAsFloat64(q))
 	}
+	if cqChanged {
+		m.removeWASUnsupportedForLocalQueueLocked(log, queue.Key(q), qImpl)
+	}
 	if cqChanged && features.Enabled(features.UnadmittedWorkloadsObservability) {
 		for _, wInfo := range qImpl.items {
 			m.updateUnadmittedWorkloadWithoutLock(log, wInfo.Obj)
@@ -625,6 +633,7 @@ func (m *Manager) DeleteLocalQueue(log logr.Logger, q *kueue.LocalQueue) {
 	if m.lqMetrics.IsEnabled() {
 		clearLQMetrics(key)
 	}
+	m.removeWASUnsupportedForLocalQueueLocked(log, key, qImpl)
 	if features.Enabled(features.UnadmittedWorkloadsObservability) {
 		for _, wInfo := range qImpl.items {
 			m.removeUnadmittedWorkloadWithoutLock(log, workload.Key(wInfo.Obj))
@@ -765,6 +774,30 @@ func (m *Manager) AddOrUpdateWorkloadWithoutLock(ctx context.Context, log logr.L
 	return nil
 }
 
+type requeueOptions struct {
+	wasUnsupportedReason     metrics.WASUnsupportedReason
+	wasUnsupportedTransition *bool
+}
+
+// RequeueOption configures optional behavior of RequeueWorkload.
+type RequeueOption func(*requeueOptions)
+
+// WithWASUnsupportedReason records (when non-empty) or clears the workload's
+// WAS unsupported reason atomically with the requeue.
+func WithWASUnsupportedReason(reason metrics.WASUnsupportedReason) RequeueOption {
+	return func(o *requeueOptions) {
+		o.wasUnsupportedReason = reason
+	}
+}
+
+// WithWASUnsupportedTransition sets *out to true iff the requeue transitioned
+// the workload into a new (ClusterQueue, WASUnsupportedReason) state.
+func WithWASUnsupportedTransition(out *bool) RequeueOption {
+	return func(o *requeueOptions) {
+		o.wasUnsupportedTransition = out
+	}
+}
+
 // RequeueWorkload requeues the workload ensuring that the queue and the
 // workload still exist in the client cache and not admitted. It won't
 // requeue if the workload is already in the queue (possible if the workload was updated).
@@ -772,8 +805,8 @@ func (m *Manager) AddOrUpdateWorkloadWithoutLock(ctx context.Context, log logr.L
 // The quotaReservedReason parameter represents the WorkloadQuotaReserved condition reason
 // computed by the scheduler during this cycle. It must be passed explicitly because info.Obj
 // has not yet been patched with the updated condition when RequeueWorkload is called.
-func (m *Manager) RequeueWorkload(ctx context.Context, info *workload.Info, reason RequeueReason, quotaReservedReason QuotaReservedReason) bool {
-	requeued, draWorkload := m.requeueWorkloadLocked(ctx, info, reason, quotaReservedReason)
+func (m *Manager) RequeueWorkload(ctx context.Context, info *workload.Info, reason RequeueReason, quotaReservedReason QuotaReservedReason, opts ...RequeueOption) bool {
+	requeued, draWorkload := m.requeueWorkloadLocked(ctx, info, reason, quotaReservedReason, opts...)
 	if draWorkload != nil {
 		m.draReconcileChannel <- event.TypedGenericEvent[*kueue.Workload]{Object: draWorkload}
 		ctrl.LoggerFrom(ctx).V(4).Info("Sent DRA workload to reconcile channel due to a generation change while inflight",
@@ -784,12 +817,25 @@ func (m *Manager) RequeueWorkload(ctx context.Context, info *workload.Info, reas
 
 // requeueWorkloadLocked requeues the workload, or returns it for the workload
 // controller when its quota charges can no longer describe it.
-func (m *Manager) requeueWorkloadLocked(ctx context.Context, info *workload.Info, reason RequeueReason, quotaReservedReason QuotaReservedReason) (bool, *kueue.Workload) {
+func (m *Manager) requeueWorkloadLocked(ctx context.Context, info *workload.Info, reason RequeueReason, quotaReservedReason QuotaReservedReason, opts ...RequeueOption) (bool, *kueue.Workload) {
 	m.Lock()
 	defer m.Unlock()
 
+	var reqOpts requeueOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&reqOpts)
+		}
+	}
+	if reqOpts.wasUnsupportedTransition != nil {
+		*reqOpts.wasUnsupportedTransition = false
+	}
+
 	log := ctrl.LoggerFrom(ctx)
 	wlKey := workload.Key(info.Obj)
+	origCQ := info.ClusterQueue
+	origGeneration := info.Obj.Generation
+	trackWAS := features.Enabled(features.SchedulerLibraryDeepIntegration) && reason != RequeueReasonSnapshotFailed
 
 	// The scheduler is giving this workload back. End its checkout first,
 	// unconditionally, so every branch below starts from the same state: the
@@ -805,15 +851,23 @@ func (m *Manager) requeueWorkloadLocked(ctx context.Context, info *workload.Info
 			// The client is cached, so NotFound is the only expected error.
 			log.Error(err, "Failed to get the workload to requeue", "workload", klog.KObj(info.Obj))
 		}
+		if trackWAS {
+			m.wasUnsupportedWorkloads.remove(log, wlKey, m)
+		}
 		return false, nil
 	}
 	// An inadmissible workload may still have a pending second-pass request.
 	if !workload.IsAdmissible(&w) {
+		if trackWAS {
+			m.wasUnsupportedWorkloads.remove(log, wlKey, m)
+		}
 		return false, nil
 	}
 
 	qKey := queue.KeyFromWorkload(&w)
+	queueMoved := false
 	if assignedQueue, ok := m.workloadAssignedQueues[wlKey]; ok && assignedQueue != qKey {
+		queueMoved = true
 		// The workload changed LocalQueue while it was checked out. No reconcile
 		// follows this requeue, so its unadmitted record has to be rebuilt under
 		// the new queue here.
@@ -825,6 +879,9 @@ func (m *Manager) requeueWorkloadLocked(ctx context.Context, info *workload.Info
 
 	q := m.localQueues[qKey]
 	if q == nil {
+		if trackWAS {
+			m.wasUnsupportedWorkloads.remove(log, wlKey, m)
+		}
 		return false, nil
 	}
 	fresh := workload.NewInfoFromClient(ctx, m.client, &w, m.workloadInfoOptions...)
@@ -840,6 +897,9 @@ func (m *Manager) requeueWorkloadLocked(ctx context.Context, info *workload.Info
 		// metadata.generation untouched; the reconcile that follows such a change
 		// re-pushes the workload with the current charges.
 		if features.Enabled(features.KueueDRAIntegration) && info.Obj.Generation != w.Generation {
+			if trackWAS && (concurrentadmission.IsVariant(&w) || queueMoved || (origCQ != "" && q.ClusterQueue != origCQ) || reqOpts.wasUnsupportedReason == "") {
+				m.wasUnsupportedWorkloads.remove(log, wlKey, m)
+			}
 			return false, w.DeepCopy()
 		}
 		// AddOrUpdateWorkload updates the LocalQueue's copy even while the
@@ -859,6 +919,9 @@ func (m *Manager) requeueWorkloadLocked(ctx context.Context, info *workload.Info
 
 	cq := m.hm.ClusterQueue(q.ClusterQueue)
 	if cq == nil {
+		if trackWAS {
+			m.wasUnsupportedWorkloads.remove(log, wlKey, m)
+		}
 		reportLQPendingWorkloads(m, q)
 		return false, nil
 	}
@@ -868,6 +931,23 @@ func (m *Manager) requeueWorkloadLocked(ctx context.Context, info *workload.Info
 		added = cq.requeueIfNotPresent(log, info, true, reason, quotaReservedReason)
 	} else {
 		added = cq.RequeueIfNotPresent(ctx, info, reason, quotaReservedReason)
+	}
+	if trackWAS {
+		switch {
+		case concurrentadmission.IsVariant(&w), queueMoved, origCQ != "" && q.ClusterQueue != origCQ:
+			m.wasUnsupportedWorkloads.remove(log, wlKey, m)
+		case w.Generation != origGeneration:
+			if reqOpts.wasUnsupportedReason == "" {
+				m.wasUnsupportedWorkloads.remove(log, wlKey, m)
+			}
+		case reqOpts.wasUnsupportedReason != "":
+			changed := m.wasUnsupportedWorkloads.set(log, wlKey, wasUnsupportedStatus{ClusterQueue: cq.name, Reason: reqOpts.wasUnsupportedReason}, m)
+			if reqOpts.wasUnsupportedTransition != nil {
+				*reqOpts.wasUnsupportedTransition = changed
+			}
+		default:
+			m.wasUnsupportedWorkloads.remove(log, wlKey, m)
+		}
 	}
 	reportCQPendingWorkloads(m, cq)
 	reportLQPendingWorkloads(m, q)
@@ -926,6 +1006,7 @@ func (m *Manager) assignWorkload(wlKey workload.Reference, qKey queue.LocalQueue
 }
 
 func (m *Manager) deleteWorkloadWithoutLock(log logr.Logger, wlKey workload.Reference) {
+	m.wasUnsupportedWorkloads.remove(log, wlKey, m)
 	qKey := m.workloadAssignedQueues[wlKey]
 	q := m.localQueues[qKey]
 	if q == nil {
@@ -1197,10 +1278,16 @@ func (m *Manager) queueSecondPass(ctx context.Context, nsName client.ObjectKey, 
 		if apierrors.IsNotFound(err) {
 			log.V(3).Info("Workload not found when queuing for second pass; dropping the request", "workload", wlKey)
 			m.secondPassQueue.deleteByKeyLocked(wlKey)
+			if features.Enabled(features.SchedulerLibraryDeepIntegration) {
+				m.wasUnsupportedWorkloads.remove(log, wlKey, m)
+			}
 			return
 		}
 		if ctx.Err() != nil {
 			m.secondPassQueue.deleteByKeyLocked(wlKey)
+			if features.Enabled(features.SchedulerLibraryDeepIntegration) {
+				m.wasUnsupportedWorkloads.remove(log, wlKey, m)
+			}
 			return
 		}
 		// Keep ownership of the pass: a transient read error retries after backoff.
@@ -1210,9 +1297,12 @@ func (m *Manager) queueSecondPass(ctx context.Context, nsName client.ObjectKey, 
 	}
 	wInfo := workload.NewInfoFromClient(ctx, m.client, &w, m.workloadInfoOptions...)
 	wInfo.SecondPassIteration = iteration
+	wasPrequeued := m.secondPassQueue.prequeued.Has(wlKey)
 	if m.secondPassQueue.queueLocked(wInfo) {
 		log.V(3).Info("Workload queued for second pass of scheduling", "workload", wlKey)
 		m.Broadcast()
+	} else if features.Enabled(features.SchedulerLibraryDeepIntegration) && (wasPrequeued || !workload.IsAdmissible(&w)) {
+		m.wasUnsupportedWorkloads.remove(log, wlKey, m)
 	}
 }
 
@@ -1233,6 +1323,9 @@ func (m *Manager) resyncClusterQueueGaugeMetricsLocked(cq *ClusterQueue) {
 	reportCQFinishedWorkloads(cq, m.roleTracker, m.customLabels)
 	if features.Enabled(features.UnadmittedWorkloadsObservability) {
 		m.resyncUnadmittedWorkloadsMetricsLocked(cq.name)
+	}
+	if features.Enabled(features.SchedulerLibraryDeepIntegration) {
+		m.wasUnsupportedWorkloads.resyncCQMetrics(cq.name, m)
 	}
 }
 
@@ -1314,6 +1407,39 @@ func (m *Manager) RemoveUnadmittedWorkload(log logr.Logger, wlKey workload.Refer
 
 func (m *Manager) removeUnadmittedWorkloadWithoutLock(log logr.Logger, wlKey workload.Reference) {
 	m.unadmittedWorkloads.remove(log, wlKey, m)
+}
+
+// SetWASUnsupportedWorkload records the workload's WAS unsupported reason for
+// the given ClusterQueue and updates the was_unsupported_workloads gauge.
+// Returns true iff the workload's tracked (ClusterQueue, reason) changed.
+func (m *Manager) SetWASUnsupportedWorkload(log logr.Logger, wlKey workload.Reference, cqName kueue.ClusterQueueReference, reason metrics.WASUnsupportedReason) bool {
+	if !features.Enabled(features.SchedulerLibraryDeepIntegration) || reason == "" {
+		return false
+	}
+	m.RLock()
+	defer m.RUnlock()
+	if cqName == "" || m.hm.ClusterQueue(cqName) == nil {
+		return false
+	}
+	return m.wasUnsupportedWorkloads.set(log, wlKey, wasUnsupportedStatus{ClusterQueue: cqName, Reason: reason}, m)
+}
+
+func (m *Manager) removeWASUnsupportedForLocalQueueLocked(log logr.Logger, lqKey queue.LocalQueueReference, qImpl *LocalQueue) {
+	m.wasUnsupportedWorkloads.removeWhere(log, func(wlKey workload.Reference, _ wasUnsupportedStatus) bool {
+		_, queued := qImpl.items[wlKey]
+		return queued || m.workloadAssignedQueues[wlKey] == lqKey
+	}, m)
+}
+
+// ClearWASUnsupportedWorkload removes the workload from WAS unsupported
+// tracking and updates the was_unsupported_workloads gauge.
+func (m *Manager) ClearWASUnsupportedWorkload(log logr.Logger, wlKey workload.Reference) {
+	if !features.Enabled(features.SchedulerLibraryDeepIntegration) {
+		return
+	}
+	m.RLock()
+	defer m.RUnlock()
+	m.wasUnsupportedWorkloads.remove(log, wlKey, m)
 }
 
 func (m *Manager) LocalQueueExists(lqRef queue.LocalQueueReference) bool {

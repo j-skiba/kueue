@@ -122,6 +122,25 @@ func (t *cqStatusTracker[S, C]) remove(
 	t.removeLocked(log, wlKey, m)
 }
 
+// removeWhere clears all tracked workloads matching pred and updates the metric.
+// Caller MUST hold at least m.RLock().
+func (t *cqStatusTracker[S, C]) removeWhere(
+	log logr.Logger,
+	pred func(workload.Reference, S) bool,
+	m *Manager,
+) {
+	t.rwm.Lock()
+	defer t.rwm.Unlock()
+
+	if len(t.statuses) == 0 {
+		return
+	}
+	for wlKey, status := range t.statuses {
+		if pred(wlKey, status) {
+			t.removeLocked(log, wlKey, m)
+		}
+	}
+}
 func (t *cqStatusTracker[S, C]) removeLocked(
 	log logr.Logger,
 	wlKey workload.Reference,
@@ -168,6 +187,24 @@ func (t *cqStatusTracker[S, C]) applyDeltaLocked(
 
 	if t.onDelta != nil {
 		t.onDelta(log, status, diff, m)
+	}
+}
+
+// deleteClusterQueue purges CQ-scoped entries for a deleted ClusterQueue.
+// It does not invoke onDelta and is intended for CQ-only trackers.
+func (t *cqStatusTracker[S, C]) deleteClusterQueue(cqName kueue.ClusterQueueReference) {
+	t.rwm.Lock()
+	defer t.rwm.Unlock()
+
+	for wlKey, status := range t.statuses {
+		if status.cqStatus().clusterQueue() == cqName {
+			delete(t.statuses, wlKey)
+		}
+	}
+	for cqKey := range t.perCQ {
+		if cqKey.clusterQueue() == cqName {
+			delete(t.perCQ, cqKey)
+		}
 	}
 }
 
@@ -382,4 +419,34 @@ func resolveUnadmittedUnderlyingCause(quotaReservedCond *metav1.Condition) strin
 		return ""
 	}
 	return quotaReservedCond.Reason
+}
+
+type wasUnsupportedStatus struct {
+	ClusterQueue kueue.ClusterQueueReference
+	Reason       metrics.WASUnsupportedReason
+}
+
+func (s wasUnsupportedStatus) clusterQueue() kueue.ClusterQueueReference {
+	return s.ClusterQueue
+}
+
+func (s wasUnsupportedStatus) cqStatus() wasUnsupportedStatus {
+	return s
+}
+
+// wasUnsupportedWorkloads tracks pending and second-pass workloads that could
+// not be scheduled by Workload-Aware Scheduling (WAS) and their per-CQ counts.
+type wasUnsupportedWorkloads = cqStatusTracker[wasUnsupportedStatus, wasUnsupportedStatus]
+
+func newWASUnsupportedWorkloads() *wasUnsupportedWorkloads {
+	return newCQStatusTracker[wasUnsupportedStatus, wasUnsupportedStatus](
+		"WAS unsupported",
+		func(s wasUnsupportedStatus, customLabels []string, tracker *roletracker.RoleTracker, count int) {
+			metrics.ReportWASUnsupportedWorkloads(s.ClusterQueue, s.Reason, customLabels, tracker, count)
+		},
+		func(s wasUnsupportedStatus, customLabels []string, tracker *roletracker.RoleTracker) {
+			metrics.ClearWASUnsupportedWorkloadsLabelValues(s.ClusterQueue, s.Reason, customLabels, tracker)
+		},
+		nil,
+	)
 }

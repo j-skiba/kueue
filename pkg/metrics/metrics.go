@@ -45,6 +45,10 @@ type LocalQueueReference struct {
 
 type PreemptionTargetRecomputationResult string
 
+// WASUnsupportedReason identifies why a queued workload could not be scheduled
+// by Workload-Aware Scheduling (WAS).
+type WASUnsupportedReason string
+
 const (
 	AdmissionResultSuccess      AdmissionResult = "success"
 	AdmissionResultInadmissible AdmissionResult = "inadmissible"
@@ -61,6 +65,13 @@ const (
 	// PreemptionTargetRecomputationResultSkipped is recorded when the
 	// recomputation does not resolve the overlap and the workload is skipped.
 	PreemptionTargetRecomputationResultSkipped PreemptionTargetRecomputationResult = "skipped"
+
+	// WASUnsupportedReasonIncompatibleFlavor indicates the workload was assigned
+	// a ResourceFlavor incompatible with WAS.
+	WASUnsupportedReasonIncompatibleFlavor WASUnsupportedReason = "incompatible_flavor"
+	// WASUnsupportedReasonInternalError indicates WAS encountered an error while
+	// virtualizing or simulating the workload.
+	WASUnsupportedReasonInternalError WASUnsupportedReason = "internal_error"
 
 	// CQStatusPending means the ClusterQueue is accepted but not yet active,
 	// this can be because of:
@@ -131,6 +142,10 @@ The label 'stage' reports the maturity of the gate at the running version and ca
 	// +metricsdoc:group=clusterqueue
 	// +metricsdoc:labels=cluster_queue="the name of the ClusterQueue",result="one of `new_targets`, `deferred_fit`, or `skipped`",replica_role="one of `leader`, `follower`, or `standalone`"
 	PreemptionTargetRecomputationsTotal *prometheus.CounterVec
+
+	// +metricsdoc:group=clusterqueue
+	// +metricsdoc:labels=cluster_queue="the name of the ClusterQueue",reason="one of `incompatible_flavor` or `internal_error`",replica_role="one of `leader`, `follower`, or `standalone`"
+	WASUnsupportedWorkloads *prometheus.GaugeVec
 
 	// Metrics tied to the queue system.
 
@@ -484,6 +499,18 @@ The label 'result' can have the following values:
 Globally configured custom ClusterQueue labels are also appended to the base labels.`,
 		}, append([]string{"cluster_queue", "result", "replica_role"}, clusterQueueMetricsLabels...),
 	)
+
+	WASUnsupportedWorkloads = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: constants.KueueName,
+			Name:      "was_unsupported_workloads",
+			Help: `The number of pending or second-pass workloads that could not be scheduled by Workload-Aware Scheduling (WAS), per 'cluster_queue' and 'reason'. Reported only when SchedulerLibraryDeepIntegration is enabled.
+The label 'reason' can have the following values:
+- 'incompatible_flavor' means the workload was assigned a ResourceFlavor incompatible with WAS (non-TAS flavor, TAS flavor whose Topology does not declare kubernetes.io/hostname, or multiple TAS flavors on a PodSet).
+- 'internal_error' means WAS encountered an error while virtualizing or simulating the workload.`,
+		}, append([]string{"cluster_queue", "reason", "replica_role"}, clusterQueueMetricsLabels...),
+	)
+	trackGaugeVec(WASUnsupportedWorkloads, gaugeCleanupScopeClusterQueue)
 
 	buildInfo = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -1681,6 +1708,35 @@ func ReportPreemptionTargetRecomputation(cqName kueue.ClusterQueueReference, res
 	PreemptionTargetRecomputationsTotal.WithLabelValues(labels...).Inc()
 }
 
+// ReportWASUnsupportedWorkloads sets the current number of queued workloads
+// that could not be scheduled by Workload-Aware Scheduling for the given
+// ClusterQueue and reason.
+func ReportWASUnsupportedWorkloads(
+	cqName kueue.ClusterQueueReference,
+	reason WASUnsupportedReason,
+	customLabelValues []string,
+	tracker *roletracker.RoleTracker,
+	count int,
+) {
+	if !features.Enabled(features.SchedulerLibraryDeepIntegration) {
+		return
+	}
+	labels := append([]string{string(cqName), string(reason), roletracker.GetRole(tracker)}, customLabelValues...)
+	WASUnsupportedWorkloads.WithLabelValues(labels...).Set(float64(count))
+}
+
+// ClearWASUnsupportedWorkloadsLabelValues removes the series for the given
+// ClusterQueue, reason, custom labels, and replica role.
+func ClearWASUnsupportedWorkloadsLabelValues(
+	cqName kueue.ClusterQueueReference,
+	reason WASUnsupportedReason,
+	customLabelValues []string,
+	tracker *roletracker.RoleTracker,
+) {
+	labels := append([]string{string(cqName), string(reason), roletracker.GetRole(tracker)}, customLabelValues...)
+	WASUnsupportedWorkloads.DeleteLabelValues(labels...)
+}
+
 func clearScopedGaugeMetrics(scope gaugeCleanupScope, lbls prometheus.Labels) {
 	for _, g := range gaugeVecsByScope[scope] {
 		g.DeletePartialMatch(lbls)
@@ -1757,6 +1813,7 @@ func Register() {
 		MultiKueueWorkloadsEvictedTotal,
 		AdmissionCyclePreemptionSkips,
 		PreemptionTargetRecomputationsTotal,
+		WASUnsupportedWorkloads,
 		PendingWorkloads,
 		PendingSchedulingHashes,
 		FinishedWorkloads,
