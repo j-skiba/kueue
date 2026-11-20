@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	schedulingv1alpha3 "k8s.io/api/scheduling/v1alpha3"
 	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -39,8 +41,10 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/cache/scheduler/simulator"
 	"sigs.k8s.io/kueue/pkg/features"
+	"sigs.k8s.io/kueue/pkg/metrics"
 	utiltas "sigs.k8s.io/kueue/pkg/util/tas"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
+	testingmetrics "sigs.k8s.io/kueue/pkg/util/testing/metrics"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
 	testingnode "sigs.k8s.io/kueue/pkg/util/testingjobs/node"
 	"sigs.k8s.io/kueue/pkg/workload"
@@ -1713,6 +1717,7 @@ func TestScheduleErrorHandling(t *testing.T) {
 	singleNode := []corev1.Node{
 		*testingnode.MakeNode("x1").
 			Label("tas-node", "true").
+			Label("cloud.provider.com/rack", "r1").
 			Label(corev1.LabelHostname, "x1").
 			StatusAllocatable(corev1.ResourceList{
 				corev1.ResourceCPU:  resource.MustParse("1"),
@@ -1725,6 +1730,27 @@ func TestScheduleErrorHandling(t *testing.T) {
 	defaultTASFlavor := *utiltestingapi.MakeResourceFlavor("tas-default").
 		NodeLabel("tas-node", "true").
 		TopologyName("tas-single-level").
+		Obj()
+	strictFIFOCQ := *utiltestingapi.MakeClusterQueue("tas-main").
+		QueueingStrategy(kueue.StrictFIFO).
+		ResourceGroup(*utiltestingapi.MakeFlavorQuotas("tas-default").
+			Resource(corev1.ResourceCPU, "1").Obj()).
+		Obj()
+	rackTopology := *utiltestingapi.MakeTopology("tas-rack-only").
+		Levels("cloud.provider.com/rack").
+		Obj()
+	rackTASFlavor := *utiltestingapi.MakeResourceFlavor("tas-rack").
+		NodeLabel("tas-node", "true").
+		TopologyName("tas-rack-only").
+		Obj()
+	strictFIFORackCQ := *utiltestingapi.MakeClusterQueue("tas-main").
+		QueueingStrategy(kueue.StrictFIFO).
+		ResourceGroup(*utiltestingapi.MakeFlavorQuotas("tas-rack").
+			Resource(corev1.ResourceCPU, "1").Obj()).
+		Obj()
+	provCheck := *utiltestingapi.MakeAdmissionCheck("prov-check").
+		ControllerName(kueue.ProvisioningRequestControllerName).
+		Condition(metav1.Condition{Type: kueue.AdmissionCheckActive, Status: metav1.ConditionTrue}).
 		Obj()
 	queues := []kueue.LocalQueue{
 		*utiltestingapi.MakeLocalQueue("tas-main", "default").ClusterQueue("tas-main").Obj(),
@@ -1787,21 +1813,21 @@ func TestScheduleErrorHandling(t *testing.T) {
 			RequiredTopologyRequest(corev1.LabelHostname).
 			Request(corev1.ResourceCPU, "1").
 			Obj())
-	wl2NotReserved := func(reason, message string) kueue.Workload {
-		return *wl2Base.Clone().
+	notReserved := func(base *utiltestingapi.WorkloadWrapper, ts time.Time, reason, message string) kueue.Workload {
+		return *base.Clone().
 			Condition(metav1.Condition{
 				Type:               kueue.WorkloadQuotaReserved,
 				Status:             metav1.ConditionFalse,
 				Reason:             reason,
 				Message:            message,
-				LastTransitionTime: metav1.NewTime(now),
+				LastTransitionTime: metav1.NewTime(ts),
 			}).
 			Condition(metav1.Condition{
 				Type:               kueue.WorkloadAdmitted,
 				Status:             metav1.ConditionFalse,
 				Reason:             kueue.WorkloadAdmittedReasonNoReservation,
 				Message:            "The workload has no reservation",
-				LastTransitionTime: metav1.NewTime(now),
+				LastTransitionTime: metav1.NewTime(ts),
 			}).
 			ResourceRequests(kueue.PodSetRequest{
 				Name: "main",
@@ -1811,6 +1837,43 @@ func TestScheduleErrorHandling(t *testing.T) {
 			}).
 			Obj()
 	}
+	wl2NotReserved := func(reason, message string) kueue.Workload {
+		return notReserved(wl2Base, now, reason, message)
+	}
+	rackWlBase := utiltestingapi.MakeWorkload("wl", "default").
+		Queue("tas-main").
+		PodSets(*utiltestingapi.MakePodSet("main", 1).
+			RequiredTopologyRequest("cloud.provider.com/rack").
+			Request(corev1.ResourceCPU, "1").
+			Obj())
+	const rackMissingHostnameMsg = `virtualization error: unable to build virtual pods: TAS flavor "tas-rack" for PodSet "main": TAS flavor topology does not declare kubernetes.io/hostname level`
+	variantWlBase := utiltestingapi.MakeWorkload("wl-variant", "default").
+		Queue("tas-main").
+		OwnerReference(kueue.SchemeGroupVersion.WithKind("Workload"), "parent-wl", "parent-uid").
+		PodSets(*utiltestingapi.MakePodSet("main", 1).
+			RequiredTopologyRequest("cloud.provider.com/rack").
+			Request(corev1.ResourceCPU, "1").
+			Obj())
+	secondPassWlBase := utiltestingapi.MakeWorkload("wl-sp", "default").
+		Queue("tas-main").
+		PodSets(*utiltestingapi.MakePodSet("main", 1).
+			RequiredTopologyRequest(corev1.LabelHostname).
+			Request(corev1.ResourceCPU, "1").
+			Obj()).
+		ReserveQuotaAt(
+			utiltestingapi.MakeAdmission("tas-main").
+				PodSets(utiltestingapi.MakePodSetAssignment("main").
+					Assignment(corev1.ResourceCPU, "tas-default", "1").
+					DelayedTopologyRequest(kueue.DelayedTopologyRequestStatePending).
+					Obj()).
+				Obj(),
+			now,
+		).
+		AdmissionCheck(kueue.AdmissionCheckState{
+			Name:               "prov-check",
+			State:              kueue.CheckStateReady,
+			LastTransitionTime: metav1.NewTime(now),
+		})
 	tasConflictWorkloads := []kueue.Workload{
 		*wl1Base.Clone().Obj(),
 		*wl2Base.Clone().Obj(),
@@ -1923,7 +1986,10 @@ func TestScheduleErrorHandling(t *testing.T) {
 			},
 			eventCmpOpts: cmp.Options{eventIgnoreMessage},
 			wantEvents: []utiltesting.EventRecord{
-				utiltesting.MakeEventRecord("default", "high", kueue.WorkloadQuotaReservedReasonAssignmentError, corev1.EventTypeWarning).Obj(),
+				utiltesting.MakeEventRecord("default", "high", wasEventReasonInternalError, corev1.EventTypeWarning).Obj(),
+			},
+			wantWASUnsupportedMetrics: []testingmetrics.MetricDataPoint{
+				wasMetricPoint("tas-main", metrics.WASUnsupportedReasonInternalError, 1),
 			},
 			featureGates: deepIntegrationGates,
 		},
@@ -1977,7 +2043,10 @@ func TestScheduleErrorHandling(t *testing.T) {
 			},
 			eventCmpOpts: cmp.Options{eventIgnoreMessage},
 			wantEvents: []utiltesting.EventRecord{
-				utiltesting.MakeEventRecord("default", "wl", kueue.WorkloadQuotaReservedReasonAssignmentError, corev1.EventTypeWarning).Obj(),
+				utiltesting.MakeEventRecord("default", "wl", wasEventReasonIncompatibleFlavor, corev1.EventTypeWarning).Obj(),
+			},
+			wantWASUnsupportedMetrics: []testingmetrics.MetricDataPoint{
+				wasMetricPoint("tas-main", metrics.WASUnsupportedReasonIncompatibleFlavor, 1),
 			},
 			featureGates: deepIntegrationGates,
 		},
@@ -2011,9 +2080,362 @@ func TestScheduleErrorHandling(t *testing.T) {
 			wantEvents: []utiltesting.EventRecord{
 				utiltesting.MakeEventRecord("default", "wl-a", "QuotaReserved", corev1.EventTypeNormal).Obj(),
 				utiltesting.MakeEventRecord("default", "wl-a", "Admitted", corev1.EventTypeNormal).Obj(),
-				utiltesting.MakeEventRecord("default", "wl-b", kueue.WorkloadQuotaReservedReasonAssignmentError, corev1.EventTypeWarning).Obj(),
+				utiltesting.MakeEventRecord("default", "wl-b", wasEventReasonInternalError, corev1.EventTypeWarning).Obj(),
+			},
+			wantWASUnsupportedMetrics: []testingmetrics.MetricDataPoint{
+				wasMetricPoint("tas-second", metrics.WASUnsupportedReasonInternalError, 1),
 			},
 			featureGates: deepIntegrationGates,
+		},
+		"StrictFIFO incompatible_flavor deduplicates events across cycles": {
+			nodes:           singleNode,
+			topologies:      []kueue.Topology{rackTopology},
+			resourceFlavors: []kueue.ResourceFlavor{rackTASFlavor},
+			clusterQueues:   []kueue.ClusterQueue{strictFIFORackCQ},
+			workloads:       []kueue.Workload{*rackWlBase.Clone().Obj()},
+			scheduleCycles:  3,
+			wantWorkloads: []kueue.Workload{
+				notReserved(rackWlBase, now, kueue.WorkloadQuotaReservedReasonAssignmentError, rackMissingHostnameMsg),
+			},
+			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"tas-main": {"default/wl"},
+			},
+			eventCmpOpts: cmp.Options{eventIgnoreMessage},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "wl", wasEventReasonIncompatibleFlavor, corev1.EventTypeWarning).Obj(),
+			},
+			wantWASUnsupportedMetrics: []testingmetrics.MetricDataPoint{
+				wasMetricPoint("tas-main", metrics.WASUnsupportedReasonIncompatibleFlavor, 1),
+			},
+			featureGates: deepIntegrationGates,
+		},
+		"StrictFIFO internal_error deduplicates even when QuotaReserved is overwritten externally": {
+			nodes:           singleNode,
+			topologies:      []kueue.Topology{defaultSingleLevelTopology},
+			resourceFlavors: []kueue.ResourceFlavor{defaultTASFlavor},
+			clusterQueues:   []kueue.ClusterQueue{strictFIFOCQ},
+			workloads:       []kueue.Workload{*wl1Base.Clone().Obj()},
+			simulatorOverride: func() simulator.SchedulerSimulator {
+				return &mockWorkloadScheduler{
+					placementNode: "x1",
+					injectError:   errors.New("persistent simulator failure"),
+					swFailAt:      1,
+				}
+			},
+			scheduleCycles: 3,
+			afterCycle: func(t *testing.T, cycle int, s *tasScheduleCycleContext) {
+				if cycle == 2 {
+					return
+				}
+				var live kueue.Workload
+				if err := s.cl.Get(t.Context(), types.NamespacedName{Namespace: "default", Name: "wl-a"}, &live); err != nil {
+					t.Fatalf("Get workload: %v", err)
+				}
+				apimeta.SetStatusCondition(&live.Status.Conditions, metav1.Condition{
+					Type:               kueue.WorkloadQuotaReserved,
+					Status:             metav1.ConditionFalse,
+					Reason:             "Pending",
+					Message:            "overwritten externally",
+					LastTransitionTime: metav1.NewTime(s.fakeClock.Now()),
+				})
+				if err := s.cl.Status().Update(t.Context(), &live); err != nil {
+					t.Fatalf("Update workload status: %v", err)
+				}
+				if err := s.qManager.AddOrUpdateWorkload(t.Context(), utiltesting.NewLogger(t), &live); err != nil {
+					t.Fatalf("AddOrUpdateWorkload: %v", err)
+				}
+			},
+			wantWorkloads: []kueue.Workload{
+				notReserved(wl1Base, now, kueue.WorkloadQuotaReservedReasonAssignmentError, "failed to schedule workload: persistent simulator failure"),
+			},
+			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"tas-main": {"default/wl-a"},
+			},
+			eventCmpOpts: cmp.Options{eventIgnoreMessage},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "wl-a", wasEventReasonInternalError, corev1.EventTypeWarning).Obj(),
+			},
+			wantWASUnsupportedMetrics: []testingmetrics.MetricDataPoint{
+				wasMetricPoint("tas-main", metrics.WASUnsupportedReasonInternalError, 1),
+			},
+			featureGates: deepIntegrationGates,
+		},
+		"recovery when workload fits and admits on next cycle clears WAS metric": {
+			nodes:           singleNode,
+			topologies:      []kueue.Topology{defaultSingleLevelTopology},
+			resourceFlavors: []kueue.ResourceFlavor{defaultTASFlavor},
+			clusterQueues:   []kueue.ClusterQueue{strictFIFOCQ},
+			workloads:       []kueue.Workload{*wl1Base.Clone().Obj()},
+			simulatorOverride: func() simulator.SchedulerSimulator {
+				return &mockWorkloadScheduler{
+					placementNode: "x1",
+					injectError:   errors.New("transient simulator error"),
+					swFailAt:      1,
+					swFailUntil:   1,
+				}
+			},
+			scheduleCycles: 2,
+			afterCycle: func(t *testing.T, cycle int, s *tasScheduleCycleContext) {
+				if cycle == 0 {
+					assertWASUnsupportedMetricSeries(t, wasMetricPoint("tas-main", metrics.WASUnsupportedReasonInternalError, 1))
+					if got := len(s.recorder.RecordedEvents); got != 1 {
+						t.Errorf("after cycle 0: got %d events, want 1", got)
+					}
+				}
+			},
+			wantWorkloads: []kueue.Workload{
+				*wl1Base.Clone().
+					Admission(&wl1Admission).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionTrue,
+						Reason:             "QuotaReserved",
+						Message:            "Quota reserved in ClusterQueue tas-main",
+						LastTransitionTime: metav1.NewTime(now.Add(time.Second)),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionTrue,
+						Reason:             "Admitted",
+						Message:            "The workload is admitted",
+						LastTransitionTime: metav1.NewTime(now.Add(time.Second)),
+					}).
+					ResourceRequests(kueue.PodSetRequest{
+						Name: "main",
+						Resources: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					}).
+					Obj(),
+			},
+			wantNewAssignments: map[workload.Reference]kueue.Admission{
+				"default/wl-a": wl1Admission,
+			},
+			eventCmpOpts: cmp.Options{eventIgnoreMessage},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "wl-a", wasEventReasonInternalError, corev1.EventTypeWarning).Obj(),
+				utiltesting.MakeEventRecord("default", "wl-a", "QuotaReserved", corev1.EventTypeNormal).Obj(),
+				utiltesting.MakeEventRecord("default", "wl-a", "Admitted", corev1.EventTypeNormal).Obj(),
+			},
+			wantWASUnsupportedMetrics: []testingmetrics.MetricDataPoint{},
+			featureGates:              deepIntegrationGates,
+		},
+		"recovery when workload transitions from WAS error to normal NoFit clears WAS metric": {
+			nodes:           singleNode,
+			topologies:      []kueue.Topology{defaultSingleLevelTopology},
+			resourceFlavors: []kueue.ResourceFlavor{defaultTASFlavor},
+			clusterQueues:   []kueue.ClusterQueue{strictFIFOCQ},
+			workloads:       []kueue.Workload{*wl1Base.Clone().Obj()},
+			simulatorOverride: func() simulator.SchedulerSimulator {
+				return &mockWorkloadScheduler{
+					placementErr: errors.New("Insufficient cpu"),
+					injectError:  errors.New("transient simulator error"),
+					swFailAt:     1,
+					swFailUntil:  1,
+				}
+			},
+			scheduleCycles: 2,
+			afterCycle: func(t *testing.T, cycle int, _ *tasScheduleCycleContext) {
+				if cycle == 0 {
+					assertWASUnsupportedMetricSeries(t, wasMetricPoint("tas-main", metrics.WASUnsupportedReasonInternalError, 1))
+				}
+			},
+			wantWorkloads: []kueue.Workload{
+				notReserved(
+					wl1Base,
+					now,
+					kueue.WorkloadQuotaReservedReasonSimulationFailed,
+					"failed to assign flavors to pod set main: pod: default/virtual-wl-a-main-0-03e95, error: Insufficient cpu",
+				),
+			},
+			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"tas-main": {"default/wl-a"},
+			},
+			eventCmpOpts: cmp.Options{eventIgnoreMessage},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "wl-a", wasEventReasonInternalError, corev1.EventTypeWarning).Obj(),
+				utiltesting.MakeEventRecord("default", "wl-a", kueue.WorkloadQuotaReservedReasonSimulationFailed, corev1.EventTypeWarning).Obj(),
+			},
+			wantWASUnsupportedMetrics: []testingmetrics.MetricDataPoint{},
+			featureGates:              deepIntegrationGates,
+		},
+		"second-pass WAS error deduplicates events and clears on recovery": {
+			nodes:           singleNode,
+			topologies:      []kueue.Topology{defaultSingleLevelTopology},
+			resourceFlavors: []kueue.ResourceFlavor{defaultTASFlavor},
+			admissionChecks: []kueue.AdmissionCheck{provCheck},
+			clusterQueues: []kueue.ClusterQueue{
+				*utiltestingapi.MakeClusterQueue("tas-main").
+					ResourceGroup(*utiltestingapi.MakeFlavorQuotas("tas-default").
+						Resource(corev1.ResourceCPU, "1").Obj()).
+					AdmissionChecks(kueue.AdmissionCheckReference(provCheck.Name)).
+					Obj(),
+			},
+			workloads:             []kueue.Workload{*secondPassWlBase.Clone().Obj()},
+			prequeuedSecondPasses: []workload.Reference{"default/wl-sp"},
+			simulatorOverride: func() simulator.SchedulerSimulator {
+				return &mockWorkloadScheduler{
+					placementNode: "x1",
+					injectError:   errors.New("second-pass simulator failure"),
+					swFailAt:      1,
+					swFailUntil:   2,
+				}
+			},
+			scheduleCycles: 3,
+			cycleStep:      10 * time.Second,
+			afterCycle: func(t *testing.T, cycle int, s *tasScheduleCycleContext) {
+				if cycle < 2 {
+					assertWASUnsupportedMetricSeries(t, wasMetricPoint("tas-main", metrics.WASUnsupportedReasonInternalError, 1))
+					if got := len(s.recorder.RecordedEvents); got != 1 {
+						t.Errorf("after cycle %d: got %d events, want 1", cycle, got)
+					}
+				}
+			},
+			wantWorkloads: []kueue.Workload{
+				*secondPassWlBase.Clone().
+					Admission(
+						utiltestingapi.MakeAdmission("tas-main").
+							PodSets(utiltestingapi.MakePodSetAssignment("main").
+								Assignment(corev1.ResourceCPU, "tas-default", "1").
+								DelayedTopologyRequest(kueue.DelayedTopologyRequestStateReady).
+								TopologyAssignment(utiltestingapi.MakeTopologyAssignment(utiltas.Levels(&defaultSingleLevelTopology)).
+									Domain(utiltestingapi.MakeTopologyDomainAssignment([]string{"x1"}, 1).Obj()).
+									Obj()).
+								Obj()).
+							Obj(),
+					).
+					AdmissionChecks(kueue.AdmissionCheckState{
+						Name:               "prov-check",
+						State:              kueue.CheckStateReady,
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadQuotaReserved,
+						Status:             metav1.ConditionTrue,
+						Reason:             "QuotaReserved",
+						Message:            "Quota reserved in ClusterQueue tas-main",
+						LastTransitionTime: metav1.NewTime(now),
+					}).
+					Condition(metav1.Condition{
+						Type:               kueue.WorkloadAdmitted,
+						Status:             metav1.ConditionTrue,
+						Reason:             "Admitted",
+						Message:            "The workload is admitted",
+						LastTransitionTime: metav1.NewTime(now.Add(21 * time.Second)),
+					}).
+					Obj(),
+			},
+			eventCmpOpts: cmp.Options{eventIgnoreMessage},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "wl-sp", wasEventReasonInternalError, corev1.EventTypeWarning).Obj(),
+				utiltesting.MakeEventRecord("default", "wl-sp", "Admitted", corev1.EventTypeNormal).Obj(),
+			},
+			wantWASUnsupportedMetrics: []testingmetrics.MetricDataPoint{},
+			featureGates:              deepIntegrationGates,
+		},
+		"dropIfAlreadyAccounted clears tracked WAS unsupported state": {
+			nodes:           singleNode,
+			topologies:      []kueue.Topology{defaultSingleLevelTopology},
+			resourceFlavors: []kueue.ResourceFlavor{defaultTASFlavor},
+			clusterQueues:   []kueue.ClusterQueue{strictFIFOCQ},
+			workloads:       []kueue.Workload{*wl1Base.Clone().Obj()},
+			simulatorOverride: func() simulator.SchedulerSimulator {
+				return &mockWorkloadScheduler{
+					placementNode: "x1",
+					injectError:   errors.New("persistent simulator failure"),
+					swFailAt:      1,
+				}
+			},
+			scheduleCycles: 2,
+			afterCycle: func(t *testing.T, cycle int, s *tasScheduleCycleContext) {
+				if cycle != 0 {
+					return
+				}
+				assertWASUnsupportedMetricSeries(t, wasMetricPoint("tas-main", metrics.WASUnsupportedReasonInternalError, 1))
+				admittedCopy := wl1Base.Clone().ReserveQuotaAt(&wl1Admission, s.fakeClock.Now()).Obj()
+				if !s.cqCache.AddOrUpdateWorkload(t.Context(), utiltesting.NewLogger(t), admittedCopy) {
+					t.Fatal("AddOrUpdateWorkload into cache failed")
+				}
+			},
+			wantWorkloads: []kueue.Workload{
+				notReserved(wl1Base, now, kueue.WorkloadQuotaReservedReasonAssignmentError, "failed to schedule workload: persistent simulator failure"),
+			},
+			wantNewAssignments: map[workload.Reference]kueue.Admission{
+				"default/wl-a": wl1Admission,
+			},
+			eventCmpOpts: cmp.Options{eventIgnoreMessage},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "wl-a", wasEventReasonInternalError, corev1.EventTypeWarning).Obj(),
+			},
+			wantWASUnsupportedMetrics: []testingmetrics.MetricDataPoint{},
+			featureGates:              deepIntegrationGates,
+		},
+		"transient status patch failure rolls back WAS tracking so next cycle emits event": {
+			nodes:           singleNode,
+			topologies:      []kueue.Topology{rackTopology},
+			resourceFlavors: []kueue.ResourceFlavor{rackTASFlavor},
+			clusterQueues:   []kueue.ClusterQueue{strictFIFORackCQ},
+			workloads:       []kueue.Workload{*rackWlBase.Clone().Obj()},
+			patchStatusErr: func() func() error {
+				var calls atomic.Int32
+				return func() error {
+					if calls.Add(1) == 1 {
+						return errors.New("transient apiserver timeout")
+					}
+					return nil
+				}
+			},
+			scheduleCycles: 3,
+			afterCycle: func(t *testing.T, cycle int, s *tasScheduleCycleContext) {
+				if cycle == 0 {
+					assertWASUnsupportedMetricSeries(t)
+					if got := len(s.recorder.RecordedEvents); got != 0 {
+						t.Errorf("after cycle 0 (failed status patch): got %d events, want 0", got)
+					}
+				} else {
+					assertWASUnsupportedMetricSeries(t, wasMetricPoint("tas-main", metrics.WASUnsupportedReasonIncompatibleFlavor, 1))
+					if got := len(s.recorder.RecordedEvents); got != 1 {
+						t.Errorf("after cycle %d: got %d events, want 1", cycle, got)
+					}
+				}
+			},
+			wantWorkloads: []kueue.Workload{
+				notReserved(rackWlBase, now.Add(time.Second), kueue.WorkloadQuotaReservedReasonAssignmentError, rackMissingHostnameMsg),
+			},
+			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"tas-main": {"default/wl"},
+			},
+			eventCmpOpts: cmp.Options{eventIgnoreMessage},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "wl", wasEventReasonIncompatibleFlavor, corev1.EventTypeWarning).Obj(),
+			},
+			wantWASUnsupportedMetrics: []testingmetrics.MetricDataPoint{
+				wasMetricPoint("tas-main", metrics.WASUnsupportedReasonIncompatibleFlavor, 1),
+			},
+			featureGates: deepIntegrationGates,
+		},
+		"ConcurrentAdmission variant falls back to AssignmentError Warning event without gauge tracking": {
+			nodes:           singleNode,
+			topologies:      []kueue.Topology{rackTopology},
+			resourceFlavors: []kueue.ResourceFlavor{rackTASFlavor},
+			clusterQueues:   []kueue.ClusterQueue{strictFIFORackCQ},
+			workloads:       []kueue.Workload{*variantWlBase.Clone().Obj()},
+			wantWorkloads: []kueue.Workload{
+				notReserved(variantWlBase, now, kueue.WorkloadQuotaReservedReasonAssignmentError, rackMissingHostnameMsg),
+			},
+			wantLeft: map[kueue.ClusterQueueReference][]workload.Reference{
+				"tas-main": {"default/wl-variant"},
+			},
+			eventCmpOpts: cmp.Options{eventIgnoreMessage},
+			wantEvents: []utiltesting.EventRecord{
+				utiltesting.MakeEventRecord("default", "wl-variant", kueue.WorkloadQuotaReservedReasonAssignmentError, corev1.EventTypeWarning).Obj(),
+			},
+			wantWASUnsupportedMetrics: []testingmetrics.MetricDataPoint{},
+			featureGates: map[featuregate.Feature]bool{
+				features.SchedulerLibraryIntegration:     true,
+				features.SchedulerLibraryDeepIntegration: true,
+				features.ConcurrentAdmission:             true,
+			},
 		},
 	}
 	runTASScheduleTestCases(t, tasScheduleTestConfig{
@@ -2123,7 +2545,8 @@ func TestScheduleNoFitReasonSchedulerLibrary(t *testing.T) {
 			wantEvents: []utiltesting.EventRecord{
 				utiltesting.MakeEventRecord("default", "wl", kueue.WorkloadQuotaReservedReasonSimulationFailed, corev1.EventTypeWarning).Obj(),
 			},
-			featureGates: deepIntegrationGates,
+			wantWASUnsupportedMetrics: []testingmetrics.MetricDataPoint{},
+			featureGates:              deepIntegrationGates,
 		},
 	}
 	runTASScheduleTestCases(t, tasScheduleTestConfig{
@@ -2140,9 +2563,11 @@ type mockWorkloadScheduler struct {
 	placementErr error
 
 	injectError error
-	// swFailAt marks at and after which call should the ShceduleWorkload
-	// method return an error. When not set, ShceduleWorkload will awlays succeed.
+	// swFailAt marks at and after which call should the ScheduleWorkload
+	// method return an error. When not set, ScheduleWorkload will always succeed.
 	swFailAt int
+	// swFailUntil, when set, stops injecting injectError after this call (inclusive).
+	swFailUntil int
 
 	swCallsCount int
 }
@@ -2166,7 +2591,7 @@ func (s *mockWorkloadScheduler) FindFeasibleNodes(
 
 func (s *mockWorkloadScheduler) ScheduleWorkload(_ context.Context, workloadPods []*corev1.Pod, _ ...simulator.ScheduleOption) simulator.SchedulingResult {
 	s.swCallsCount++
-	if s.swFailAt != 0 && s.swCallsCount >= s.swFailAt {
+	if s.swFailAt != 0 && s.swCallsCount >= s.swFailAt && (s.swFailUntil == 0 || s.swCallsCount <= s.swFailUntil) {
 		return simulator.SchedulingResult{Error: s.injectError}
 	}
 	placements := make(simulator.PodPlacements, len(workloadPods))

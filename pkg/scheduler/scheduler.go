@@ -460,6 +460,7 @@ func (s *Scheduler) requeueHeadsAfterSnapshotError(ctx context.Context, heads []
 func (s *Scheduler) finishEntry(ctx context.Context, log logr.Logger, e *entry) bool {
 	logAdmissionAttemptIfVerbose(log, e)
 	if e.status == assumed || e.status == evicted {
+		s.queues.ClearWASUnsupportedWorkload(log, workload.Key(e.Obj))
 		return true
 	}
 	s.requeueAndUpdate(ctx, *e)
@@ -503,6 +504,7 @@ func (s *Scheduler) processEntry(
 	fits, err := s.updateAssignmentIfNeeded(ctx, log, e, snapshot, cq, preemptedWorkloads)
 	if err != nil {
 		log.Error(err, "Failed to re-compute the assignment")
+		e.assignmentErr = err
 		e.markSkipped(err.Error())
 		e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonAssignmentError
 		return
@@ -667,7 +669,7 @@ func (s *Scheduler) tryDeferFailedTASReplacement(ctx context.Context, log logr.L
 	// first flavor again, mirroring updateAssignmentIfNeeded.
 	e.FlavorScanState = nil
 	e.NominationMapping = e.readResourceToFlavorMapping()
-	newAssignment, newTargets, err := s.getAssignments(ctx, &e.Info, snapshot)
+	newAssignment, newTargets, _, err := s.getAssignments(ctx, &e.Info, snapshot)
 	e.NominationMapping = nil
 	revertRemoval()
 	if err != nil {
@@ -832,6 +834,8 @@ type entry struct {
 	clusterQueueSnapshot *schdcache.ClusterQueueSnapshot
 	quotaReservedReason  string
 	skipStatusUpdate     bool
+	assignmentErr        error
+	usedWAS              bool
 	// refilled marks an entry popped mid-cycle rather than nominated as a
 	// ClusterQueue head; such entries are admitted only on Fit.
 	refilled bool
@@ -925,6 +929,7 @@ func (s *Scheduler) dropIfAlreadyAccounted(log logr.Logger, h qcache.Head) bool 
 	}
 	log.V(3).Info("Workload skipped from admission because it's already accounted in cache, and it does not need second pass")
 	s.queues.ForgetInflight(h.ClusterQueue, workload.Key(h.Obj))
+	s.queues.ClearWASUnsupportedWorkload(log, workload.Key(h.Obj))
 	return true
 }
 
@@ -955,11 +960,14 @@ func (s *Scheduler) nominateWorkload(ctx context.Context, log logr.Logger, h qca
 				e.requeueReason = qcache.RequeueReasonNamespaceMismatch
 			}
 		}
-	} else if assignment, targets, err := s.getAssignments(ctx, &e.Info, snap); err != nil {
+	} else if assignment, targets, usedWAS, err := s.getAssignments(ctx, &e.Info, snap); err != nil {
 		log.Error(err, "Failed to compute the initial assignment")
+		e.assignmentErr = err
+		e.usedWAS = usedWAS
 		e.inadmissibleMsg = err.Error()
 		e.quotaReservedReason = kueue.WorkloadQuotaReservedReasonAssignmentError
 	} else {
+		e.usedWAS = usedWAS
 		e.recordAssignment(assignment, targets)
 		return e, true
 	}
@@ -1007,12 +1015,13 @@ func (s *Scheduler) updateAssignmentIfNeeded(
 	nominationScanState := e.assignment.FlavorScanState
 	e.FlavorScanState = nil
 	e.NominationMapping = e.readResourceToFlavorMapping()
-	newAssignment, newTargets, err := s.getAssignments(ctx, &e.Info, snapshot)
+	newAssignment, newTargets, usedWAS, err := s.getAssignments(ctx, &e.Info, snapshot)
 	if revertRemoval != nil {
 		revertRemoval()
 	}
 	// clear the assignment flavors as they are only used within a single scheduling cycle
 	e.NominationMapping = nil
+	e.usedWAS = usedWAS
 
 	if err != nil {
 		return false, err
@@ -1365,16 +1374,37 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 		e.requeueReason = qcache.RequeueReasonFailedAfterNomination
 	}
 
+	var wasReason metrics.WASUnsupportedReason
+	var wasEventReason string
+	if e.usedWAS && e.assignmentErr != nil && !concurrentadmission.IsVariant(e.Obj) {
+		wasReason, wasEventReason = classifyWASError(e.assignmentErr)
+	}
+
 	// A workload only needs a second pass once it holds a quota reservation, which
 	// a checked-out workload never does, so returning here leaves no checkout open.
 	if s.queues.QueueSecondPassIfNeeded(ctx, e.Obj, e.SecondPassIteration) {
 		log.V(3).
 			Info("Workload re-queued for second pass", "workload", klog.KObj(e.Obj), "clusterQueue", klog.KRef("", string(e.ClusterQueue)), "localQueue", klog.KRef(e.Obj.Namespace, string(e.Obj.Spec.QueueName)), "requeueReason", e.requeueReason, "status", e.status)
-		s.recorder.Eventf(e.Obj, nil, corev1.EventTypeWarning, "SecondPassFailed", "SecondPassFailed", api.TruncateEventMessage(e.inadmissibleMsg))
+		if wasReason != "" {
+			if s.queues.SetWASUnsupportedWorkload(log, workload.Key(e.Obj), e.ClusterQueue, wasReason) {
+				s.recorder.Eventf(e.Obj, nil, corev1.EventTypeWarning, wasEventReason, wasEventReason, api.TruncateEventMessage(e.inadmissibleMsg))
+			}
+		} else {
+			s.queues.ClearWASUnsupportedWorkload(log, workload.Key(e.Obj))
+			s.recorder.Eventf(e.Obj, nil, corev1.EventTypeWarning, "SecondPassFailed", "SecondPassFailed", api.TruncateEventMessage(e.inadmissibleMsg))
+		}
 		return
 	}
 
-	added := s.queues.RequeueWorkload(ctx, &e.Info, e.requeueReason, qcache.QuotaReservedReason(e.quotaReservedReason))
+	var wasTransitioned bool
+	added := s.queues.RequeueWorkload(
+		ctx,
+		&e.Info,
+		e.requeueReason,
+		qcache.QuotaReservedReason(e.quotaReservedReason),
+		qcache.WithWASUnsupportedReason(wasReason),
+		qcache.WithWASUnsupportedTransition(&wasTransitioned),
+	)
 	log.V(3).
 		Info("Workload re-queued", "workload", klog.KObj(e.Obj), "clusterQueue", klog.KRef("", string(e.ClusterQueue)), "localQueue", klog.KRef(e.Obj.Namespace, string(e.Obj.Spec.QueueName)), "requeueReason", e.requeueReason, "added", added, "status", e.status)
 	if e.status == notNominated || e.status == skipped || e.status == preemptionGated {
@@ -1384,8 +1414,10 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 		}
 		wl := e.Obj.DeepCopy()
 		condReason := workload.UnadmittedWorkloadReasonWithFallback(e.quotaReservedReason, "Pending")
-		if err := workloadpatching.PatchAdmissionStatus(ctx, s.client, wl, s.clock, func(wl *kueue.Workload) (bool, error) {
-			updated := workload.UnsetQuotaReservationWithCondition(wl, condReason, e.inadmissibleMsg, s.clock.Now())
+		var condChanged bool
+		patchErr := workloadpatching.PatchAdmissionStatus(ctx, s.client, wl, s.clock, func(wl *kueue.Workload) (bool, error) {
+			condChanged = workload.UnsetQuotaReservationWithCondition(wl, condReason, e.inadmissibleMsg, s.clock.Now())
+			updated := condChanged
 			if workload.PropagateResourceRequests(wl, &e.Info, s.resourceFormatter) {
 				updated = true
 			}
@@ -1393,14 +1425,24 @@ func (s *Scheduler) requeueAndUpdate(ctx context.Context, e entry) {
 				updated = true
 			}
 			return updated, nil
-		}, workloadpatching.WithLooseOnApply(), workloadpatching.WithRetryOnConflict()); err != nil {
-			if apierrors.IsNotFound(err) {
+		}, workloadpatching.WithLooseOnApply(), workloadpatching.WithRetryOnConflict())
+		if patchErr != nil {
+			if apierrors.IsNotFound(patchErr) {
 				log.V(3).Info("Workload status not updated because it was deleted")
 				return
 			}
-			log.Error(err, "Could not update Workload status")
+			if wasEventReason != "" && wasTransitioned {
+				s.queues.ClearWASUnsupportedWorkload(log, workload.Key(e.Obj))
+			}
+			log.Error(patchErr, "Could not update Workload status")
 		}
-		s.recorder.Eventf(e.Obj, nil, corev1.EventTypeWarning, condReason, condReason, api.TruncateEventMessage(e.inadmissibleMsg))
+		if wasEventReason != "" {
+			if patchErr == nil && condChanged && wasTransitioned {
+				s.recorder.Eventf(e.Obj, nil, corev1.EventTypeWarning, wasEventReason, wasEventReason, api.TruncateEventMessage(e.inadmissibleMsg))
+			}
+		} else {
+			s.recorder.Eventf(e.Obj, nil, corev1.EventTypeWarning, condReason, condReason, api.TruncateEventMessage(e.inadmissibleMsg))
+		}
 	}
 }
 
@@ -1673,6 +1715,7 @@ func resolveFlavorIndex(wl *workload.Info, flavors []kueue.ResourceFlavorReferen
 func (s *Scheduler) getAssignments(ctx context.Context, wl *workload.Info, snap *schdcache.Snapshot) (
 	fullAssignment flavorassigner.Assignment,
 	targets []*preemption.Target,
+	usedWAS bool,
 	err error,
 ) {
 	log := log.FromContext(ctx)
@@ -1697,6 +1740,7 @@ func (s *Scheduler) getAssignments(ctx context.Context, wl *workload.Info, snap 
 	var planner assignment.Planner
 	if features.Enabled(features.SchedulerLibraryDeepIntegration) {
 		planner = wasplanner.NewPlanner(wl, snap, s.preemptor)
+		usedWAS = true
 	} else {
 		planner = nativeplanner.NewPlanner(wl, snap, s.preemptor, flvAssigner)
 	}
