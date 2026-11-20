@@ -39,6 +39,9 @@ func (a *Assignment) CandidateVirtualPods(
 		if psAssignment.Status.IsError() {
 			return nil, fmt.Errorf("podset %q is failing: %w", psAssignment.Name, psAssignment.Status.err)
 		}
+		if psAssignment.Count == 0 {
+			continue
+		}
 		podSet := podset.FindPodSetByName(wl.Obj.Spec.PodSets, psAssignment.Name)
 		if podSet == nil {
 			return nil, fmt.Errorf("podSet %q not found in workload %s", psAssignment.Name, wl.Obj.Name)
@@ -51,6 +54,9 @@ func (a *Assignment) CandidateVirtualPods(
 		flavorSnapshot := cq.TASFlavors[*tasFlavor]
 		if flavorSnapshot == nil {
 			return nil, fmt.Errorf("TAS flavor snapshot for flavor %q not found in ClusterQueue %s", *tasFlavor, cq.Name)
+		}
+		if !flavorSnapshot.DeclaresHostnameLevel() {
+			return nil, fmt.Errorf("TAS flavor %q for PodSet %q: %w", *tasFlavor, psAssignment.Name, ErrTASFlavorMissingHostnameLevel)
 		}
 		flavorNodeLabels := flavorSnapshot.NodeLabels()
 		flavorTolerations := flavorSnapshot.Tolerations()

@@ -21,12 +21,17 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/constants"
+	"sigs.k8s.io/kueue/pkg/features"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
+	testingnode "sigs.k8s.io/kueue/pkg/util/testingjobs/node"
 	"sigs.k8s.io/kueue/pkg/workload"
 )
 
@@ -182,6 +187,22 @@ func TestCandidateVirtualPods(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		"skips zero-count podset on non-TAS flavor": {
+			workload: wlInfo,
+			assignment: Assignment{
+				PodSets: []PodSetAssignment{
+					{
+						Name:  kueue.DefaultPodSetName,
+						Count: 0,
+						Flavors: ResourceAssignment{
+							corev1.ResourceCPU: {Name: "non-tas-flavor", Mode: Fit},
+						},
+						Status: *NewStatus(),
+					},
+				},
+			},
+			wantPodsCount: 0,
+		},
 		"returns error when podset is failing": {
 			workload: wlInfo,
 			assignment: Assignment{
@@ -231,6 +252,113 @@ func TestCandidateVirtualPods(t *testing.T) {
 				if len(pod.Spec.Tolerations) != tc.wantTolerationsLen {
 					t.Errorf("pod[%d] expected %d tolerations, got %d", i, tc.wantTolerationsLen, len(pod.Spec.Tolerations))
 				}
+			}
+		})
+	}
+}
+
+func TestCandidateVirtualPods_MissingHostnameLevel(t *testing.T) {
+	const blockLabel = "cloud.provider.com/topology-block"
+
+	cases := map[string]struct {
+		nodeFeasibility bool
+		levels          []string
+		count           int32
+		wantErr         error
+	}{
+		"topology omits hostname with TASNodeFeasibilityForAllLevels disabled": {
+			nodeFeasibility: false,
+			levels:          []string{blockLabel},
+			count:           1,
+			wantErr:         ErrTASFlavorMissingHostnameLevel,
+		},
+		"topology omits hostname with TASNodeFeasibilityForAllLevels enabled": {
+			nodeFeasibility: true,
+			levels:          []string{blockLabel},
+			count:           1,
+			wantErr:         ErrTASFlavorMissingHostnameLevel,
+		},
+		"skips zero-count podset when topology omits hostname": {
+			nodeFeasibility: true,
+			levels:          []string{blockLabel},
+			count:           0,
+		},
+		"topology declares hostname with TASNodeFeasibilityForAllLevels disabled": {
+			nodeFeasibility: false,
+			levels:          []string{blockLabel, corev1.LabelHostname},
+			count:           1,
+		},
+		"topology declares hostname with TASNodeFeasibilityForAllLevels enabled": {
+			nodeFeasibility: true,
+			levels:          []string{blockLabel, corev1.LabelHostname},
+			count:           1,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGateDuringTest(t, features.TASNodeFeasibilityForAllLevels, tc.nodeFeasibility)
+			ctx, log := utiltesting.ContextWithLog(t)
+
+			cache := schdcache.New(utiltesting.NewFakeClient())
+			cache.AddOrUpdateResourceFlavor(log, utiltestingapi.MakeResourceFlavor("tas-flavor").
+				NodeLabel("tas", "tas-flavor").
+				TopologyName("tas-topology").
+				Obj())
+			cache.AddOrUpdateTopology(log, utiltestingapi.MakeTopology("tas-topology").Levels(tc.levels...).Obj())
+			cache.TASCache().SyncNode(testingnode.MakeNode("node-1").
+				Label("tas", "tas-flavor").
+				Label(blockLabel, "block-1").
+				Label(corev1.LabelHostname, "node-1").
+				StatusAllocatable(corev1.ResourceList{
+					corev1.ResourceCPU:  resource.MustParse("4"),
+					corev1.ResourcePods: resource.MustParse("32"),
+				}).
+				Ready().
+				Obj())
+			if err := cache.AddClusterQueue(ctx, utiltestingapi.MakeClusterQueue("cq").
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas("tas-flavor").Resource(corev1.ResourceCPU, "4").Obj()).
+				Obj()); err != nil {
+				t.Fatalf("adding ClusterQueue: %v", err)
+			}
+
+			snapshot, err := cache.Snapshot(ctx)
+			if err != nil {
+				t.Fatalf("building snapshot: %v", err)
+			}
+			cq := snapshot.ClusterQueue("cq")
+
+			wl := workload.NewInfo(log, utiltestingapi.MakeWorkload("wl", "default").
+				PodSets(*utiltestingapi.MakePodSet(kueue.DefaultPodSetName, int(tc.count)).
+					RequiredTopologyRequest(blockLabel).
+					Request(corev1.ResourceCPU, "1").
+					Obj()).
+				Obj())
+			assignment := Assignment{
+				PodSets: []PodSetAssignment{
+					{
+						Name:  kueue.DefaultPodSetName,
+						Count: tc.count,
+						Flavors: ResourceAssignment{
+							corev1.ResourceCPU: {Name: "tas-flavor", Mode: Fit},
+						},
+						Status: *NewStatus(),
+					},
+				},
+			}
+
+			pods, err := assignment.CandidateVirtualPods(wl, cq, nil)
+			if diff := cmp.Diff(tc.wantErr, err, cmpopts.EquateErrors()); diff != "" {
+				t.Errorf("CandidateVirtualPods() error mismatch (-want +got):\n%s", diff)
+			}
+			if tc.wantErr != nil {
+				if pods != nil {
+					t.Errorf("CandidateVirtualPods() returned %d pods on error, want nil", len(pods))
+				}
+				return
+			}
+			if len(pods) != int(tc.count) {
+				t.Errorf("CandidateVirtualPods() returned %d pods, want %d", len(pods), tc.count)
 			}
 		})
 	}

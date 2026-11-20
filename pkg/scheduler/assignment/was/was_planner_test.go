@@ -1629,3 +1629,133 @@ func TestPlan_PreemptionStrategies(t *testing.T) {
 		})
 	}
 }
+
+func TestPlan_MissingHostnameLevel(t *testing.T) {
+	cases := map[string]struct {
+		nodeFeasibility bool
+		levels          []string
+		wantErr         error
+		wantFit         bool
+		wantCalls       int
+		wantAddedPGs    int
+	}{
+		"topology omits hostname with TASNodeFeasibilityForAllLevels disabled": {
+			nodeFeasibility: false,
+			levels:          []string{testBlockLabel},
+			wantErr:         flavorassigner.ErrTASFlavorMissingHostnameLevel,
+		},
+		"topology omits hostname with TASNodeFeasibilityForAllLevels enabled": {
+			nodeFeasibility: true,
+			levels:          []string{testBlockLabel},
+			wantErr:         flavorassigner.ErrTASFlavorMissingHostnameLevel,
+		},
+		"topology declares hostname with TASNodeFeasibilityForAllLevels disabled": {
+			nodeFeasibility: false,
+			levels:          []string{testBlockLabel, corev1.LabelHostname},
+			wantFit:         true,
+			wantCalls:       1,
+			wantAddedPGs:    1,
+		},
+		"topology declares hostname with TASNodeFeasibilityForAllLevels enabled": {
+			nodeFeasibility: true,
+			levels:          []string{testBlockLabel, corev1.LabelHostname},
+			wantFit:         true,
+			wantCalls:       1,
+			wantAddedPGs:    1,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGatesDuringTest(t, map[featuregate.Feature]bool{
+				features.SchedulerLibraryDeepIntegration: true,
+				features.TASNodeFeasibilityForAllLevels:  tc.nodeFeasibility,
+			})
+
+			log := testr.New(t)
+			ctx := ctrllog.IntoContext(t.Context(), log)
+
+			cache := schdcache.New(utiltesting.NewFakeClient())
+			cache.AddOrUpdateResourceFlavor(log, utiltestingapi.MakeResourceFlavor(testFlavor).
+				NodeLabel("tas", testFlavor).TopologyName("topology").Obj())
+			cache.AddOrUpdateTopology(log, utiltestingapi.MakeTopology("topology").Levels(tc.levels...).Obj())
+			for _, node := range []string{testNode1, testNode2} {
+				cache.TASCache().SyncNode(testingnode.MakeNode(node).
+					Label("tas", testFlavor).
+					Label(testBlockLabel, testBlock).
+					Label(corev1.LabelHostname, node).
+					StatusAllocatable(corev1.ResourceList{
+						corev1.ResourceCPU:  resource.MustParse(testNodeCPUs),
+						corev1.ResourcePods: resource.MustParse("32"),
+					}).
+					Ready().
+					Obj())
+			}
+			if err := cache.AddClusterQueue(ctx, utiltestingapi.MakeClusterQueue(testCQ).
+				ResourceGroup(cpuQuota(testFlavor, "20")).
+				Obj()); err != nil {
+				t.Fatalf("adding ClusterQueue: %v", err)
+			}
+
+			snapshot, err := cache.Snapshot(ctx)
+			if err != nil {
+				t.Fatalf("building snapshot: %v", err)
+			}
+			testSim := &testSimulator{
+				SchedulerSimulator: snapshot.SchedulerSimulator,
+				steps: []simulationStep{{
+					podPlacements: simulator.PodPlacements{
+						podKey(kueue.DefaultPodSetName, 0): {Node: testNode1},
+					},
+				}},
+			}
+			snapshot.SchedulerSimulator = testSim
+
+			wl := workload.NewInfo(log, utiltestingapi.MakeWorkload(incomingName, testNamespace).
+				Priority(incomingPriority).
+				PodSets(*utiltestingapi.MakePodSet(kueue.DefaultPodSetName, 1).
+					RequiredTopologyRequest(testBlockLabel).
+					Request(corev1.ResourceCPU, "1").
+					Obj()).
+				Obj())
+			wl.ClusterQueue = testCQ
+
+			preemptor := preemption.New(
+				utiltesting.NewFakeClient(), workload.Ordering{}, &utiltesting.EventRecorder{}, nil, false,
+				clocktesting.NewFakeClock(time.Now()), nil, preemptexpectations.New(), nil,
+			)
+			assigner := flavorassigner.New(
+				wl, snapshot.ClusterQueue(testCQ), snapshot.ResourceFlavors, false,
+				preemption.NewOracle(preemptor, snapshot), nil,
+				configapi.QuotaCheckBlockUndeclared, resources.NewResourceFormatter(), 0,
+			)
+			initialAssignment := assigner.AssignFlavors(ctx, log, nil)
+			if gotMode := initialAssignment.RepresentativeMode(); gotMode != flavorassigner.Fit {
+				t.Fatalf("AssignFlavors() mode = %v, want %v", gotMode, flavorassigner.Fit)
+			}
+
+			planner := NewPlanner(wl, snapshot, preemptor)
+			gotPlan := planner.Plan(ctx, &initialAssignment)
+
+			if diff := cmp.Diff(tc.wantErr, gotPlan.Error, cmpopts.EquateErrors()); diff != "" {
+				t.Errorf("Plan() error mismatch (-want +got):\n%s", diff)
+			}
+			if gotPlan.CanFit() != tc.wantFit {
+				t.Errorf("Plan().CanFit() = %v, want %v", gotPlan.CanFit(), tc.wantFit)
+			}
+			if len(testSim.receivedCalls) != tc.wantCalls {
+				t.Errorf("Plan() called ScheduleWorkload %d times, want %d", len(testSim.receivedCalls), tc.wantCalls)
+			}
+			if len(testSim.addedPGs) != tc.wantAddedPGs {
+				t.Errorf("Plan() added %d PodGroups, want %d", len(testSim.addedPGs), tc.wantAddedPGs)
+			}
+			if diff := cmp.Diff(testSim.addedPGs, testSim.removedPGs); diff != "" {
+				t.Errorf("Plan() removed PodGroups mismatch (-added +removed):\n%s", diff)
+			}
+			if len(testSim.addedCPGs) != 0 || len(testSim.removedCPGs) != 0 {
+				t.Errorf("Plan() unexpectedly touched CompositePodGroups: added=%d removed=%d",
+					len(testSim.addedCPGs), len(testSim.removedCPGs))
+			}
+		})
+	}
+}
