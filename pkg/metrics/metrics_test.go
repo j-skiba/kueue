@@ -179,6 +179,87 @@ func TestReportPendingSchedulingHashesFeatureGateDisabled(t *testing.T) {
 	expectFilteredMetricsCount(t, PendingSchedulingHashes, 0, "cluster_queue", cqName)
 }
 
+func TestReportAndCleanupWASUnsupportedWorkloads(t *testing.T) {
+	const (
+		cqName      = "cq-was-unsupported"
+		otherCQName = "cq-was-unsupported-other"
+	)
+
+	features.SetFeatureGateDuringTest(t, features.SchedulerLibraryDeepIntegration, true)
+	t.Cleanup(func() {
+		ClearClusterQueueMetrics(cqName)
+		ClearClusterQueueMetrics(otherCQName)
+	})
+
+	ReportWASUnsupportedWorkloads(cqName, WASUnsupportedReasonIncompatibleFlavor, nil, nil, 3)
+	ReportWASUnsupportedWorkloads(cqName, WASUnsupportedReasonInternalError, nil, nil, 1)
+	ReportWASUnsupportedWorkloads(otherCQName, WASUnsupportedReasonIncompatibleFlavor, nil, nil, 2)
+
+	expectFilteredMetricsCount(t, WASUnsupportedWorkloads, 2, "cluster_queue", cqName)
+	gotIncompatible := testutil.ToFloat64(WASUnsupportedWorkloads.WithLabelValues(cqName, string(WASUnsupportedReasonIncompatibleFlavor), roletracker.RoleStandalone))
+	if gotIncompatible != 3 {
+		t.Fatalf("WASUnsupportedWorkloads incompatible_flavor = %v, want 3", gotIncompatible)
+	}
+	gotInternal := testutil.ToFloat64(WASUnsupportedWorkloads.WithLabelValues(cqName, string(WASUnsupportedReasonInternalError), roletracker.RoleStandalone))
+	if gotInternal != 1 {
+		t.Fatalf("WASUnsupportedWorkloads internal_error = %v, want 1", gotInternal)
+	}
+
+	ClearWASUnsupportedWorkloadsLabelValues(cqName, WASUnsupportedReasonIncompatibleFlavor, nil, nil)
+	expectFilteredMetricsCount(t, WASUnsupportedWorkloads, 0, "cluster_queue", cqName, "reason", string(WASUnsupportedReasonIncompatibleFlavor))
+	expectFilteredMetricsCount(t, WASUnsupportedWorkloads, 1, "cluster_queue", cqName, "reason", string(WASUnsupportedReasonInternalError))
+	expectFilteredMetricsCount(t, WASUnsupportedWorkloads, 1, "cluster_queue", otherCQName)
+
+	ReportWASUnsupportedWorkloads(cqName, WASUnsupportedReasonIncompatibleFlavor, nil, nil, 4)
+	expectFilteredMetricsCount(t, WASUnsupportedWorkloads, 2, "cluster_queue", cqName)
+	ClearClusterQueueGaugeMetrics(cqName)
+	expectFilteredMetricsCount(t, WASUnsupportedWorkloads, 0, "cluster_queue", cqName)
+	expectFilteredMetricsCount(t, WASUnsupportedWorkloads, 1, "cluster_queue", otherCQName)
+
+	ReportWASUnsupportedWorkloads(cqName, WASUnsupportedReasonIncompatibleFlavor, nil, nil, 5)
+	ReportWASUnsupportedWorkloads(cqName, WASUnsupportedReasonInternalError, nil, nil, 2)
+	expectFilteredMetricsCount(t, WASUnsupportedWorkloads, 2, "cluster_queue", cqName)
+	ClearClusterQueueMetrics(cqName)
+	expectFilteredMetricsCount(t, WASUnsupportedWorkloads, 0, "cluster_queue", cqName)
+	expectFilteredMetricsCount(t, WASUnsupportedWorkloads, 1, "cluster_queue", otherCQName)
+}
+
+func TestReportWASUnsupportedWorkloadsFeatureGateDisabled(t *testing.T) {
+	const cqName = "cq-was-unsupported-gated"
+
+	features.SetFeatureGateDuringTest(t, features.SchedulerLibraryDeepIntegration, false)
+
+	ReportWASUnsupportedWorkloads(cqName, WASUnsupportedReasonIncompatibleFlavor, nil, nil, 3)
+	ReportWASUnsupportedWorkloads(cqName, WASUnsupportedReasonInternalError, nil, nil, 1)
+
+	expectFilteredMetricsCount(t, WASUnsupportedWorkloads, 0, "cluster_queue", cqName)
+}
+
+func TestRegisterExposesWASUnsupportedWorkloads(t *testing.T) {
+	const cqName = "cq-was-registered"
+
+	features.SetFeatureGateDuringTest(t, features.SchedulerLibraryDeepIntegration, true)
+
+	registry := prometheus.NewRegistry()
+	originalRegistry := ctrlmetrics.Registry
+	ctrlmetrics.Registry = registry
+	t.Cleanup(func() {
+		ctrlmetrics.Registry = originalRegistry
+		ClearClusterQueueMetrics(cqName)
+	})
+
+	Register()
+	ReportWASUnsupportedWorkloads(cqName, WASUnsupportedReasonIncompatibleFlavor, nil, nil, 1)
+
+	count, err := testutil.GatherAndCount(registry, "kueue_was_unsupported_workloads")
+	if err != nil {
+		t.Fatalf("Failed to gather metrics: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("Unexpected number of kueue_was_unsupported_workloads series in the registry: got %d, want 1", count)
+	}
+}
+
 func TestReportAndCleanupClusterQueueMetrics(t *testing.T) {
 	ReportClusterQueueQuotas("cohort", "queue", "flavor", "res", 5, 10, 3, nil, nil)
 	ReportClusterQueueQuotas("cohort", "queue", "flavor2", "res", 1, 2, 1, nil, nil)

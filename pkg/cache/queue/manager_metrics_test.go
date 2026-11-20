@@ -17,13 +17,18 @@ limitations under the License.
 package queue
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/go-logr/logr"
 	gocmp "github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	testingclock "k8s.io/utils/clock/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	configapi "sigs.k8s.io/kueue/apis/config/v1beta2"
@@ -33,6 +38,8 @@ import (
 	"sigs.k8s.io/kueue/pkg/metrics"
 	preemptexpectations "sigs.k8s.io/kueue/pkg/scheduler/preemption/expectations"
 	"sigs.k8s.io/kueue/pkg/util/queue"
+	"sigs.k8s.io/kueue/pkg/util/roletracker"
+	utiltas "sigs.k8s.io/kueue/pkg/util/tas"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	testingmetrics "sigs.k8s.io/kueue/pkg/util/testing/metrics"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
@@ -832,5 +839,405 @@ func TestLocalQueuePendingMetrics_RequeueAfterClusterQueueDeleted(t *testing.T) 
 	})
 	if len(gotPending) != 1 || gotPending[0].Value != 1 {
 		t.Errorf("LocalQueue pending inadmissible after resync = %v, want 1", gotPending)
+	}
+}
+
+func wasUnsupportedMetricPoint(
+	cq kueue.ClusterQueueReference,
+	reason metrics.WASUnsupportedReason,
+	value float64,
+) testingmetrics.MetricDataPoint {
+	return testingmetrics.MetricDataPoint{
+		Labels: map[string]string{
+			"cluster_queue": string(cq),
+			"reason":        string(reason),
+			"replica_role":  roletracker.RoleStandalone,
+		},
+		Value: value,
+	}
+}
+
+func assertWASUnsupportedMetrics(t *testing.T, want ...testingmetrics.MetricDataPoint) {
+	t.Helper()
+	got := testingmetrics.CollectFilteredGaugeVec(metrics.WASUnsupportedWorkloads, nil)
+	sortPoints := cmpopts.SortSlices(func(a, b testingmetrics.MetricDataPoint) bool {
+		return a.Less(&b)
+	})
+	if diff := gocmp.Diff(want, got, cmpopts.EquateEmpty(), sortPoints); diff != "" {
+		t.Errorf("Unexpected kueue_was_unsupported_workloads series (-want,+got):\n%s", diff)
+	}
+}
+
+func setupWASManager(
+	t *testing.T,
+	cqs []*kueue.ClusterQueue,
+	lqs []*kueue.LocalQueue,
+	wls []*kueue.Workload,
+	opts ...Option,
+) (context.Context, logr.Logger, client.Client, *Manager) {
+	t.Helper()
+	features.SetFeatureGateDuringTest(t, features.SchedulerLibraryDeepIntegration, true)
+	metrics.InitMetricVectors(nil)
+	t.Cleanup(func() { metrics.InitMetricVectors(nil) })
+
+	ctx, log := utiltesting.ContextWithLog(t)
+	objs := make([]client.Object, 0, 1+len(lqs)+len(wls))
+	objs = append(objs, utiltesting.MakeNamespace("ns"))
+	for _, lq := range lqs {
+		objs = append(objs, lq)
+	}
+	for _, wl := range wls {
+		objs = append(objs, wl)
+	}
+	cl := utiltesting.NewClientBuilder().
+		WithObjects(objs...).
+		WithStatusSubresource(&kueue.Workload{}).
+		WithIndex(&corev1.LimitRange{}, indexer.LimitRangeHasContainerOrPodType, indexer.IndexLimitRangeHasContainerOrPodType).
+		Build()
+	manager := NewManagerForUnitTests(cl, nil, opts...)
+	for _, cq := range cqs {
+		if err := manager.AddClusterQueue(ctx, cq); err != nil {
+			t.Fatalf("AddClusterQueue(%s): %v", cq.Name, err)
+		}
+	}
+	for _, lq := range lqs {
+		if err := manager.AddLocalQueue(ctx, lq); err != nil {
+			t.Fatalf("AddLocalQueue(%s): %v", lq.Name, err)
+		}
+	}
+	return ctx, log, cl, manager
+}
+
+func TestWASUnsupportedWorkloads_SetRepeatTransitionAndClear(t *testing.T) {
+	cq1 := utiltestingapi.MakeClusterQueue("cq1").QueueingStrategy(kueue.StrictFIFO).Obj()
+	cq2 := utiltestingapi.MakeClusterQueue("cq2").QueueingStrategy(kueue.StrictFIFO).Obj()
+	lq1 := utiltestingapi.MakeLocalQueue("lq1", "ns").ClusterQueue("cq1").Obj()
+	lq2 := utiltestingapi.MakeLocalQueue("lq2", "ns").ClusterQueue("cq2").Obj()
+	wl := utiltestingapi.MakeWorkload("wl", "ns").Queue("lq1").Generation(1).Obj()
+
+	ctx, log, _, manager := setupWASManager(
+		t,
+		[]*kueue.ClusterQueue{cq1, cq2},
+		[]*kueue.LocalQueue{lq1, lq2},
+		[]*kueue.Workload{wl},
+		WithPreemptionExpectations(preemptexpectations.New()),
+	)
+
+	var transitioned bool
+	heads := manager.Heads(ctx)
+	if len(heads) != 1 || !manager.RequeueWorkload(
+		ctx, &heads[0].Info, RequeueReasonNoFit, QuotaReservedReasonWaitingForQuota,
+		WithWASUnsupportedReason(metrics.WASUnsupportedReasonIncompatibleFlavor),
+		WithWASUnsupportedTransition(&transitioned),
+	) || !transitioned {
+		t.Fatalf("initial RequeueWorkload failed or transitioned=%v, want true", transitioned)
+	}
+	assertWASUnsupportedMetrics(t, wasUnsupportedMetricPoint("cq1", metrics.WASUnsupportedReasonIncompatibleFlavor, 1))
+
+	// Repeat with same reason is idempotent (transitioned=false); in-place update preserves tracking.
+	heads = manager.Heads(ctx)
+	if len(heads) != 1 || !manager.RequeueWorkload(
+		ctx, &heads[0].Info, RequeueReasonNoFit, QuotaReservedReasonWaitingForQuota,
+		WithWASUnsupportedReason(metrics.WASUnsupportedReasonIncompatibleFlavor),
+		WithWASUnsupportedTransition(&transitioned),
+	) || transitioned {
+		t.Fatalf("repeat RequeueWorkload failed or transitioned=%v, want false", transitioned)
+	}
+	if err := manager.AddOrUpdateWorkload(ctx, log, wl.DeepCopy()); err != nil {
+		t.Fatalf("AddOrUpdateWorkload: %v", err)
+	}
+	assertWASUnsupportedMetrics(t, wasUnsupportedMetricPoint("cq1", metrics.WASUnsupportedReasonIncompatibleFlavor, 1))
+
+	// Transition to a new reason deletes the old series and reports transitioned=true.
+	heads = manager.Heads(ctx)
+	if len(heads) != 1 || !manager.RequeueWorkload(
+		ctx, &heads[0].Info, RequeueReasonNoFit, QuotaReservedReasonWaitingForQuota,
+		WithWASUnsupportedReason(metrics.WASUnsupportedReasonInternalError),
+		WithWASUnsupportedTransition(&transitioned),
+	) || !transitioned {
+		t.Fatalf("transition RequeueWorkload failed or transitioned=%v, want true", transitioned)
+	}
+	assertWASUnsupportedMetrics(t, wasUnsupportedMetricPoint("cq1", metrics.WASUnsupportedReasonInternalError, 1))
+
+	// Requeue with empty reason (normal NoFit) clears tracking without reporting a transition.
+	heads = manager.Heads(ctx)
+	if len(heads) != 1 || !manager.RequeueWorkload(
+		ctx, &heads[0].Info, RequeueReasonNoFit, QuotaReservedReasonWaitingForQuota,
+		WithWASUnsupportedReason(""),
+		WithWASUnsupportedTransition(&transitioned),
+	) || transitioned {
+		t.Fatalf("clearing RequeueWorkload failed or transitioned=%v, want false", transitioned)
+	}
+	assertWASUnsupportedMetrics(t)
+
+	// Direct Set/Clear, validation, multi-workload counts, DeleteWorkload, and LQ switch clear.
+	wlKey := workload.Key(wl)
+	if manager.SetWASUnsupportedWorkload(log, wlKey, "cq1", "") || manager.SetWASUnsupportedWorkload(log, wlKey, "missing-cq", metrics.WASUnsupportedReasonInternalError) {
+		t.Error("SetWASUnsupportedWorkload should reject empty reason and missing CQ")
+	}
+	manager.SetWASUnsupportedWorkload(log, wlKey, "cq1", metrics.WASUnsupportedReasonIncompatibleFlavor)
+	manager.SetWASUnsupportedWorkload(log, "ns/wl2", "cq1", metrics.WASUnsupportedReasonIncompatibleFlavor)
+	assertWASUnsupportedMetrics(t, wasUnsupportedMetricPoint("cq1", metrics.WASUnsupportedReasonIncompatibleFlavor, 2))
+
+	manager.DeleteWorkload(log, "ns/wl2")
+	assertWASUnsupportedMetrics(t, wasUnsupportedMetricPoint("cq1", metrics.WASUnsupportedReasonIncompatibleFlavor, 1))
+
+	moved := wl.DeepCopy()
+	moved.Spec.QueueName = "lq2"
+	if err := manager.AddOrUpdateWorkload(ctx, log, moved); err != nil {
+		t.Fatalf("AddOrUpdateWorkload(moved): %v", err)
+	}
+	assertWASUnsupportedMetrics(t)
+}
+
+func TestWASUnsupportedWorkloads_RequeueGuards(t *testing.T) {
+	cases := map[string]struct {
+		mutateInflight func(t *testing.T, ctx context.Context, cl client.Client, wl *kueue.Workload)
+		requeueReason  RequeueReason
+		wasReason      metrics.WASUnsupportedReason
+		wantMetrics    []testingmetrics.MetricDataPoint
+	}{
+		"RequeueReasonSnapshotFailed preserves prior state": {
+			requeueReason: RequeueReasonSnapshotFailed,
+			wantMetrics:   []testingmetrics.MetricDataPoint{wasUnsupportedMetricPoint("cq1", metrics.WASUnsupportedReasonIncompatibleFlavor, 1)},
+		},
+		"deleted while inflight clears prior state and avoids zombie": {
+			mutateInflight: func(t *testing.T, ctx context.Context, cl client.Client, wl *kueue.Workload) {
+				if err := cl.Delete(ctx, wl); err != nil {
+					t.Fatalf("Delete workload: %v", err)
+				}
+			},
+			requeueReason: RequeueReasonNoFit,
+			wasReason:     metrics.WASUnsupportedReasonInternalError,
+		},
+		"generation changed while inflight does not record stale error": {
+			mutateInflight: func(t *testing.T, ctx context.Context, cl client.Client, wl *kueue.Workload) {
+				var cur kueue.Workload
+				if err := cl.Get(ctx, client.ObjectKeyFromObject(wl), &cur); err != nil {
+					t.Fatalf("Get workload: %v", err)
+				}
+				cur.Generation++
+				if err := cl.Update(ctx, &cur); err != nil {
+					t.Fatalf("Update workload: %v", err)
+				}
+			},
+			requeueReason: RequeueReasonNoFit,
+			wasReason:     metrics.WASUnsupportedReasonInternalError,
+			wantMetrics:   []testingmetrics.MetricDataPoint{wasUnsupportedMetricPoint("cq1", metrics.WASUnsupportedReasonIncompatibleFlavor, 1)},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cq1 := utiltestingapi.MakeClusterQueue("cq1").QueueingStrategy(kueue.StrictFIFO).Obj()
+			lq1 := utiltestingapi.MakeLocalQueue("lq1", "ns").ClusterQueue("cq1").Obj()
+			wl := utiltestingapi.MakeWorkload("wl", "ns").Queue("lq1").Generation(1).Obj()
+
+			ctx, log, cl, manager := setupWASManager(
+				t, []*kueue.ClusterQueue{cq1}, []*kueue.LocalQueue{lq1}, []*kueue.Workload{wl},
+				WithPreemptionExpectations(preemptexpectations.New()),
+			)
+			manager.SetWASUnsupportedWorkload(log, workload.Key(wl), "cq1", metrics.WASUnsupportedReasonIncompatibleFlavor)
+
+			popped := manager.PopFrom("cq1")
+			if popped == nil {
+				t.Fatal("PopFrom(cq1) returned nil")
+			}
+			if tc.mutateInflight != nil {
+				tc.mutateInflight(t, ctx, cl, wl)
+			}
+
+			transitioned := true
+			manager.RequeueWorkload(
+				ctx, &popped.Info, tc.requeueReason, QuotaReservedReasonWaitingForQuota,
+				WithWASUnsupportedReason(tc.wasReason),
+				WithWASUnsupportedTransition(&transitioned),
+			)
+			if transitioned {
+				t.Error("guarded RequeueWorkload reported transitioned = true, want false")
+			}
+			assertWASUnsupportedMetrics(t, tc.wantMetrics...)
+		})
+	}
+}
+
+func TestWASUnsupportedWorkloads_QueueLifecycle(t *testing.T) {
+	now := time.Now()
+	cases := map[string]struct {
+		action      func(t *testing.T, ctx context.Context, log logr.Logger, manager *Manager, cq1 *kueue.ClusterQueue, lq1 *kueue.LocalQueue, wlQueued *kueue.Workload)
+		wantMetrics []testingmetrics.MetricDataPoint
+	}{
+		"DeleteLocalQueue clears queued and inflight workloads without affecting other queues": {
+			action: func(_ *testing.T, _ context.Context, log logr.Logger, manager *Manager, _ *kueue.ClusterQueue, lq1 *kueue.LocalQueue, _ *kueue.Workload) {
+				manager.DeleteLocalQueue(log, lq1)
+			},
+			wantMetrics: []testingmetrics.MetricDataPoint{
+				wasUnsupportedMetricPoint("cq1", metrics.WASUnsupportedReasonIncompatibleFlavor, 1),
+				wasUnsupportedMetricPoint("cq2", metrics.WASUnsupportedReasonInternalError, 1),
+			},
+		},
+		"DeleteClusterQueue clears series and internal state so recreated CQ starts clean": {
+			action: func(t *testing.T, ctx context.Context, log logr.Logger, manager *Manager, cq1 *kueue.ClusterQueue, _ *kueue.LocalQueue, wlQueued *kueue.Workload) {
+				manager.DeleteClusterQueue(log, cq1)
+				assertWASUnsupportedMetrics(t, wasUnsupportedMetricPoint("cq2", metrics.WASUnsupportedReasonInternalError, 1))
+				if err := manager.AddClusterQueue(ctx, cq1); err != nil {
+					t.Fatalf("AddClusterQueue(recreate cq1): %v", err)
+				}
+				manager.ResyncClusterQueueGaugeMetrics("cq1")
+				if !manager.SetWASUnsupportedWorkload(log, workload.Key(wlQueued), "cq1", metrics.WASUnsupportedReasonIncompatibleFlavor) {
+					t.Error("SetWASUnsupportedWorkload after CQ recreation returned false, want true")
+				}
+			},
+			wantMetrics: []testingmetrics.MetricDataPoint{
+				wasUnsupportedMetricPoint("cq1", metrics.WASUnsupportedReasonIncompatibleFlavor, 1),
+				wasUnsupportedMetricPoint("cq2", metrics.WASUnsupportedReasonInternalError, 1),
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cq1 := utiltestingapi.MakeClusterQueue("cq1").Obj()
+			cq2 := utiltestingapi.MakeClusterQueue("cq2").Obj()
+			lq1 := utiltestingapi.MakeLocalQueue("lq1", "ns").ClusterQueue("cq1").Obj()
+			lq1b := utiltestingapi.MakeLocalQueue("lq1b", "ns").ClusterQueue("cq1").Obj()
+			lq2 := utiltestingapi.MakeLocalQueue("lq2", "ns").ClusterQueue("cq2").Obj()
+			wlInflight := utiltestingapi.MakeWorkload("wl-inflight", "ns").Queue("lq1").Creation(now.Add(-2 * time.Minute)).Obj()
+			wlQueued := utiltestingapi.MakeWorkload("wl-queued", "ns").Queue("lq1").Creation(now.Add(-1 * time.Minute)).Obj()
+			wlOtherLQ := utiltestingapi.MakeWorkload("wl-other-lq", "ns").Queue("lq1b").Creation(now).Obj()
+			wlOtherCQ := utiltestingapi.MakeWorkload("wl-other-cq", "ns").Queue("lq2").Creation(now).Obj()
+
+			ctx, log, _, manager := setupWASManager(
+				t,
+				[]*kueue.ClusterQueue{cq1, cq2},
+				[]*kueue.LocalQueue{lq1, lq1b, lq2},
+				[]*kueue.Workload{wlQueued, wlInflight, wlOtherLQ, wlOtherCQ},
+			)
+			for _, wl := range []*kueue.Workload{wlQueued, wlInflight, wlOtherLQ} {
+				manager.SetWASUnsupportedWorkload(log, workload.Key(wl), "cq1", metrics.WASUnsupportedReasonIncompatibleFlavor)
+			}
+			manager.SetWASUnsupportedWorkload(log, workload.Key(wlOtherCQ), "cq2", metrics.WASUnsupportedReasonInternalError)
+			if popped := manager.PopFrom("cq1"); popped == nil || popped.Obj.Name != wlInflight.Name {
+				t.Fatalf("PopFrom(cq1) = %v, want %s", popped, wlInflight.Name)
+			}
+
+			tc.action(t, ctx, log, manager, cq1, lq1, wlQueued)
+			assertWASUnsupportedMetrics(t, tc.wantMetrics...)
+		})
+	}
+}
+
+func TestWASUnsupportedWorkloads_ResyncCustomLabels(t *testing.T) {
+	features.SetFeatureGateDuringTest(t, features.SchedulerLibraryDeepIntegration, true)
+	features.SetFeatureGateDuringTest(t, features.CustomMetricLabels, true)
+	cLabels := metrics.NewCustomLabels([]configapi.ControllerMetricsCustomLabel{
+		utiltestingapi.MakeCustomLabel("team_cq").SourceLabelKey("team").SourceKind(configapi.SourceKindClusterQueue).Obj(),
+	})
+	metrics.InitMetricVectors(cLabels)
+	t.Cleanup(func() { metrics.InitMetricVectors(nil) })
+
+	ctx, log := utiltesting.ContextWithLog(t)
+	cq := utiltestingapi.MakeClusterQueue("cq").Label("team", "alpha").Obj()
+	cl := utiltesting.NewClientBuilder().WithObjects(utiltesting.MakeNamespace("ns")).Build()
+	manager := NewManagerForUnitTests(cl, nil, WithCustomLabels(cLabels))
+	cLabels.CQStore("cq", cq.Labels, cq.Annotations)
+	if err := manager.AddClusterQueue(ctx, cq); err != nil {
+		t.Fatalf("AddClusterQueue: %v", err)
+	}
+	manager.SetWASUnsupportedWorkload(log, "ns/wl1", "cq", metrics.WASUnsupportedReasonIncompatibleFlavor)
+	want := wasUnsupportedMetricPoint("cq", metrics.WASUnsupportedReasonIncompatibleFlavor, 1)
+	want.Labels["custom_team_cq"] = "alpha"
+	assertWASUnsupportedMetrics(t, want)
+
+	cLabels.CQStore("cq", map[string]string{"team": "beta"}, nil)
+	metrics.ClearClusterQueueGaugeMetrics("cq")
+	manager.ResyncClusterQueueGaugeMetrics("cq")
+	want.Labels["custom_team_cq"] = "beta"
+	assertWASUnsupportedMetrics(t, want)
+}
+
+func TestWASUnsupportedWorkloads_SecondPassCleanup(t *testing.T) {
+	now := time.Now()
+	makeAdmittedUnhealthyWl := func() *kueue.Workload {
+		return utiltestingapi.MakeWorkload("wl", "ns").
+			Queue("lq").
+			PodSets(*utiltestingapi.MakePodSet("one", 1).
+				RequiredTopologyRequest(corev1.LabelHostname).
+				Request(corev1.ResourceCPU, "1").
+				Obj()).
+			ReserveQuotaAt(
+				utiltestingapi.MakeAdmission("cq").
+					PodSets(utiltestingapi.MakePodSetAssignment("one").
+						Assignment(corev1.ResourceCPU, "tas-flavor", "1").
+						TopologyAssignment(utiltestingapi.MakeTopologyAssignment([]string{corev1.LabelHostname}).
+							Domain(utiltas.TopologyDomainAssignment{Count: 1, Values: []string{"node-1"}}).
+							Obj()).
+						Obj()).
+					Obj(),
+				now,
+			).
+			AdmittedAt(true, now).
+			UnhealthyNodes("node-1").
+			Obj()
+	}
+
+	cases := map[string]struct {
+		beforeTimer func(t *testing.T, ctx context.Context, log logr.Logger, cl client.Client, manager *Manager, wl *kueue.Workload)
+		wantMetrics []testingmetrics.MetricDataPoint
+		wantReady   int
+	}{
+		"delete race NotFound clears zombie entry": {
+			beforeTimer: func(t *testing.T, ctx context.Context, log logr.Logger, cl client.Client, manager *Manager, wl *kueue.Workload) {
+				if err := cl.Delete(ctx, wl); err != nil {
+					t.Fatalf("Delete workload: %v", err)
+				}
+				manager.DeleteAndForgetWorkload(log, workload.Key(wl))
+				manager.SetWASUnsupportedWorkload(log, workload.Key(wl), "cq", metrics.WASUnsupportedReasonInternalError)
+			},
+		},
+		"NeedsSecondPass becomes false while admitted clears entry": {
+			beforeTimer: func(t *testing.T, ctx context.Context, log logr.Logger, cl client.Client, manager *Manager, wl *kueue.Workload) {
+				manager.SetWASUnsupportedWorkload(log, workload.Key(wl), "cq", metrics.WASUnsupportedReasonInternalError)
+				var cur kueue.Workload
+				if err := cl.Get(ctx, client.ObjectKeyFromObject(wl), &cur); err != nil {
+					t.Fatalf("Get workload: %v", err)
+				}
+				cur.Status.UnhealthyNodes = nil
+				if err := cl.Status().Update(ctx, &cur); err != nil {
+					t.Fatalf("Status().Update workload: %v", err)
+				}
+			},
+		},
+		"NeedsSecondPass remains true keeps entry while queued": {
+			beforeTimer: func(_ *testing.T, _ context.Context, log logr.Logger, _ client.Client, manager *Manager, wl *kueue.Workload) {
+				manager.SetWASUnsupportedWorkload(log, workload.Key(wl), "cq", metrics.WASUnsupportedReasonInternalError)
+			},
+			wantMetrics: []testingmetrics.MetricDataPoint{wasUnsupportedMetricPoint("cq", metrics.WASUnsupportedReasonInternalError, 1)},
+			wantReady:   1,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cq := utiltestingapi.MakeClusterQueue("cq").Obj()
+			lq := utiltestingapi.MakeLocalQueue("lq", "ns").ClusterQueue("cq").Obj()
+			wl := makeAdmittedUnhealthyWl()
+			fakeClock := testingclock.NewFakeClock(now)
+
+			ctx, log, cl, manager := setupWASManager(
+				t, []*kueue.ClusterQueue{cq}, []*kueue.LocalQueue{lq}, []*kueue.Workload{wl},
+				WithClock(fakeClock),
+			)
+			if !manager.QueueSecondPassIfNeeded(ctx, wl, 0) {
+				t.Fatal("QueueSecondPassIfNeeded returned false, want true")
+			}
+			tc.beforeTimer(t, ctx, log, cl, manager, wl)
+			fakeClock.Step(time.Second)
+
+			assertWASUnsupportedMetrics(t, tc.wantMetrics...)
+			if ready := manager.secondPassQueue.takeAllReady(); len(ready) != tc.wantReady {
+				t.Errorf("second-pass ready workloads = %d, want %d", len(ready), tc.wantReady)
+			}
+		})
 	}
 }
