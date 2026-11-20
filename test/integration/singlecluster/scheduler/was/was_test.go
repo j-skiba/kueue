@@ -19,6 +19,8 @@ limitations under the License.
 package was
 
 import (
+	"strconv"
+
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -26,12 +28,17 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/component-base/metrics/testutil"
+	kubefeatures "k8s.io/kubernetes/pkg/features"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/features"
+	kueuemetrics "sigs.k8s.io/kueue/pkg/metrics"
+	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	utiltas "sigs.k8s.io/kueue/pkg/util/tas"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
+	testingmetrics "sigs.k8s.io/kueue/pkg/util/testing/metrics"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
 	testingdra "sigs.k8s.io/kueue/pkg/util/testingjobs/dra"
 	testingnode "sigs.k8s.io/kueue/pkg/util/testingjobs/node"
@@ -70,6 +77,7 @@ var _ = ginkgo.Describe("WAS Simulator", ginkgo.Label("feature:scheduler-library
 		)
 
 		ginkgo.BeforeEach(func() {
+			fwk.StartManagerForSpec(ctx, cfg, managerSetup())
 			nodes = []corev1.Node{
 				*testingnode.MakeNode("was-n1").
 					Label("node-group", "was-dra").
@@ -870,6 +878,7 @@ var _ = ginkgo.Describe("WAS Simulator", ginkgo.Label("feature:scheduler-library
 		)
 
 		ginkgo.BeforeEach(func() {
+			fwk.StartManagerForSpec(ctx, cfg, managerSetup())
 			nodes = []corev1.Node{
 				*testingnode.MakeNode("was-n1").
 					Label("node-group", "was-ports").
@@ -983,6 +992,129 @@ var _ = ginkgo.Describe("WAS Simulator", ginkgo.Label("feature:scheduler-library
 			gomega.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(wl), wl)).To(gomega.Succeed())
 			ta := utiltas.InternalFrom(wl.Status.Admission.PodSetAssignments[0].TopologyAssignment)
 			gomega.Expect(ta.Domains[0].Values).To(gomega.ContainElement("was-n1"))
+		})
+	})
+
+	ginkgo.When("SchedulerLibraryDeepIntegration observability is enabled", func() {
+		const wasEventReasonIncompatibleFlavor = "WASIncompatibleFlavor"
+
+		var (
+			node     *corev1.Node
+			nonTASRF *kueue.ResourceFlavor
+			cq       *kueue.ClusterQueue
+		)
+
+		wasWarningCount := func(wl *kueue.Workload) (int32, error) {
+			events, err := behavioral.EventsForObject(ctx, k8sClient, client.ObjectKeyFromObject(wl))
+			if err != nil {
+				return 0, err
+			}
+			var total int32
+			for i := range events {
+				ev := &events[i]
+				if ev.Type == corev1.EventTypeWarning &&
+					ev.Reason == wasEventReasonIncompatibleFlavor &&
+					ev.Regarding.Kind == "Workload" &&
+					ev.Regarding.UID == wl.UID {
+					if ev.Series != nil {
+						total += ev.Series.Count
+					} else {
+						total++
+					}
+				}
+			}
+			return total, nil
+		}
+
+		expectIncompatibleGaugeAndSingleEvent := func(g gomega.Gomega, cqName string, wl *kueue.Workload) {
+			metric := kueuemetrics.WASUnsupportedWorkloads.WithLabelValues(
+				cqName,
+				string(kueuemetrics.WASUnsupportedReasonIncompatibleFlavor),
+				roletracker.RoleStandalone,
+			)
+			v, err := testutil.GetGaugeMetricValue(metric)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(v).To(gomega.Equal(1.0))
+
+			count, err := wasWarningCount(wl)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(count).To(gomega.Equal(int32(1)))
+		}
+
+		triggerStrictFIFORetries := func(cq *kueue.ClusterQueue, count int) {
+			for i := range count {
+				gomega.Eventually(func(g gomega.Gomega) {
+					var liveCQ kueue.ClusterQueue
+					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(cq), &liveCQ)).To(gomega.Succeed())
+					liveCQ.Spec.ResourceGroups[0].Flavors[0].Resources[0].NominalQuota = resource.MustParse(strconv.Itoa(5 + i))
+					g.Expect(k8sClient.Update(ctx, &liveCQ)).To(gomega.Succeed())
+				}, behavioral.Timeout, behavioral.Interval).Should(gomega.Succeed())
+			}
+		}
+
+		ginkgo.BeforeEach(func() {
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), kubefeatures.GenericWorkload, true)
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.SchedulerLibraryDeepIntegration, true)
+			fwk.StartManagerForSpec(ctx, cfg, managerSetup())
+
+			node = testingnode.MakeNode("node-"+ns.Name).
+				Label("pool", ns.Name).
+				Label(utiltesting.DefaultRackTopologyLevel, "r1").
+				Label(corev1.LabelHostname, "node-"+ns.Name).
+				StatusAllocatable(corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("4"),
+					corev1.ResourceMemory: resource.MustParse("8Gi"),
+					corev1.ResourcePods:   resource.MustParse("10"),
+				}).
+				Ready().
+				Obj()
+			integration.CreateNodesWithStatus(ctx, k8sClient, []corev1.Node{*node})
+
+			nonTASRF = utiltestingapi.MakeResourceFlavor("rf-non-tas-" + ns.Name).Obj()
+			behavioral.MustCreate(ctx, k8sClient, nonTASRF)
+		})
+
+		ginkgo.AfterEach(func() {
+			gomega.Expect(behavioral.DeleteWorkloadsInNamespace(ctx, k8sClient, ns)).To(gomega.Succeed())
+			if cq != nil {
+				behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, cq, true)
+				cq = nil
+			}
+			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, nonTASRF, true)
+			behavioral.ExpectObjectToBeDeleted(ctx, k8sClient, node, true)
+		})
+
+		ginkgo.It("should report incompatible_flavor metric and deduplicated Warning event for non-TAS flavor on StrictFIFO and clear on delete", func() {
+			cq = utiltestingapi.MakeClusterQueue("cq-non-tas-" + ns.Name).
+				QueueingStrategy(kueue.StrictFIFO).
+				ResourceGroup(*utiltestingapi.MakeFlavorQuotas(nonTASRF.Name).Resource(corev1.ResourceCPU, "4").Obj()).
+				Obj()
+			behavioral.CreateClusterQueuesAndWaitForActive(ctx, k8sClient, cq)
+
+			lq := utiltestingapi.MakeLocalQueue("lq-non-tas", ns.Name).ClusterQueue(cq.Name).Obj()
+			behavioral.CreateLocalQueuesAndWaitForActive(ctx, k8sClient, lq)
+
+			wl := utiltestingapi.MakeWorkload("wl-non-tas", ns.Name).
+				Queue(kueue.LocalQueueName(lq.Name)).
+				Request(corev1.ResourceCPU, "1").
+				Obj()
+			behavioral.MustCreate(ctx, k8sClient, wl)
+
+			gomega.Eventually(func(g gomega.Gomega) {
+				expectIncompatibleGaugeAndSingleEvent(g, cq.Name, wl)
+			}, behavioral.Timeout, behavioral.Interval).Should(gomega.Succeed())
+
+			triggerStrictFIFORetries(cq, 3)
+			gomega.Consistently(func(g gomega.Gomega) {
+				expectIncompatibleGaugeAndSingleEvent(g, cq.Name, wl)
+			}, behavioral.ConsistentDuration, behavioral.ShortInterval).Should(gomega.Succeed())
+
+			gomega.Expect(k8sClient.Delete(ctx, wl)).To(gomega.Succeed())
+			gomega.Eventually(func(g gomega.Gomega) {
+				g.Expect(testingmetrics.CollectFilteredGaugeVec(kueuemetrics.WASUnsupportedWorkloads, map[string]string{
+					"cluster_queue": cq.Name,
+				})).To(gomega.BeEmpty())
+			}, behavioral.Timeout, behavioral.Interval).Should(gomega.Succeed())
 		})
 	})
 })

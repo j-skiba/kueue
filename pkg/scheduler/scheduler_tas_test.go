@@ -53,12 +53,14 @@ import (
 	"sigs.k8s.io/kueue/pkg/constants"
 	tasindexer "sigs.k8s.io/kueue/pkg/controller/tas/indexer"
 	"sigs.k8s.io/kueue/pkg/features"
+	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/scheduler/flavorassigner"
 	preemptexpectations "sigs.k8s.io/kueue/pkg/scheduler/preemption/expectations"
 	"sigs.k8s.io/kueue/pkg/util/routine"
 	"sigs.k8s.io/kueue/pkg/util/slices"
 	utiltas "sigs.k8s.io/kueue/pkg/util/tas"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
+	testingmetrics "sigs.k8s.io/kueue/pkg/util/testing/metrics"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
 	testingnode "sigs.k8s.io/kueue/pkg/util/testingjobs/node"
 	testingpod "sigs.k8s.io/kueue/pkg/util/testingjobs/pod"
@@ -6186,9 +6188,17 @@ type tasScheduleTestCase struct {
 
 	// simulatorOverride allows to set a custom simulator.SchedulerSimulator.
 	simulatorOverride func() simulator.SchedulerSimulator
+	patchStatusErr    func() func() error
 
 	// prequeuedSecondPasses are the Workloads with a second pass already pending when the cycle runs.
 	prequeuedSecondPasses []workload.Reference
+
+	// scheduleCycles sets how many consecutive schedule cycles to execute (defaults to 1).
+	scheduleCycles int
+	// cycleStep sets how much to advance fakeClock between consecutive schedule cycles (defaults to 1s).
+	cycleStep time.Duration
+	// afterCycle, when set, runs after each schedule cycle (0-indexed).
+	afterCycle func(t *testing.T, cycle int, s *tasScheduleCycleContext)
 
 	// recoveryTimeout bounds failed TAS replacement deferral in this case.
 	// A nil value keeps the default used by normal Kueue configuration.
@@ -6208,6 +6218,8 @@ type tasScheduleTestCase struct {
 	wantEvents []utiltesting.EventRecord
 	// eventCmpOpts are the comparison options for the events
 	eventCmpOpts cmp.Options
+	// wantWASUnsupportedMetrics, when non-nil, resets and asserts kueue_was_unsupported_workloads after schedule.
+	wantWASUnsupportedMetrics []testingmetrics.MetricDataPoint
 
 	// wantSimulatorPreemptions are the Workloads the scheduler must tell the
 	// simulator to preempt.
@@ -6296,6 +6308,14 @@ func (s *recordingSchedulerSimulator) FindFeasibleNodes(
 	return s.SchedulerSimulator.FindFeasibleNodes(ctx, candidates, requirements, stats)
 }
 
+type tasScheduleCycleContext struct {
+	cl        client.Client
+	cqCache   *schdcache.Cache
+	qManager  *qcache.Manager
+	recorder  *utiltesting.EventRecorder
+	fakeClock *testingclock.FakeClock
+}
+
 type tasScheduleTestConfig struct {
 	queues []kueue.LocalQueue
 	now    time.Time
@@ -6373,6 +6393,10 @@ func runTASScheduleTestCases(t *testing.T, cfg tasScheduleTestConfig, cases map[
 					}
 					features.SetFeatureGatesDuringTest(t, scenario)
 					features.SetFeatureGatesDuringTest(t, tc.featureGates)
+					if tc.wantWASUnsupportedMetrics != nil {
+						metrics.WASUnsupportedWorkloads.Reset()
+						t.Cleanup(func() { metrics.WASUnsupportedWorkloads.Reset() })
+					}
 
 					adjustWantWorkloads := func(want []kueue.Workload) []kueue.Workload {
 						if want == nil {
@@ -6394,8 +6418,13 @@ func runTASScheduleTestCases(t *testing.T, cfg tasScheduleTestConfig, cases map[
 					for _, wl := range tc.workloads {
 						testWls = append(testWls, *wl.DeepCopy())
 					}
+					var patchErrFn func() error
+					if tc.patchStatusErr != nil {
+						patchErrFn = tc.patchStatusErr()
+					}
 					clientBuilder := utiltesting.NewClientBuilder().
 						WithLists(
+							&kueue.AdmissionCheckList{Items: tc.admissionChecks},
 							&kueue.WorkloadList{Items: testWls},
 							&kueue.TopologyList{Items: tc.topologies},
 							&corev1.PodList{Items: tc.pods},
@@ -6405,7 +6434,22 @@ func runTASScheduleTestCases(t *testing.T, cfg tasScheduleTestConfig, cases map[
 							utiltesting.MakeNamespace("default"),
 						).
 						WithInterceptorFuncs(interceptor.Funcs{
-							SubResourceApply: utiltesting.TreatSSAAsStrategicMergeForApplyConfiguration,
+							SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+								if patchErrFn != nil {
+									if err := patchErrFn(); err != nil {
+										return err
+									}
+								}
+								return c.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+							},
+							SubResourceApply: func(ctx context.Context, c client.Client, subResourceName string, applyConf runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+								if patchErrFn != nil {
+									if err := patchErrFn(); err != nil {
+										return err
+									}
+								}
+								return utiltesting.TreatSSAAsStrategicMergeForApplyConfiguration(ctx, c, subResourceName, applyConf, opts...)
+							},
 						}).
 						WithStatusSubresource(&kueue.Workload{})
 					_ = tasindexer.SetupIndexes(ctx, utiltesting.AsIndexer(clientBuilder))
@@ -6435,7 +6479,8 @@ func runTASScheduleTestCases(t *testing.T, cfg tasScheduleTestConfig, cases map[
 					}
 					cqCache := schdcache.New(cl, cacheOptions...)
 					fakeClock := testingclock.NewFakeClock(cfg.now)
-					qManager := qcache.NewManagerForUnitTests(cl, cqCache, qcache.WithClock(fakeClock))
+					preemptionExpectations := preemptexpectations.New()
+					qManager := qcache.NewManagerForUnitTests(cl, cqCache, qcache.WithClock(fakeClock), qcache.WithPreemptionExpectations(preemptionExpectations))
 					topologyByName := slices.ToMap(tc.topologies, func(i int) (kueue.TopologyReference, kueue.Topology) {
 						return kueue.TopologyReference(tc.topologies[i].Name), tc.topologies[i]
 					})
@@ -6503,7 +6548,7 @@ func runTASScheduleTestCases(t *testing.T, cfg tasScheduleTestConfig, cases map[
 					if tc.recoveryTimeout != nil {
 						recoveryTimeout = *tc.recoveryTimeout
 					}
-					schedulerOpts := []Option{WithFairSharing(fairSharing), WithClock(t, fakeClock), WithPreemptionExpectations(preemptexpectations.New())}
+					schedulerOpts := []Option{WithFairSharing(fairSharing), WithClock(t, fakeClock), WithPreemptionExpectations(preemptionExpectations)}
 					if recoveryTimeout > 0 {
 						schedulerOpts = append(schedulerOpts, WithFailedTASReplacementRecoveryTimeout(new(recoveryTimeout)))
 					}
@@ -6518,8 +6563,27 @@ func runTASScheduleTestCases(t *testing.T, cfg tasScheduleTestConfig, cases map[
 					go qManager.CleanUpOnContext(ctx)
 					defer cancel()
 
-					scheduler.schedule(ctx)
-					wg.Wait()
+					step := tc.cycleStep
+					if step == 0 {
+						step = time.Second
+					}
+					cycleCtx := &tasScheduleCycleContext{
+						cl:        cl,
+						cqCache:   cqCache,
+						qManager:  qManager,
+						recorder:  recorder,
+						fakeClock: fakeClock,
+					}
+					for i := range max(1, tc.scheduleCycles) {
+						if i > 0 {
+							fakeClock.Step(step)
+						}
+						scheduler.schedule(ctx)
+						wg.Wait()
+						if tc.afterCycle != nil {
+							tc.afterCycle(t, i, cycleCtx)
+						}
+					}
 					snapshot, err := cqCache.Snapshot(ctx)
 					if err != nil {
 						t.Fatalf("unexpected error while building snapshot: %v", err)
@@ -6611,6 +6675,9 @@ func runTASScheduleTestCases(t *testing.T, cfg tasScheduleTestConfig, cases map[
 					eventCmpOpts := append(tc.eventCmpOpts, cmpopts.SortSlices(utiltesting.SortEvents))
 					if diff := cmp.Diff(wantEvents, recorder.RecordedEvents, eventCmpOpts...); diff != "" {
 						t.Errorf("unexpected events (-want/+got):\n%s", diff)
+					}
+					if tc.wantWASUnsupportedMetrics != nil {
+						assertWASUnsupportedMetricSeries(t, tc.wantWASUnsupportedMetrics...)
 					}
 				},
 			)

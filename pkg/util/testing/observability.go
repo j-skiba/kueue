@@ -136,7 +136,7 @@ func AdjustEventsForDisabledObservabilityInScheduler(events []EventRecord) {
 			case kueue.WorkloadQuotaReservedReasonWaitingForPodsReady:
 				//nolint:staticcheck // SA1019: intentional deprecated legacy reason
 				events[i].Reason = kueue.WorkloadWaiting
-			case kueue.WorkloadAdmissionGated, "SecondPassFailed", "DeprecatedPathUsage", "FailedCreate", "ErrWorkloadCompose", "JobNestingTooDeep":
+			case kueue.WorkloadAdmissionGated, "SecondPassFailed", "DeprecatedPathUsage", "FailedCreate", "ErrWorkloadCompose", "JobNestingTooDeep", "WASIncompatibleFlavor", "WASInternalError":
 				// Keep warning events that are not related to QuotaReserved=False unadmitted reasons
 			default:
 				//nolint:staticcheck // SA1019: intentional deprecated legacy reason

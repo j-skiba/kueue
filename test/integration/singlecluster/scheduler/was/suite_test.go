@@ -65,7 +65,7 @@ var (
 )
 
 func TestAPIs(t *testing.T) {
-	behavioral.RunSuite(t, "WAS DRA Feasibility Integration Suite")
+	behavioral.RunSuite(t, "WAS Integration Suite")
 }
 
 var _ = ginkgo.BeforeSuite(func() {
@@ -87,12 +87,9 @@ var _ = ginkgo.BeforeSuite(func() {
 	}
 	cfg = fwk.Init()
 	ctx, k8sClient = fwk.SetupClient(cfg)
-	// Share a manager within each parallel process; specs clean up their own resources.
-	fwk.StartManager(ctx, cfg, managerSetup())
 })
 
 var _ = ginkgo.AfterSuite(func() {
-	fwk.StopManager(ctx)
 	fwk.Teardown()
 })
 
