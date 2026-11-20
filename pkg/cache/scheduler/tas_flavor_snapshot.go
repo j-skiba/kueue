@@ -403,6 +403,18 @@ func (s *TASFlavorSnapshot) Tolerations() []corev1.Toleration {
 	return s.tolerations
 }
 
+// DeclaresHostnameLevel reports whether the flavor's Topology explicitly
+// declares kubernetes.io/hostname as its lowest level. It intentionally
+// returns false even when TASNodeFeasibilityForAllLevels injects a virtual
+// hostname level, because BuildTopologyAssignmentsForPodSet strips the virtual
+// level and VirtualPodsForWorkload requires an explicit hostname level.
+func (s *TASFlavorSnapshot) DeclaresHostnameLevel() bool {
+	if s == nil || s.topologyTree == nil {
+		return false
+	}
+	return s.declaresHostnameLevel()
+}
+
 func (s *TASFlavorSnapshot) addNonTASUsage(domainID utiltas.TopologyDomainID, usage resources.Requests) {
 	// domainID comes from topologyTree.nodeToDomain, while leaves is populated
 	// from the same node set by newTopologyTree, so the corresponding leaf exists.

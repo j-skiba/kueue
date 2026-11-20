@@ -32,6 +32,7 @@ var (
 	ErrElasticPreferredTopologyNotSupported = errors.New("preferred topology is not supported with ElasticJobsViaWorkloadSlices")
 	ErrNoTASCacheInformation                = errors.New("workload requires Topology, but there is no TAS cache information")
 	ErrNoTASFlavorAssigned                  = errors.New("no TAS flavor assigned")
+	ErrTASFlavorMissingHostnameLevel        = errors.New("TAS flavor topology does not declare kubernetes.io/hostname level")
 )
 
 // MultipleTASFlavorsAssignedError indicates that a PodSet ended up with more
